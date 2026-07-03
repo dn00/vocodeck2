@@ -1,0 +1,33 @@
+# voco config — M1 MacBook Pro profile (SPEC §11)
+# Copy to ~/.config/voco/config.toml or pass --config.
+
+[audio]
+duplex = "full_duplex"          # headset assumed; "half_duplex" for speakers
+ptt_key = "f9"
+silero_model = "models/silero_vad.onnx"
+# input_device / output_device: sounddevice name or index (default: system)
+dispatch_hold_ms = 800
+reopen_window_ms = 1200
+min_speech_ms = 384
+min_speech_continuation_ms = 192
+min_silence_ms = 64
+vad_threshold = 0.5
+
+[stt]
+provider = "faster-whisper"
+model_size = "small"
+device = "cpu"                   # mlx providers land per SPEC §4.2
+
+[tts]
+# Existing mlx-audio server (SPEC §4.3)
+base_url = "http://127.0.0.1:8000/v1"
+model = "mlx-community/Kokoro-82M-bf16"
+voice = "af_heart"
+sample_rate = 24000
+
+# [llm]                          # Gemma tier (M1 milestone)
+# base_url = "http://127.0.0.1:8080/v1"
+# model = "gemma-4-e4b-it"
+
+# [bridge]
+# token = ""                     # bearer token; default-on for remote attach

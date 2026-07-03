@@ -1,0 +1,27 @@
+# voco config — portability floor: any machine, CPU only (SPEC §11)
+
+[audio]
+duplex = "half_duplex"
+ptt_key = "f9"
+silero_model = "models/silero_vad.onnx"
+dispatch_hold_ms = 800
+reopen_window_ms = 1200
+min_speech_ms = 384
+min_speech_continuation_ms = 192
+min_silence_ms = 64
+vad_threshold = 0.5
+
+[stt]
+provider = "faster-whisper"
+model_size = "small"
+device = "cpu"
+
+[tts]
+# kokoro-onnx runner (bundled runner lands in M3); any OpenAI-compatible
+# /v1/audio/speech endpoint works here.
+base_url = "http://127.0.0.1:8880/v1"
+model = "kokoro"
+voice = "af_heart"
+sample_rate = 24000
+
+# Gemma tier off: degraded mode = phrase table + forward-verbatim (SPEC §6)
