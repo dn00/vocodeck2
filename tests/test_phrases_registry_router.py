@@ -98,19 +98,19 @@ def test_say_records_and_flags_background_digest():
 
 
 def test_router_degraded_mode_phrase_or_forward():
-    router = Router(llm=None)
+    router = Router(first_mate=None)
     routed = asyncio.run(router.decide("stop", ["Helena"], {}))
     assert routed.phrase is not None and routed.phrase.kind == "stop"
     routed = asyncio.run(router.decide("please refactor the parser", ["Helena"], {}))
     assert routed.decision is not None and routed.decision.kind == "forward"
 
 
-def test_router_coerces_bad_gemma_output():
+def test_router_coerces_bad_first_mate_output():
     class BadLlm:
         async def route(self, text: str, grounding: dict) -> RouteDecision | None:
             return RouteDecision(kind="answer", speech="   ")
 
-    router = Router(llm=BadLlm())
+    router = Router(first_mate=BadLlm())
     routed = asyncio.run(router.decide("how are you", [], {}))
     assert routed.decision.kind == "forward"
 
@@ -119,6 +119,6 @@ def test_router_coerces_bad_gemma_output():
             await asyncio.sleep(5)
             return RouteDecision(kind="answer", speech="too late")
 
-    router = Router(llm=SlowLlm())
+    router = Router(first_mate=SlowLlm())
     routed = asyncio.run(router.decide("how are you", [], {}))
     assert routed.decision.kind == "forward"

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from voco.audio.capture import CaptureBuffer
-from voco.audio.vad import FRAME_MS, FRAME_SAMPLES, VadConfig, VadGate
+from voco.core.capture import CaptureBuffer
+from voco.core.vad import FRAME_MS, FRAME_SAMPLES, VadConfig, VadGate
 
 
 def frame(value: int = 1000) -> np.ndarray:

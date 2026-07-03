@@ -44,7 +44,8 @@ def check_vad(model_path: Path) -> None:
         model_path.parent.mkdir(parents=True, exist_ok=True)
         print(f"  downloading silero to {model_path} ...")
         urllib.request.urlretrieve(SILERO_URL, model_path)
-    from voco.audio.vad import FRAME_SAMPLES, load_silero
+    from voco.adapters.silero import load_silero
+    from voco.core.vad import FRAME_SAMPLES
 
     model = load_silero(str(model_path))
     frame = (np.random.randn(FRAME_SAMPLES) * 1000).astype(np.int16)
@@ -61,7 +62,7 @@ def check_stt(cfg: dict) -> None:
 
     stt_cfg = dict(cfg.get("stt", {"provider": "faster-whisper"}))
     provider = stt_cfg.pop("provider")
-    from voco.providers.stt import build_stt
+    from voco.adapters.stt import build_stt
 
     t0 = time.perf_counter()
     stt = build_stt(provider, **stt_cfg)
@@ -78,7 +79,7 @@ async def check_tts(cfg: dict) -> None:
         "tts",
         {"base_url": "http://127.0.0.1:8000/v1", "model": "kokoro", "voice": "af_heart"},
     )
-    from voco.providers.tts import OpenAICompatibleTts
+    from voco.adapters.tts import OpenAICompatibleTts
 
     tts = OpenAICompatibleTts(
         base_url=tts_cfg["base_url"],
@@ -103,9 +104,9 @@ async def check_tts(cfg: dict) -> None:
 
 
 async def check_llm(cfg: dict) -> None:
-    llm_cfg = cfg.get("llm")
+    llm_cfg = cfg.get("first_mate")
     if not llm_cfg:
-        report("llm (gemma tier)", "SKIP (not configured; M1)")
+        report("first mate (llm)", "SKIP (not configured)")
         return
     import aiohttp
 
@@ -122,7 +123,7 @@ async def check_llm(cfg: dict) -> None:
         ) as resp:
             resp.raise_for_status()
             await resp.json()
-    report("llm (gemma tier)", f"OK  round trip {(time.perf_counter()-t0)*1000:.0f}ms")
+    report("first mate (llm)", f"OK  round trip {(time.perf_counter()-t0)*1000:.0f}ms")
 
 
 def check_devices() -> None:

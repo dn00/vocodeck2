@@ -1,23 +1,19 @@
-"""Microphone capture (SPEC §4.1).
+"""Utterance capture buffer (SPEC §4.1) — pure logic.
 
-ROLE: own the input stream and the utterance buffer. Feeds 32ms frames to
-the VAD gate and accumulates utterance audio (with pre-roll so the first
+ROLE: accumulate utterance audio (with pre-roll so the first
 syllable isn't clipped). The turn machine's shell asks for the accumulated
 utterance at finalize time; merges keep accumulating into the same buffer.
 
 INVARIANTS: 16kHz mono int16 throughout; pre-roll ring holds ~320ms; the
 utterance buffer grows only between capture_started and capture_stopped
-(+ merge reopens); hardware enters only through start()/stop().
+(+ merge reopens). Hardware lives in adapters/microphone.py.
 """
 
 from __future__ import annotations
 
 import collections
-from typing import Callable
 
 import numpy as np
-
-from voco.audio.vad import FRAME_SAMPLES, SAMPLE_RATE
 
 PRE_ROLL_FRAMES = 10  # ~320ms
 
@@ -64,38 +60,3 @@ class CaptureBuffer:
     def clear(self) -> None:
         self._utterance = []
         self._recording = False
-
-
-class MicStream:
-    """sounddevice input stream → frame callback. Hardware edge, no logic."""
-
-    def __init__(
-        self,
-        on_frame: Callable[[np.ndarray], None],
-        device: int | str | None = None,
-    ) -> None:
-        self._on_frame = on_frame
-        self._device = device
-        self._stream = None
-
-    def start(self) -> None:
-        import sounddevice as sd  # noqa: PLC0415  (hardware edge, lazy)
-
-        def callback(indata, frames, time_info, status) -> None:
-            self._on_frame(indata[:, 0].copy())
-
-        self._stream = sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            blocksize=FRAME_SAMPLES,
-            channels=1,
-            dtype="int16",
-            device=self._device,
-            callback=callback,
-        )
-        self._stream.start()
-
-    def stop(self) -> None:
-        if self._stream is not None:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None

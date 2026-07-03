@@ -7,7 +7,7 @@ import asyncio
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from voco.bridge.http import BridgeServer
+from voco.server.http import BridgeServer
 from voco.core.events import EventBus
 from voco.core.registry import Registry
 

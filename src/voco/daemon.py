@@ -19,8 +19,9 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from voco.bridge.http import BridgeServer, run_server
+from voco.server.http import BridgeServer, run_server
 from voco.core.arbitration import DuplexMode, PlaybackItem, PlaybackQueue, Source
+from voco.core.first_mate import build_grounding, execute_action
 from voco.core.events import EventBus
 from voco.core.registry import Registry
 from voco.core.router import Router
@@ -42,7 +43,17 @@ class Daemon:
         self.no_audio = no_audio
         self.bus = EventBus()
         self.registry = Registry(emit=self.bus.emit)
-        self.router = Router(llm=None)  # Gemma tier lands in M1
+        mate = None
+        mate_cfg = cfg.get("first_mate")
+        if mate_cfg:
+            from voco.adapters.first_mate import OpenAIChatFirstMate  # noqa: PLC0415
+
+            mate = OpenAIChatFirstMate(
+                base_url=mate_cfg["base_url"],
+                model=mate_cfg.get("model", ""),
+                api_key=mate_cfg.get("api_key"),
+            )
+        self.router = Router(first_mate=mate)
         self.bridge = BridgeServer(
             self.registry,
             self.bus,
@@ -94,12 +105,37 @@ class Daemon:
 
     # ---- typed/text input path (audio path reuses this from stt_final) --------
 
+    def _grounding(self) -> dict:
+        return build_grounding(self.registry, self.duplex.value, time.time())
+
+    def _exec_action(self, action: dict | None) -> None:
+        if action is None:
+            return
+        execute_action(
+            action,
+            self.registry,
+            set_mic=lambda mode: self._control("mic.set", {"mode": mode}),
+            set_muted=self._set_muted,
+        )
+
+    def _set_muted(self, muted: bool) -> None:
+        self.bus.emit("mic.state", {"mode": "mute" if muted else "unmute"})
+        if self._vad_gate is not None:
+            self._vad_gate.suppress(muted)
+
     async def _route_and_dispatch(self, text: str) -> None:
-        routed = await self.router.decide(text, self.registry.call_names(), {})
+        routed = await self.router.decide(
+            text, self.registry.call_names(), self._grounding()
+        )
         if routed.phrase is not None:
             self._run_phrase(routed.phrase)
             return
         decision = routed.decision or RouteDecision(kind="forward")
+        self._exec_action(decision.action)
+        if decision.kind == "answer":
+            if decision.speech:
+                self._speak_local(decision.speech, None)
+            return
         turn_id = self.registry.mint_turn_id()
         self.bus.emit(
             "route.decision",
@@ -148,11 +184,13 @@ class Daemon:
     def _wire_audio(self) -> None:
         import numpy as np  # noqa: F401
 
-        from voco.audio.capture import CaptureBuffer, MicStream
-        from voco.audio.playback import SpeakerPlayer
-        from voco.audio.vad import VadConfig, VadGate, load_silero
-        from voco.providers.stt import build_stt
-        from voco.providers.tts import OpenAICompatibleTts, PhraseBank
+        from voco.adapters.microphone import MicStream
+        from voco.adapters.silero import load_silero
+        from voco.adapters.speaker import SpeakerPlayer
+        from voco.adapters.stt import build_stt
+        from voco.adapters.tts import OpenAICompatibleTts, PhraseBank
+        from voco.core.capture import CaptureBuffer
+        from voco.core.vad import VadConfig, VadGate
 
         audio_cfg = self.cfg.get("audio", {})
         stt_cfg = self.cfg.get("stt", {"provider": "faster-whisper"})
@@ -293,7 +331,9 @@ class Daemon:
         self.loop.create_task(self._route_turn(key, revision, text))
 
     async def _route_turn(self, key: int, revision: int, text: str) -> None:
-        routed = await self.router.decide(text, self.registry.call_names(), {})
+        routed = await self.router.decide(
+            text, self.registry.call_names(), self._grounding()
+        )
         if routed.phrase is not None:
             self._run_phrase(routed.phrase)
             # Phrase commands never dispatch: close out as a local answer
@@ -302,9 +342,11 @@ class Daemon:
                 key, revision, RouteDecision(kind="answer", speech="ok")
             )
             return
-        self.machine.route_decided(
-            key, revision, routed.decision or RouteDecision(kind="forward")
-        )
+        decision = routed.decision or RouteDecision(kind="forward")
+        # Actions are loop-domain and reversible: execute immediately, so a
+        # spoken "switch to Helena, tell her X" retargets before dispatch.
+        self._exec_action(decision.action)
+        self.machine.route_decided(key, revision, decision)
         self._kick_deadline()
 
     def _on_dispatch_ready(self, key: int, text: str, decision: RouteDecision) -> None:
@@ -332,7 +374,7 @@ class Daemon:
         if self.playback_queue is None:
             return
         self.playback_queue.enqueue(
-            PlaybackItem(Source.GEMMA, self._tts.stream(text), turn_id=turn_id)
+            PlaybackItem(Source.FIRST_MATE, self._tts.stream(text), turn_id=turn_id)
         )
 
     def _on_turn_state(self, key: int, state: TurnState) -> None:
@@ -382,7 +424,7 @@ class Daemon:
     # ---- PTT ------------------------------------------------------------------------------
 
     def _wire_ptt(self) -> None:
-        from voco.audio.ptt import PttHotkey
+        from voco.adapters.hotkey import PttHotkey
 
         key = self.cfg.get("audio", {}).get("ptt_key", "f9")
         try:

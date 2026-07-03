@@ -9,9 +9,9 @@ INVARIANTS:
   except cached earcons ≤400ms in full_duplex.
 - Rule 1: barge-in flushes everything (playing + queued).
 - Rule 2: an agent say for the CURRENT dispatched turn preempts local
-  (gemma/ack) speech mid-item; says for older turns queue.
-- Rule 3: gemma speech for a turn never plays after an agent say for that
-  turn has played.
+  (first-mate/ack) speech mid-item; says for older turns queue.
+- Rule 3: first-mate speech for a turn never plays after an agent say for
+  that turn has played.
 - Rule 4: fillers (acks) are droppable — discarded when real speech exists.
 - Rule 5: background chimes never preempt anything.
 """
@@ -25,7 +25,7 @@ from typing import Callable, Protocol
 
 class Source(str, Enum):
     ACK = "ack"  # cached PCM earcons/fillers
-    GEMMA = "gemma"
+    FIRST_MATE = "first_mate"  # the local voice tier (SPEC §7)
     AGENT = "agent"
     CHIME = "chime"
 
@@ -48,7 +48,7 @@ class Player(Protocol):
     def stop(self) -> None: ...
 
 
-_PRIORITY = {Source.AGENT: 0, Source.GEMMA: 1, Source.ACK: 2, Source.CHIME: 3}
+_PRIORITY = {Source.AGENT: 0, Source.FIRST_MATE: 1, Source.ACK: 2, Source.CHIME: 3}
 
 ACK_GATE_EXEMPT_MS = 400
 
@@ -91,9 +91,9 @@ class PlaybackQueue:
             self._interrupt("barge-in")
 
     def enqueue(self, item: PlaybackItem) -> None:
-        # Rule 3: gemma speech dead once the agent has spoken for that turn.
+        # Rule 3: first-mate speech dead once the agent spoke for that turn.
         if (
-            item.source is Source.GEMMA
+            item.source is Source.FIRST_MATE
             and item.turn_id is not None
             and item.turn_id in self._agent_spoke_turns
         ):
@@ -101,14 +101,14 @@ class PlaybackQueue:
         # Rule 4: fillers are pointless when real speech exists.
         if item.source is Source.ACK and self._has_real_speech():
             return
-        if item.source in (Source.GEMMA, Source.AGENT):
+        if item.source in (Source.FIRST_MATE, Source.AGENT):
             self._queue = [q for q in self._queue if q.source is not Source.ACK]
         # Rule 2: current-turn agent say preempts playing local speech.
         if (
             item.source is Source.AGENT
             and self._is_current_turn(item)
             and self._playing is not None
-            and self._playing.source in (Source.GEMMA, Source.ACK)
+            and self._playing.source in (Source.FIRST_MATE, Source.ACK)
         ):
             self._interrupt("preempted")
         self._queue.append(item)
@@ -133,7 +133,7 @@ class PlaybackQueue:
         return item.turn_id is None or item.turn_id == self._current_turn
 
     def _has_real_speech(self) -> bool:
-        real = (Source.GEMMA, Source.AGENT)
+        real = (Source.FIRST_MATE, Source.AGENT)
         if self._playing is not None and self._playing.source in real:
             return True
         return any(q.source in real for q in self._queue)

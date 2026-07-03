@@ -32,7 +32,7 @@ model = "qwen3-tts"
 voice = "default"
 sample_rate = 24000
 
-# [llm]                          # Gemma tier (M1 milestone)
+# [first_mate]                   # local Gemma tier (SPEC §7)
 # base_url = "http://127.0.0.1:8080/v1"
 # model = "gemma-4-e4b-it"
 

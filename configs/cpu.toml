@@ -24,4 +24,4 @@ model = "kokoro"
 voice = "af_heart"
 sample_rate = 24000
 
-# Gemma tier off: degraded mode = phrase table + forward-verbatim (SPEC §6)
+# First-mate tier off: degraded mode = phrase table + forward-verbatim (SPEC §6)
