@@ -171,18 +171,63 @@ repo pushed to GitHub as PRIVATE (github.com/dn00/vocodeck2); commit often.
       chip. Groundwork for proactive "Marcus is waiting on you" lines.
 - 79 tests, ruff+mypy+format clean, PROTOCOL.md regenerated (12 commands).
 
-### v-next (from herdr review + this stretch)
+## Overnight stretch, second half (2026-07-04 pre-dawn)
 
-- Background pane watcher: poll inject-capable, non-parked sessions'
-  panes (cheap capture + classify), feed hints into grounding + UI badges
-  + optional proactive voice ("Helena is waiting for your approval").
-  Needs debounce + per-session opt-out; voice line only on None→waiting
-  edge.
-- DeepFilterNet-style mic enhancement stage in front of VAD (speech-to-
-  speech does this; separate from AEC) — improves VAD + STT in noisy
-  rooms.
-- config.set persistence; kokoro create_stream already used by the floor
-  when the installed kokoro-onnx provides it.
+User green-lit (before going afk): pane watcher, durable sessions,
+config validation, mate streaming; SQLite allowed "only if it fits"
+(it didn't — JSON snapshot at this scale); subagents fully off again
+("for now"; one review + one next-steps agent ran under the earlier
+window — findings below); repo private on GitHub, push per slice.
+
+- [x] Config schema validation + config.set (voco/config.py): hand-rolled
+      schema, errors refuse boot together, unknown keys warn; base +
+      config.local.toml overrides merge — the base file is NEVER
+      rewritten; hot-apply whitelist (duplex/attention/timeout_ms via
+      Router.set_timeout), everything else honestly restart_required;
+      voco config get/set.
+- [x] Durable sessions: Registry.dump/restore (versioned, defensive) +
+      adapters/state_store.py (atomic, 0600 — tokens inside; corrupt →
+      .corrupt sidecar + fresh boot); daemon restores on run, debounced
+      saver on bus events, final save on shutdown. Queued words + tokens
+      survive restarts; CLI caches stay valid (no 410 churn).
+- [x] ADVERSARIAL REVIEW (subagent, 9 findings) — all fixed same night:
+      stored XSS via screen-markdown link href (esc() now escapes quotes;
+      URL class forbids them) — MAJOR; bare numbered list read as
+      'waiting' (now needs ask-context) — MAJOR; fallback fuzz 0.75→0.8
+      (Noah≠Nova); doctor default port mismatch + contradictory FAIL row;
+      WS commands off the receive loop (reply via the pump queue — single
+      writer); TmuxManager built on loop thread; UI pending-map rejected
+      on reconnect; screen.updated double-render.
+- [x] Pane watcher (watcher.py): polls inject-capable non-parked panes
+      (3s), pane.hint event + snapshot field + UI badge + grounding
+      terminal=<hint>; 'waiting' needs two consecutive sightings, one
+      announcement per episode → "X looks like they're waiting on you."
+- [x] Mate speech streaming ([first_mate] stream, default OFF):
+      SpeechStream extracts the speech field from the streaming JSON;
+      MateSpeechChannel sentence-cuts into one playback item; decision
+      parsing byte-identical to the plain path. Machine-validated vs real
+      Gemma 4 E4B: warm first speech delta 0.75-1.6s vs 1.8s+ plain
+      (scripts/mate_stream_smoke.py); found + fixed SSE keep-alive pool
+      poisoning (plain-after-stream died); adapter socket budget now
+      derives from timeout_ms; retry-once on stale connections.
+- References mined (user links): faster-qwen3-tts = our OpenAI TTS
+  contract, 156ms TTFA on 4090-class, NO incremental text input →
+  sentence-chunked TTS is the right mate-streaming design (built);
+  speech-to-speech = we already mirror its VAD/speculation constants;
+  its live-transcription deltas map to our stt.partial (future).
+- 107 tests; ruff+mypy+format clean; PROTOCOL.md 20 events/12 commands.
+
+### v-next (updated)
+
+- Flip [first_mate] stream default ON after ears validation; then wire
+  streamed ack_forward turn_id attribution (streamed item currently
+  carries turn_id=None — arbitration rule-3 fidelity).
+- DeepFilterNet-style mic enhancement stage in front of VAD (separate
+  from AEC) — VAD+STT robustness in noisy rooms.
+- stt.partial production + speculative routing during HOLDING;
+  wake same-breath VAD reset; multi-utterance mate memory; packaging
+  (uvx/launchd/systemd) + PtyHost seam for native Windows (ranked list
+  from the next-steps agent lives in the session log, 2026-07-04).
 
 ## M0 exit — REMAINING (needs user present / live audio)
 
