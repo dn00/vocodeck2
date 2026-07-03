@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from aiohttp import WSMsgType, web
@@ -28,6 +28,10 @@ if TYPE_CHECKING:
 LISTEN_SLICE_S = 50.0
 
 
+async def _no_control(cmd: str, payload: dict) -> dict:
+    return {}
+
+
 class BridgeServer:
     def __init__(
         self,
@@ -36,14 +40,16 @@ class BridgeServer:
         *,
         token: str | None = None,
         listen_slice_s: float = LISTEN_SLICE_S,
-        on_control: Callable[[str, dict], dict] | None = None,
+        on_control: Callable[[str, dict], Awaitable[dict]] | None = None,
     ) -> None:
         self._registry = registry
         self._bus = bus
         self._token = token
         self._slice = listen_slice_s
         # Daemon-owned control commands (mic.set, interrupt, switch...).
-        self._on_control = on_control or (lambda cmd, payload: {})
+        # Async so subprocess-backed commands (tmux/ssh) never block the
+        # loop that pumps WS events and listen polls.
+        self._on_control = on_control or _no_control
         self._waiters: dict[str, asyncio.Future[dict]] = {}
         registry.try_deliver = self._try_deliver
 
@@ -181,7 +187,7 @@ class BridgeServer:
         if env.type == "state.get":
             return web.json_response(self._registry.snapshot())
         try:
-            result = self._on_control(env.type, env.payload)
+            result = await self._on_control(env.type, env.payload)
         except ValueError as e:
             return web.json_response({"ok": False, "error": str(e)}, status=400)
         except Exception as e:
@@ -216,7 +222,7 @@ class BridgeServer:
             async for msg in ws:
                 if msg.type != WSMsgType.TEXT:
                     continue
-                await ws.send_json(self._handle_ws_command(msg.data))
+                await ws.send_json(await self._handle_ws_command(msg.data))
         finally:
             unsubscribe()
             sender.cancel()
@@ -228,7 +234,7 @@ class BridgeServer:
         while True:
             await ws.send_str(await queue.get())
 
-    def _handle_ws_command(self, raw: str) -> dict:
+    async def _handle_ws_command(self, raw: str) -> dict:
         try:
             data = json.loads(raw)
             req_id = data.get("id")
@@ -240,7 +246,7 @@ class BridgeServer:
                 id=req_id, ok=True, payload=self._registry.snapshot()
             ).to_dict()
         try:
-            result = self._on_control(env.type, env.payload)
+            result = await self._on_control(env.type, env.payload)
             return CommandReply(id=req_id, ok=True, payload=result).to_dict()
         except Exception as e:
             return CommandReply(id=req_id, ok=False, error=str(e)).to_dict()

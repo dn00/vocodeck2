@@ -198,7 +198,13 @@ class Daemon:
 
     # ---- control commands (CLI/WS) -----------------------------------------------
 
-    def _control(self, cmd: str, payload: dict) -> dict:
+    @staticmethod
+    async def _run_blocking(fn):
+        """Subprocess-backed commands (tmux/ssh) must never block the loop
+        that pumps WS events, listen polls, and speech."""
+        return await asyncio.get_running_loop().run_in_executor(None, fn)
+
+    async def _control(self, cmd: str, payload: dict) -> dict:
         if cmd == "switch_session":
             s = self.registry.switch(str(payload.get("name", "")))
             if s is None:
@@ -233,18 +239,27 @@ class Daemon:
             harness = str(payload.get("harness", "")).strip()
             if not harness:
                 raise ValueError("harness command required")
-            name = self._tmux().spawn(
-                harness,
-                name=str(payload.get("name") or harness),
-                cwd=payload.get("cwd"),
-                host=payload.get("host"),
+            name = await self._run_blocking(
+                lambda: self._tmux().spawn(
+                    harness,
+                    name=str(payload.get("name") or harness),
+                    cwd=payload.get("cwd"),
+                    host=payload.get("host"),
+                )
             )
             return {"tmux_session": name}
         if cmd == "session.kill":
-            self._tmux().kill(str(payload.get("name", "")), host=payload.get("host"))
+            await self._run_blocking(
+                lambda: self._tmux().kill(
+                    str(payload.get("name", "")), host=payload.get("host")
+                )
+            )
             return {}
         if cmd == "session.panes":
-            return {"panes": self._tmux().list(host=payload.get("host"))}
+            panes = await self._run_blocking(
+                lambda: self._tmux().list(host=payload.get("host"))
+            )
+            return {"panes": panes}
         if cmd == "session.detach":
             name = str(payload.get("name", "")).strip()
             s = self.registry.by_call_name(name)
@@ -253,16 +268,20 @@ class Daemon:
             self.registry.detach(s.session_id)
             return {"detached": s.call_name}
         if cmd == "session.peek":
-            return {"text": self._peek(payload)}
+            target, host = self._peek_target(payload)
+            text = await self._run_blocking(
+                lambda: self._tmux().capture_pane(target, host=host)
+            )
+            return {"text": text}
         if cmd == "config.get":
             return self._public_config()
         if cmd == "config.set":
             raise ValueError("config.set lands with persistent config (M3)")
         raise ValueError(f"unknown command {cmd!r}")
 
-    def _peek(self, payload: dict) -> str:
-        """Terminal mirror: capture the pane behind a registered session
-        (by call name) or a raw tmux target (spawned but not yet attached)."""
+    def _peek_target(self, payload: dict) -> tuple[str, str | None]:
+        """Terminal mirror target: a registered session's pane (by call
+        name) or a raw tmux target (spawned but not yet attached)."""
         target = payload.get("target")
         host = payload.get("host")
         if not target:
@@ -274,7 +293,7 @@ class Daemon:
                 raise ValueError(f"{s.call_name} has no terminal to peek (not in tmux)")
             target = s.inject_target
             host = s.identity.get("host_alias")
-        return self._tmux().capture_pane(str(target), host=host)
+        return str(target), host
 
     def _public_config(self) -> dict:
         """Config snapshot minus secrets (tokens, api keys)."""

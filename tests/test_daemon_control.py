@@ -31,44 +31,44 @@ def daemon() -> tuple[Daemon, FakeRunner]:
     return d, runner
 
 
-def test_detach_removes_session_and_clears_active(daemon):
+async def test_detach_removes_session_and_clears_active(daemon):
     d, _ = daemon
     s = d.registry.register({"host": "mac", "cwd": "/a", "harness": "claude"}, ["say"])
-    result = d._control("session.detach", {"name": s.call_name})
+    result = await d._control("session.detach", {"name": s.call_name})
     assert result == {"detached": s.call_name}
     assert d.registry.get(s.session_id) is None
     assert d.registry.active is None  # no auto-election
 
 
-def test_detach_unknown_name_raises(daemon):
+async def test_detach_unknown_name_raises(daemon):
     d, _ = daemon
     with pytest.raises(ValueError, match="no session named"):
-        d._control("session.detach", {"name": "Nobody"})
+        await d._control("session.detach", {"name": "Nobody"})
 
 
-def test_peek_by_call_name_uses_session_pane(daemon):
+async def test_peek_by_call_name_uses_session_pane(daemon):
     d, runner = daemon
     s = d.registry.register(
         {"host": "mac", "cwd": "/a", "harness": "claude", "tmux_pane": "%7"},
         ["say", "listen"],
     )
-    result = d._control("session.peek", {"name": s.call_name})
+    result = await d._control("session.peek", {"name": s.call_name})
     assert result["text"] == "line one\nline two\n"
     assert runner.calls[-1] == ["tmux", "capture-pane", "-p", "-t", "%7"]
 
 
-def test_peek_raw_target_and_remote_host(daemon):
+async def test_peek_raw_target_and_remote_host(daemon):
     d, runner = daemon
-    d._control("session.peek", {"target": "voco-claude", "host": "ws"})
+    await d._control("session.peek", {"target": "voco-claude", "host": "ws"})
     assert runner.calls[-1][:3] == ["ssh", "-T", "ws"]
     assert runner.calls[-1][-1] == "voco-claude"
 
 
-def test_peek_without_terminal_raises(daemon):
+async def test_peek_without_terminal_raises(daemon):
     d, _ = daemon
     s = d.registry.register({"host": "mac", "cwd": "/b", "harness": "codex"}, ["say"])
     with pytest.raises(ValueError, match="no terminal to peek"):
-        d._control("session.peek", {"name": s.call_name})
+        await d._control("session.peek", {"name": s.call_name})
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals only")
