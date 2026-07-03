@@ -58,6 +58,15 @@ def test_waiting_outranks_working():
     assert classify(CLAUDE_WORKING + CLAUDE_PERMISSION) == "waiting"
 
 
+def test_bare_numbered_plan_is_not_waiting():
+    # Agents print numbered plans constantly (review finding): without
+    # ask-context this must NOT read as blocked.
+    plan = "Here's my plan:\n 1. Refactor the parser\n 2. Add tests\n"
+    assert classify(plan) is None
+    # Same list under an actual question IS a menu.
+    assert classify("Which approach?\n 1. Refactor\n 2. Rewrite\n") == "waiting"
+
+
 def test_shell_prompt_and_unsure():
     assert classify(SHELL_IDLE) == "shell"
     assert classify("") is None

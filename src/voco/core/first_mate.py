@@ -91,12 +91,16 @@ def fallback_target(text: str, roster: list[str]) -> str | None:
     """Misroute guard for mate-tier deadline misses: when the mate is
     configured but times out, 'tell/ask <known name> ...' keeps its spoken
     destination instead of silently landing on the active session.
-    Registry facts + conservative fuzz only — this is NOT targeted
-    forwarding for degraded mode (SPEC §14.9: no mate, no targets)."""
+    Registry facts only — NOT targeted forwarding for degraded mode
+    (SPEC §14.9: no mate, no targets). Fuzz is tighter than the switch
+    table (0.8 vs 0.75): redirecting payload silently needs more
+    certainty than executing an explicit switch — 'Noah' must not hit
+    'Nova' (0.75), while the STT-misspelled 'Markus' still resolves
+    to Marcus (0.83)."""
     m = _FORWARD_PREFIX.match(text)
     if m is None:
         return None
-    return resolve_name(m.group(1), roster)
+    return resolve_name(m.group(1), roster, cutoff=0.8)
 
 
 def build_grounding(registry: Registry, mic_mode: str, now: float) -> dict[str, Any]:

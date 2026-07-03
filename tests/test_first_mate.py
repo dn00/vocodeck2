@@ -148,3 +148,6 @@ def test_fallback_target_prefix_known_names_only():
     assert fallback_target("can you tell Marcus something", roster) is None
     # Unknown name -> no guess (active session is the honest default).
     assert fallback_target("tell Bob to stop", roster) is None
+    # Tighter fuzz than switches: a real different name must not redirect
+    # payload ("Noah" vs Nova scores 0.75 — below the 0.8 guard cutoff).
+    assert fallback_target("tell Noah to deploy", ["Helena", "Nova"]) is None

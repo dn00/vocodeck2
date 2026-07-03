@@ -16,18 +16,23 @@ from __future__ import annotations
 
 import re
 
-# Blocked on a human decision: numbered choice menus (Claude Code style),
-# y/n confirms, and explicit ask-phrases from common harnesses.
+# Blocked on a human decision: selector-marked choice menus (Claude Code
+# style), y/n confirms, and explicit ask-phrases from common harnesses.
 _WAITING = [
-    re.compile(r"❯\s*1\.", re.MULTILINE),
-    re.compile(r"^\s*1\.\s.+\n\s*(?:❯\s*)?2\.\s", re.MULTILINE),
+    re.compile(r"❯\s*\d+\.", re.MULTILINE),
     re.compile(r"\[y/n\]|\(y/n\)|\by/N\b|\bY/n\b", re.IGNORECASE),
     re.compile(
         r"do you want to|would you like to|allow this|proceed\?|"
-        r"press enter to continue|waiting for your (?:approval|input)",
+        r"select an option|press enter to continue|"
+        r"waiting for your (?:approval|input)",
         re.IGNORECASE,
     ),
 ]
+
+# A bare numbered list is NOT a menu — agents print numbered plans
+# constantly (review finding: over-trigger). It only counts as waiting
+# when ask-context (a question mark or an ask-phrase) is also present.
+_NUMBERED = re.compile(r"^\s*1\.\s.+\n\s*(?:❯\s*)?2\.\s", re.MULTILINE)
 
 # Actively generating/executing: interrupt hints and spinner glyphs.
 _WORKING = [
@@ -52,6 +57,8 @@ def classify(pane_text: str) -> str | None:
     for pattern in _WAITING:
         if pattern.search(tail):
             return "waiting"
+    if _NUMBERED.search(tail) and "?" in tail:
+        return "waiting"
     for pattern in _WORKING:
         if pattern.search(tail):
             return "working"

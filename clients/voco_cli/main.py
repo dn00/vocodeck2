@@ -265,7 +265,8 @@ def cmd_doctor(client: Client) -> int:
     def probe_tts(tts_cfg: dict) -> str | None:
         """POST a real tiny synth and require audio bytes back — a random
         HTTP listener squatting the port (OrbStack does) must not read ok."""
-        url = f"{tts_cfg.get('base_url', 'http://127.0.0.1:8880/v1').rstrip('/')}"
+        # Default mirrors the daemon's built-in (voice_loop): port 8000.
+        url = f"{tts_cfg.get('base_url', 'http://127.0.0.1:8000/v1').rstrip('/')}"
         body = json.dumps(
             {
                 "model": tts_cfg.get("model", "kokoro"),
@@ -301,21 +302,28 @@ def cmd_doctor(client: Client) -> int:
 
     print(f"voco doctor — {client.base_url}")
 
-    # 1. daemon + config
+    # 1. daemon, then config separately — a config.get hiccup must not
+    # contradict an already-printed ok daemon row.
     cfg: dict = {}
+    daemon_up = False
     try:
         state = client._request("POST", "/v1/control/state.get", {}, timeout=3)
         n = len(state.get("sessions", []))
         active = state.get("active_session")
         row("ok", "daemon", f"up; {n} session(s), active={'yes' if active else 'no'}")
-        cfg = client._request("POST", "/v1/control/config.get", {}, timeout=3)
+        daemon_up = True
     except Exception as e:
         row("FAIL", "daemon", f"unreachable ({e}) — start with: voco-d")
         failures += 1
+    if daemon_up:
+        try:
+            cfg = client._request("POST", "/v1/control/config.get", {}, timeout=3)
+        except Exception as e:
+            row("warn", "config", f"config.get failed ({e}); probing defaults")
 
     # 2. TTS endpoint (from daemon config when available): must return audio
     tts_cfg = cfg.get("tts", {})
-    tts_url = tts_cfg.get("base_url", "http://127.0.0.1:8880/v1")
+    tts_url = tts_cfg.get("base_url", "http://127.0.0.1:8000/v1")
     err = probe_tts(tts_cfg)
     if err is None:
         row("ok", "tts", f"{tts_url} (synthesized a test phrase)")

@@ -45,14 +45,16 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-def resolve_name(spoken: str, names: list[str]) -> str | None:
+def resolve_name(
+    spoken: str, names: list[str], cutoff: float = _NAME_FUZZ
+) -> str | None:
     spoken = _normalize(spoken)
     if not spoken or not names:
         return None
     by_lower = {n.lower(): n for n in names}
     if spoken in by_lower:
         return by_lower[spoken]
-    match = difflib.get_close_matches(spoken, list(by_lower), n=1, cutoff=_NAME_FUZZ)
+    match = difflib.get_close_matches(spoken, list(by_lower), n=1, cutoff=cutoff)
     return by_lower[match[0]] if match else None
 
 

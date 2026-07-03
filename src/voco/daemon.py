@@ -276,8 +276,11 @@ class Daemon:
             harness = str(payload.get("harness", "")).strip()
             if not harness:
                 raise ValueError("harness command required")
+            # Manager is constructed HERE (loop thread), used in the
+            # executor — no shared-state mutation off the loop.
+            mgr = self._tmux()
             name = await self._run_blocking(
-                lambda: self._tmux().spawn(
+                lambda: mgr.spawn(
                     harness,
                     name=str(payload.get("name") or harness),
                     cwd=payload.get("cwd"),
@@ -286,16 +289,14 @@ class Daemon:
             )
             return {"tmux_session": name}
         if cmd == "session.kill":
+            mgr = self._tmux()
             await self._run_blocking(
-                lambda: self._tmux().kill(
-                    str(payload.get("name", "")), host=payload.get("host")
-                )
+                lambda: mgr.kill(str(payload.get("name", "")), host=payload.get("host"))
             )
             return {}
         if cmd == "session.panes":
-            panes = await self._run_blocking(
-                lambda: self._tmux().list(host=payload.get("host"))
-            )
+            mgr = self._tmux()
+            panes = await self._run_blocking(lambda: mgr.list(host=payload.get("host")))
             return {"panes": panes}
         if cmd == "session.detach":
             name = str(payload.get("name", "")).strip()
@@ -308,9 +309,8 @@ class Daemon:
             from voco.core.pane_state import classify
 
             target, host = self._peek_target(payload)
-            text = await self._run_blocking(
-                lambda: self._tmux().capture_pane(target, host=host)
-            )
+            mgr = self._tmux()
+            text = await self._run_blocking(lambda: mgr.capture_pane(target, host=host))
             return {"text": text, "hint": classify(text)}
         if cmd == "config.get":
             return self._public_config()

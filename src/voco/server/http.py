@@ -241,14 +241,30 @@ class BridgeServer:
         # Per-connection snapshot (SPEC §10): stamped but not broadcast.
         push(self._bus.make("snapshot", self._registry.snapshot()))
         sender = asyncio.create_task(self._pump_ws(ws, queue))
+        # Commands run as tasks and reply through the event queue: the
+        # receive loop stays responsive during a slow peek/spawn, and one
+        # task (the pump) is the only writer — no interleaved WS frames.
+        pending: set[asyncio.Task[None]] = set()
+
+        async def run_command(raw: str) -> None:
+            reply = await self._handle_ws_command(raw)
+            try:
+                queue.put_nowait(json.dumps(reply))
+            except asyncio.QueueFull:
+                pass  # same named fail-silent as events: slow UI drops
+
         try:
             async for msg in ws:
                 if msg.type != WSMsgType.TEXT:
                     continue
-                await ws.send_json(await self._handle_ws_command(msg.data))
+                task = asyncio.create_task(run_command(msg.data))
+                pending.add(task)
+                task.add_done_callback(pending.discard)
         finally:
             unsubscribe()
             sender.cancel()
+            for task in pending:
+                task.cancel()
         return ws
 
     async def _pump_ws(
