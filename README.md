@@ -20,7 +20,16 @@ uv run voco-d --config configs/mac-m1.toml
 
 # 3. Attach an agent — print the paste-ready snippet:
 uv run voco attach-cmd
+
+# Not sure what's missing? One-command environment diagnostic:
+uv run voco doctor
 ```
+
+The daemon also serves a debug UI at <http://127.0.0.1:7777> — sessions
+with live states/digests/queues, each agent's screen, a terminal mirror
+(peek) with waiting/working hints, the live event stream, mic controls,
+and a type-as-user input. It speaks only the public WS protocol
+([PROTOCOL.md](PROTOCOL.md)), so it doubles as the reference client.
 
 Agent-side discipline (paste into CLAUDE.md / AGENTS.md equivalent):
 
@@ -35,6 +44,11 @@ Agent-side discipline (paste into CLAUDE.md / AGENTS.md equivalent):
 `voco listen` parks inside one blocking call (rearm slices are handled
 internally — one bash/tool call per user turn, no churn) and self-heals
 through daemon restarts.
+
+Operator commands: `voco sessions` / `switch <name>` / `mic <mode>` /
+`input <text>` / `watch` (event tail) / `new <cmd>` / `kill` / `panes`
+(tmux managed sessions) / `peek <name>` (terminal mirror) /
+`detach <name>` / `doctor`.
 
 ## Platform profiles
 
@@ -58,7 +72,10 @@ set `[bridge] token` (SPEC §9.1).
 
 ## Status
 
-M0 (core loop) code-complete: turn machine, arbitration, phrase table,
-registry, bridge, daemon, CLI — 37 tests. Live-audio validation and the
-latency ladder measurement are the remaining M0 exit items. Milestones:
-SPEC §12.
+M0–M3 buildable scope code-complete: turn machine, arbitration, phrase
+table, registry, bridge + WS, first-mate contract (calibrated against
+real Gemma 4 E4B: 16/16 parse, 0 authority violations), attention modes,
+tmux managed sessions + inject, AEC, debug UI, doctor — 79 tests, ruff +
+mypy clean, CI on 3 OSes. Live-audio validation and the latency ladder
+measurement are the remaining exit items (need ears). Milestones:
+SPEC §12; running journal: BUILD.md.

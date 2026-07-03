@@ -122,12 +122,67 @@ uses).
       (default OFF until live-tuned). No double-talk detector yet —
       half_duplex stays the speakers fallback until live validation.
 - Decisions from idea review: simple localhost UI = recommended next
-  (protocol is ready for it); own tmux/wrapper = NO (decision 006);
+  (protocol is ready for it); own tmux/wrapper = NO for stdio WRAPPERS
+  (006 re-adopted by choice; the reasons transfer) — a pty HOST (tmux
+  today, a ConPTY host for native Windows later) was never banned;
   terminal mirroring = capture-pane peek once UI exists.
 - Known limitation (wake mode): if the wake word and the command share
   one breath with no pause, the VAD speech-run started before arming and
   speech_started won't refire until a silence gap — "voco, <pause>, do X"
   works; same-breath needs a VAD reset-on-wake (v2 refinement).
+
+## Overnight stretch (2026-07-03 night, user asleep — "solid state" goal)
+
+User directives for this stretch: backend/daemon/cli = production grade;
+core UX (mate↔backend integration, voice) matters even more; simple web
+UI is fine; subagents allowed for REVIEW/next-steps only, never building;
+repo pushed to GitHub as PRIVATE (github.com/dn00/vocodeck2); commit often.
+
+- [x] session.detach (unparks the agent's listen with status=detach) +
+      session.peek (terminal mirror by call name or raw tmux target) +
+      voco detach/peek; graceful SIGTERM/SIGINT (verified live: kill →
+      "shut down cleanly").
+- [x] Async control surface: on_control awaitable; tmux/ssh subprocess
+      commands run in the executor — a slow ssh can no longer stall WS
+      delivery/listen polls/speech.
+- [x] Debug UI at / and /ui: self-contained page (no CDN), one WS,
+      sessions/states/badges, screen (markdown-lite), terminal peek tab
+      with auto-refresh, live event log (stt.partial filtered), mic +
+      attention controls, interrupt, type-as-user, detach, token bar
+      (?token= WS auth for browsers). Snapshot enriched: queued count,
+      screen_markdown, say_tail(10), last_seen; screen.updated carries
+      full markdown.
+- [x] BUG (live-smoke find): bridge register dropped tmux_pane/
+      tmux_session/host_alias → inject capability never activated over
+      real HTTP. Fixed + regression test.
+- [x] Misroute guard: mate configured but times out → 'tell/ask <known
+      name>' keeps its destination (registry facts + conservative fuzz);
+      degraded mode still never targets (§14.9 upheld). Grounding gains
+      queued_inputs per session.
+- [x] daemon.error → stderr with timestamp; clean one-line exits for bad
+      --config and port-in-use.
+- [x] voco doctor: daemon/tts/mate/tmux/extras diagnostic. TTS probe
+      synthesizes a REAL test phrase and requires audio bytes (OrbStack
+      squats :8880 and answers 200 with 0 bytes — a reachability check
+      lies). Verified live against a real kokoro behind OrbStack.
+- [x] Pane-state heuristics (herdr-inspired, clean-room — it's AGPL):
+      core/pane_state.py classifies peeked panes waiting/working/shell,
+      None when unsure; session.peek returns {text, hint}; UI shows the
+      chip. Groundwork for proactive "Marcus is waiting on you" lines.
+- 79 tests, ruff+mypy+format clean, PROTOCOL.md regenerated (12 commands).
+
+### v-next (from herdr review + this stretch)
+
+- Background pane watcher: poll inject-capable, non-parked sessions'
+  panes (cheap capture + classify), feed hints into grounding + UI badges
+  + optional proactive voice ("Helena is waiting for your approval").
+  Needs debounce + per-session opt-out; voice line only on None→waiting
+  edge.
+- DeepFilterNet-style mic enhancement stage in front of VAD (speech-to-
+  speech does this; separate from AEC) — improves VAD + STT in noisy
+  rooms.
+- config.set persistence; kokoro create_stream already used by the floor
+  when the installed kokoro-onnx provides it.
 
 ## M0 exit — REMAINING (needs user present / live audio)
 
