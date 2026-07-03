@@ -1,0 +1,94 @@
+"""VAD hysteresis + capture buffer logic (SPEC §4.1) — fake prob model."""
+
+from __future__ import annotations
+
+import numpy as np
+
+from voco.audio.capture import CaptureBuffer
+from voco.audio.vad import FRAME_MS, FRAME_SAMPLES, VadConfig, VadGate
+
+
+def frame(value: int = 1000) -> np.ndarray:
+    return np.full(FRAME_SAMPLES, value, dtype=np.int16)
+
+
+class Script:
+    """Feed a scripted prob sequence to the gate."""
+
+    def __init__(self, reopenable: bool = False) -> None:
+        self.events: list[str] = []
+        self.probs: list[float] = []
+        self._i = 0
+        self.gate = VadGate(
+            VadConfig(),
+            model=self._model,
+            on_speech_started=lambda: self.events.append("start"),
+            on_speech_ended=lambda: self.events.append("end"),
+            reopenable=lambda: reopenable,
+        )
+
+    def _model(self, f: np.ndarray) -> float:
+        p = self.probs[self._i]
+        self._i += 1
+        return p
+
+    def run(self, probs: list[float]) -> None:
+        self.probs.extend(probs)
+        for _ in probs:
+            self.gate.process(frame())
+
+
+def frames_for(ms: int) -> int:
+    return ms // FRAME_MS
+
+
+def test_entry_requires_min_speech_and_end_requires_min_silence():
+    s = Script()
+    # 320ms speech < 384ms entry: no event.
+    s.run([0.9] * frames_for(320))
+    assert s.events == []
+    # Cross the entry bar.
+    s.run([0.9] * frames_for(96))
+    assert s.events == ["start"]
+    # 32ms silence < 64ms: still in speech.
+    s.run([0.1])
+    assert s.events == ["start"]
+    # Cross min_silence.
+    s.run([0.1] * 2)
+    assert s.events == ["start", "end"]
+
+
+def test_continuation_threshold_applies_when_reopenable():
+    s = Script(reopenable=True)
+    # 192ms suffices while the turn is reopenable.
+    s.run([0.9] * frames_for(192))
+    assert s.events == ["start"]
+
+
+def test_suppress_blocks_events_half_duplex():
+    s = Script()
+    s.gate.suppress(True)
+    s.run([0.9] * frames_for(500))
+    assert s.events == []
+    s.gate.suppress(False)
+    s.run([0.9] * frames_for(384))
+    assert s.events == ["start"]
+
+
+def test_capture_buffer_preroll_and_merge():
+    buf = CaptureBuffer()
+    for i in range(15):
+        buf.feed(frame(i))
+    buf.start_utterance()  # seeds with last 10 pre-roll frames
+    buf.feed(frame(100))
+    buf.pause()
+    # Silence between segments is preserved by feeding through the pause?
+    # No: paused frames go to pre-roll, not the utterance (gap dropped is
+    # fine for STT; SPEC stitching preserves within-segment audio).
+    buf.resume_utterance()
+    buf.feed(frame(200))
+    pcm = np.frombuffer(buf.take(), dtype=np.int16)
+    assert len(pcm) == 12 * FRAME_SAMPLES  # 10 preroll + 2 speech frames
+    assert pcm[-1] == 200
+    buf.clear()
+    assert buf.take() == b""

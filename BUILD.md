@@ -13,14 +13,13 @@ resume. Update the journal at every checkpoint (after each commit).
 ## M0 build order (current)
 
 1. [x] Repo scaffold: git init, tree, pyproject (uv), .gitignore
-2. [ ] `protocol/` — event vocabulary + validators (pure, zero deps)
-3. [ ] `core/clock.py` + `core/turn.py` — turn state machine (§5) with
-       injected clock; fake-clock tests incl. reopen/hold/PTT races
-4. [ ] `core/arbitration.py` — prioritized playback queue, rules 0–6 (§5.4)
-5. [ ] `core/phrases.py` — phrase table (§6)
-6. [ ] `core/registry.py` — sessions, states parked/working/idle (§8.2),
-       queues, call names (pool in M1; M0 uses one session)
-7. [ ] `core/router.py` — route decision port: phrase table now, Gemma M1
+2. [x] `protocol/` — event vocabulary + validators (pure, zero deps)
+3. [x] `core/turn.py` — turn state machine (§5), injected now();
+       shell contract: await next_deadline() → on_deadline()
+4. [x] `core/arbitration.py` — prioritized playback queue, rules 0–5
+5. [x] `core/phrases.py` — phrase table (§6)
+6. [x] `core/registry.py` — sessions, parked/working/idle, queues, names
+7. [x] `core/router.py` — Routed = phrase | decision; LlmTier port for M1
 8. [ ] `audio/` — silero VAD wrapper (hysteresis per §4.1), capture,
        playback ring buffer, PTT hotkey (optional import)
 9. [ ] `providers/` — STT port (faster-whisper first), TTS client
@@ -37,10 +36,16 @@ bridge round-trip works via curl/CLI with a fake-audio harness.
 
 ## Deviations / build-time decisions
 
-- (record here as they happen; SPEC change → update SPEC.md too)
+- turn.py: pre-dispatch speech ALWAYS merges (dispatch is THE turn
+  boundary); reopen_window_ms bounds only the REOPENABLE state. Spec-
+  compatible clarification of §5.2 (noted in module docstring).
+- registry: same identity re-register returns the same session record and
+  token (idempotent); new listen ends the working turn (outstanding_turn
+  cleared on on_listen_start).
 
 ## Journal
 
 - 2026-07-03: SPEC.md v1.1 finalized (review findings + first-mate +
-  wake-word + targeted-forward corrections). Repo initialized. Starting
-  step 2 (protocol).
+  wake-word + targeted-forward corrections). Repo initialized.
+- 2026-07-03 (commit b88f73a): core complete, 25 tests green. Next:
+  audio layer (silero VAD wrapper w/ hysteresis, capture, playback, PTT).
