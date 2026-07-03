@@ -204,6 +204,42 @@ class Client:
                 failing_since = None
 
 
+def cmd_watch(client: Client) -> int:
+    """Tail the daemon's WS event stream (snapshot first, then live)."""
+    import asyncio
+
+    import aiohttp
+
+    async def run() -> None:
+        headers = {}
+        if client.token:
+            headers["Authorization"] = f"Bearer {client.token}"
+        ws_url = client.base_url.replace("http", "ws", 1) + "/v1/events"
+        async with (
+            aiohttp.ClientSession(headers=headers) as session,
+            session.ws_connect(ws_url) as ws,
+        ):
+            async for msg in ws:
+                if msg.type != aiohttp.WSMsgType.TEXT:
+                    continue
+                env = json.loads(msg.data)
+                stamp = time.strftime("%H:%M:%S", time.localtime(env.get("ts", 0)))
+                payload = json.dumps(env.get("payload", {}))
+                if len(payload) > 110:
+                    payload = payload[:110] + "…"
+                seq, typ = env.get("seq", 0), env.get("type", "?")
+                print(f"{stamp} {seq:>5} {typ:<20} {payload}")
+
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        return 0
+    except Exception as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_attach(args, client: Client) -> int:
     mcp = {
         "mcpServers": {
@@ -253,6 +289,7 @@ def main() -> None:
     p_kill.add_argument("--host", default=None)
     p_panes = sub.add_parser("panes")
     p_panes.add_argument("--host", default=None)
+    sub.add_parser("watch")
     p_input = sub.add_parser("input")  # typed input path (say_as_user)
     p_input.add_argument("text")
     sub.add_parser("attach-cmd")
@@ -313,6 +350,8 @@ def main() -> None:
         )
     elif args.cmd == "panes":
         sys.exit(control(client, "session.panes", {"host": args.host}))
+    elif args.cmd == "watch":
+        sys.exit(cmd_watch(client))
     elif args.cmd == "input":
         sys.exit(control(client, "say_as_user", {"text": args.text}, timeout=5))
     elif args.cmd == "attach-cmd":
