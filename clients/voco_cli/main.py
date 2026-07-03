@@ -433,6 +433,10 @@ def main() -> None:
     p_input.add_argument("text")
     sub.add_parser("attach-cmd")
     sub.add_parser("doctor")
+    p_cfg = sub.add_parser("config")
+    p_cfg.add_argument("action", choices=["get", "set"])
+    p_cfg.add_argument("key", nargs="?", help="section.key (set only)")
+    p_cfg.add_argument("value", nargs="?", help="value; JSON parsed, else string")
     args = parser.parse_args()
 
     client = Client()
@@ -515,6 +519,19 @@ def main() -> None:
         sys.exit(cmd_attach(args, client))
     elif args.cmd == "doctor":
         sys.exit(cmd_doctor(client))
+    elif args.cmd == "config":
+        if args.action == "get":
+            sys.exit(control(client, "config.get", {}, timeout=5))
+        if not args.key or args.value is None:
+            print("usage: voco config set <section.key> <value>", file=sys.stderr)
+            sys.exit(2)
+        try:
+            value = json.loads(args.value)  # numbers/bools; fallback: string
+        except json.JSONDecodeError:
+            value = args.value
+        sys.exit(
+            control(client, "config.set", {"key": args.key, "value": value}, timeout=5)
+        )
 
 
 if __name__ == "__main__":

@@ -38,6 +38,12 @@ class Router:
         self._mate = first_mate
         self._timeout_s = timeout_s
 
+    def set_timeout(self, seconds: float) -> None:
+        """Runtime tuning knob (config.set first_mate.timeout_ms)."""
+        if seconds <= 0:
+            raise ValueError("timeout must be > 0")
+        self._timeout_s = seconds
+
     async def decide(self, text: str, names: list[str], grounding: dict) -> Routed:
         cmd = phrases.match(text, names)
         if cmd is not None:

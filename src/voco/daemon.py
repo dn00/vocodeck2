@@ -19,12 +19,13 @@ import sys
 import time
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from voco.adapters.tmux import TmuxManager
     from voco.voice_loop import VoiceLoop
 
+from voco import config as config_mod
 from voco.core.arbitration import DuplexMode
 from voco.core.attention import AttentionMode
 from voco.core.events import EventBus
@@ -39,21 +40,43 @@ DEFAULT_CONFIG = Path.home() / ".config" / "voco" / "config.toml"
 
 
 def load_config(path: Path | None) -> dict[str, Any]:
+    """Read base + .local.toml overrides, validate, refuse boot on errors."""
     p = path or DEFAULT_CONFIG
     if not p.exists():
         if path is not None:  # explicit --config that doesn't exist is an error
             raise SystemExit(f"voco-d: config not found: {p}")
-        return {}
+        base: dict[str, Any] = {}
+    else:
+        try:
+            base = tomllib.loads(p.read_text())
+        except tomllib.TOMLDecodeError as e:
+            raise SystemExit(f"voco-d: bad config {p}: {e}") from e
     try:
-        return tomllib.loads(p.read_text())
+        overrides = config_mod.read_overrides(config_mod.overrides_path(p))
     except tomllib.TOMLDecodeError as e:
-        raise SystemExit(f"voco-d: bad config {p}: {e}") from e
+        raise SystemExit(
+            f"voco-d: bad overrides {config_mod.overrides_path(p)}: {e}"
+        ) from e
+    cfg = config_mod.merge(base, overrides)
+    errors, warnings = config_mod.validate(cfg)
+    for w in warnings:
+        print(f"voco-d: config warning: {w}", file=sys.stderr)
+    if errors:
+        listing = "\n  ".join(errors)
+        raise SystemExit(f"voco-d: invalid config {p}:\n  {listing}")
+    return cfg
 
 
 class Daemon:
-    def __init__(self, cfg: dict[str, Any], no_audio: bool = False) -> None:
+    def __init__(
+        self,
+        cfg: dict[str, Any],
+        no_audio: bool = False,
+        config_path: Path | None = None,
+    ) -> None:
         self.cfg = cfg
         self.no_audio = no_audio
+        self._config_path = config_path or DEFAULT_CONFIG
         self.bus = EventBus()
         self.registry = Registry(emit=self.bus.emit)
         mate = None
@@ -283,8 +306,45 @@ class Daemon:
         if cmd == "config.get":
             return self._public_config()
         if cmd == "config.set":
-            raise ValueError("config.set lands with persistent config (M3)")
+            return self._config_set(payload)
         raise ValueError(f"unknown command {cmd!r}")
+
+    # Keys that take effect immediately; everything else persists and is
+    # honestly reported restart_required (a wrong "applied" is worse).
+    _HOT_APPLY: ClassVar[set[str]] = {
+        "audio.duplex",
+        "audio.attention",
+        "first_mate.timeout_ms",
+    }
+
+    def _config_set(self, payload: dict) -> dict:
+        key = str(payload.get("key", "")).strip()
+        if "value" not in payload:
+            raise ValueError("config.set needs key and value")
+        value = payload["value"]
+        self.cfg = config_mod.set_value(self._config_path, self.cfg, key, value)
+        applied = False
+        if key in self._HOT_APPLY:
+            try:
+                if key == "audio.duplex":
+                    self._set_duplex(str(value))
+                elif key == "audio.attention":
+                    if self.voice is None:
+                        raise ValueError("no voice loop running")
+                    self.voice.set_attention(AttentionMode(str(value)))
+                    self._emit_mic_state()
+                elif key == "first_mate.timeout_ms":
+                    self.router.set_timeout(float(value) / 1000.0)
+                applied = True
+            except Exception:
+                applied = False  # persisted; takes effect on restart
+        return {
+            "key": key,
+            "value": value,
+            "applied": applied,
+            "restart_required": not applied,
+            "written": str(config_mod.overrides_path(self._config_path)),
+        }
 
     def _peek_target(self, payload: dict) -> tuple[str, str | None]:
         """Terminal mirror target: a registered session's pane (by call
@@ -408,7 +468,7 @@ def main() -> None:
     parser.add_argument("--no-audio", action="store_true")
     args = parser.parse_args()
     cfg = load_config(args.config)
-    daemon = Daemon(cfg, no_audio=args.no_audio)
+    daemon = Daemon(cfg, no_audio=args.no_audio, config_path=args.config)
     try:
         asyncio.run(daemon.run(port=args.port))
     except KeyboardInterrupt:
