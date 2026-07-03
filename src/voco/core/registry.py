@@ -85,6 +85,11 @@ class Session:
         return "idle"
 
     @property
+    def inject_target(self) -> str | None:
+        """tmux pane id (adapter-derived) or spawned tmux session name."""
+        return self.identity.get("tmux_pane") or self.identity.get("tmux_session")
+
+    @property
     def display_name(self) -> str:
         host = self.identity.get("host", "?")
         cwd = str(self.identity.get("cwd", "?")).rstrip("/").split("/")[-1]
@@ -123,11 +128,16 @@ class Registry:
             s.identity.update(identity)  # refresh derived git facts
             s.last_seen = self._now()
             return s
+        capabilities = list(capabilities)
+        if (identity.get("tmux_pane") or identity.get("tmux_session")) and (
+            "inject" not in capabilities
+        ):
+            capabilities.append("inject")
         s = Session(
             session_id=secrets.token_hex(16),
             identity=dict(identity),
             call_name=self._assign_name(key),
-            capabilities=list(capabilities),
+            capabilities=capabilities,
             last_seen=self._now(),
         )
         self._sessions[s.session_id] = s

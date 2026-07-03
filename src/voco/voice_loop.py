@@ -31,6 +31,7 @@ from voco.adapters.tts import OpenAICompatibleTts, PhraseBank
 from voco.core.arbitration import DuplexMode, PlaybackItem, PlaybackQueue, Source
 from voco.core.attention import AttentionGate, AttentionMode
 from voco.core.capture import CaptureBuffer
+from voco.core.echo import FRAME, EchoCanceller, resample_to_16k
 from voco.core.events import EventBus
 from voco.core.phrases import PhraseCommand
 from voco.core.router import Routed
@@ -116,12 +117,15 @@ class VoiceLoop:
         self.bank = PhraseBank(self.tts, cache)
         self.stt = deps.stt_builder(stt_cfg.pop("provider"), **stt_cfg)
 
+        self._aec = EchoCanceller() if audio_cfg.get("aec") else None
+        self._aec_ref = bytearray()  # 16kHz reference accumulator
         self.queue: PlaybackQueue  # assigned below; the lambda closes over it
         self.player = deps.player_factory(
             on_finished=lambda: self.queue.on_item_finished(),
             on_playing_changed=self._on_playing_changed,
             sample_rate=self.tts.sample_rate,
             device=audio_cfg.get("output_device"),
+            on_pcm_played=self._on_pcm_played if self._aec else None,
         )
         self.queue = PlaybackQueue(self.player, emit=bus.emit)
         self.queue.set_duplex(self.duplex)
@@ -265,7 +269,21 @@ class VoiceLoop:
         assert self._loop is not None
         self._loop.call_soon_threadsafe(self._process_frame, frame)
 
+    def _on_pcm_played(self, pcm: bytes) -> None:
+        # PortAudio output thread: resample + frame the AEC reference.
+        if self._aec is None:  # tap is only wired when AEC is on; guard anyway
+            return
+        samples = resample_to_16k(pcm, self.tts.sample_rate)
+        self._aec_ref.extend(samples.tobytes())
+        frame_bytes = FRAME * 2
+        while len(self._aec_ref) >= frame_bytes:
+            chunk = bytes(self._aec_ref[:frame_bytes])
+            del self._aec_ref[:frame_bytes]
+            self._aec.push_playback(np.frombuffer(chunk, dtype=np.int16))
+
     def _process_frame(self, frame: np.ndarray) -> None:
+        if self._aec is not None:
+            frame = self._aec.process(frame)
         self.capture.feed(frame)
         if (
             self._wake_scorer is not None

@@ -18,6 +18,8 @@ min_speech_ms = 384
 min_speech_continuation_ms = 192
 min_silence_ms = 64
 vad_threshold = 0.5
+# aec = true                     # experimental FDAF echo cancel (open speakers
+#                                # + full_duplex); validate live before trusting
 
 [stt]
 provider = "faster-whisper"      # parakeet provider lands per SPEC §4.2

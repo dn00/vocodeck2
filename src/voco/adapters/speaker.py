@@ -28,9 +28,11 @@ class SpeakerPlayer:
         sample_rate: int = 24_000,
         device: int | str | None = None,
         buffer_threshold_ms: int = 150,
+        on_pcm_played: Callable[[bytes], None] | None = None,
     ) -> None:
         self._on_finished = on_finished
         self._on_playing_changed = on_playing_changed
+        self._on_pcm_played = on_pcm_played  # AEC reference tap
         self._sample_rate = sample_rate
         self._device = device
         self._buffer_threshold_ms = buffer_threshold_ms
@@ -85,6 +87,8 @@ class SpeakerPlayer:
             nonlocal pos
             chunk = data[pos : pos + frames]
             outdata[: len(chunk), 0] = chunk
+            if self._on_pcm_played is not None and len(chunk):
+                self._on_pcm_played(chunk.tobytes())
             if len(chunk) < frames:
                 outdata[len(chunk) :, 0] = 0
                 raise sd.CallbackStop
@@ -119,6 +123,8 @@ class SpeakerPlayer:
             needed = frames * 2
             take = bytes(buffer[:needed])
             del buffer[: len(take)]
+            if self._on_pcm_played is not None and take:
+                self._on_pcm_played(take)
             out = np.frombuffer(take, dtype=np.int16)
             outdata[: len(out), 0] = out
             if len(out) < frames:

@@ -80,6 +80,17 @@ class TmuxManager:
             raise ValueError(f"refusing to kill non-voco session {tmux_name!r}")
         self._tmux(["kill-session", "-t", tmux_name], host)
 
+    def send_text(self, target: str, text: str, host: str | None = None) -> None:
+        """Type literal text + Enter into a pane/session composer."""
+        self._tmux(["send-keys", "-t", target, "-l", text], host)
+        self._tmux(["send-keys", "-t", target, "Enter"], host)
+
+    def send_escape(self, target: str, host: str | None = None) -> None:
+        self._tmux(["send-keys", "-t", target, "Escape"], host)
+
+    def capture_pane(self, target: str, host: str | None = None) -> str:
+        return self._tmux(["capture-pane", "-p", "-t", target], host).stdout
+
     def list(self, host: str | None = None) -> list[str]:
         try:
             result = self._tmux(["list-sessions", "-F", "#{session_name}"], host)

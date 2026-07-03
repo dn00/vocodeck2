@@ -57,6 +57,8 @@ def derive_identity() -> dict:
         "worktree": repo_root,
         "harness": harness,
         "pid": os.getpid(),
+        # Inside tmux? Enables the inject capability (SPEC v2 → now).
+        "tmux_pane": os.environ.get("TMUX_PANE"),
     }
 
 

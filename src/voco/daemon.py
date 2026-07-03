@@ -105,6 +105,7 @@ class Daemon:
         if cmd.kind == "stop":
             if self.voice is not None:
                 self.voice.barge_in()
+            self._inject_escape(self.registry.active)
         elif cmd.kind == "switch" and cmd.target:
             self.registry.switch(cmd.target)
         elif cmd.kind in ("mute", "unmute"):
@@ -119,8 +120,57 @@ class Daemon:
         target = (
             self.registry.by_call_name(decision.target) if decision.target else None
         )
+        session = target or self.registry.active
         result = self.registry.dispatch(text, turn_id, target=target)
+        if result == "queued_idle" and session is not None:
+            self._schedule_nudge(session.session_id)
         return turn_id, result
+
+    # ---- inject capability (tmux send-keys; SPEC v2 pulled forward) ---------
+
+    NUDGE_TEXT = (
+        "[voco] queued voice input waiting — call voice_listen "
+        "(or run `voco listen`) to receive it, then keep listening."
+    )
+
+    def _inject_escape(self, session) -> None:
+        """Voice 'stop' becomes a real interrupt for inject-capable sessions."""
+        if session is None or session.inject_target is None:
+            return
+        host = session.identity.get("host_alias")  # None = local
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(
+            None, self._inject_safely, session.inject_target, "escape", host
+        )
+
+    def _schedule_nudge(self, session_id: str) -> None:
+        """Self-healing rearm: if input is still queued shortly after landing
+        on an idle inject-capable session, type a nudge into its composer."""
+
+        async def nudge() -> None:
+            await asyncio.sleep(2.0)
+            s = self.registry.get(session_id)
+            if s is None or s.state != "idle" or not s.queued:
+                return  # it picked the input up (or left) — stand down
+            if s.inject_target is None:
+                return
+            host = s.identity.get("host_alias")
+            await asyncio.get_running_loop().run_in_executor(
+                None, self._inject_safely, s.inject_target, "nudge", host
+            )
+
+        asyncio.get_running_loop().create_task(nudge())
+
+    def _inject_safely(self, target: str, kind: str, host: str | None) -> None:
+        try:
+            if kind == "escape":
+                self._tmux().send_escape(target, host=host)
+            else:
+                self._tmux().send_text(target, self.NUDGE_TEXT, host=host)
+        except Exception as e:
+            # Named fail-silent: inject is best-effort; the queue + earcon
+            # remain the source of truth (SPEC §8.4).
+            self.bus.emit("daemon.error", {"error": f"inject: {e}"})
 
     # ---- shared mic/duplex state changes ---------------------------------------
 
@@ -156,6 +206,7 @@ class Daemon:
         if cmd == "interrupt":
             if self.voice is not None:
                 self.voice.barge_in()
+            self._inject_escape(self.registry.active)
             return {}
         if cmd == "mic.set":
             # Two orthogonal knobs (SPEC §4.4/§4.5); legacy "mode" = duplex.

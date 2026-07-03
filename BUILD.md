@@ -102,6 +102,28 @@ uses).
   answers) unless timeout_ms is raised (now config) or a smaller model is
   used. 3090 expected well under budget — re-run harness there.
 - Router timeout now configurable: [first_mate] timeout_ms.
+
+## v2 pulled forward (2026-07-03, user-directed)
+
+- [x] Inject capability (tmux send-keys, universal — NOT Claude-only):
+      adapters derive TMUX_PANE (derive-don't-ask) → "inject" capability;
+      voice "stop"/interrupt sends Escape to the active session's pane;
+      queued-idle dispatch schedules a 2s nudge typed into the composer
+      (self-healing rearm). Fail-silent with daemon.error. LIVE-VALIDATED:
+      tmux 3.7b installed; spawn→send_text→capture_pane→kill round trip
+      green (test_inject_live.py).
+- [x] AEC: pure-numpy partitioned-block FDAF (core/echo.py) — webrtc/
+      speex bindings don't build on arm64, and zero-dep is more portable
+      anyway. 8 partitions ≈256ms tail absorbs device latency. Synthetic
+      room validation: ERLE >12dB after convergence, bit-exact passthrough
+      without playback, near-end survives (corr >0.7). Wired: speaker
+      device-callback tap → resample 24k→16k → reference; mic frames pass
+      through canceller before capture/VAD. Config: [audio] aec = true
+      (default OFF until live-tuned). No double-talk detector yet —
+      half_duplex stays the speakers fallback until live validation.
+- Decisions from idea review: simple localhost UI = recommended next
+  (protocol is ready for it); own tmux/wrapper = NO (decision 006);
+  terminal mirroring = capture-pane peek once UI exists.
 - Known limitation (wake mode): if the wake word and the command share
   one breath with no pause, the VAD speech-run started before arming and
   speech_started won't refire until a silence gap — "voco, <pause>, do X"
