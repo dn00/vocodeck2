@@ -233,8 +233,9 @@ cross-platform, low CPU) as the default provider, ships M3. A custom
 "voco" model is trained from synthetic TTS data (openWakeWord's documented
 pipeline); honest caveat: two-syllable wake words run higher false-accept
 rates — if bare "voco" proves noisy, the fallback is "hey voco", decided by
-measurement, not taste. PTT works in every attention mode; the phrase table
-and Gemma are downstream and unaffected.
+measurement, not taste. PTT works in every attention mode **except muted**
+(muted is the privacy switch: nothing opens turns, full stop); the phrase
+table and the first mate are downstream and unaffected.
 
 ---
 
@@ -604,9 +605,11 @@ Events (daemon → clients): `snapshot`,
 
 Commands (client → daemon, over WS or `/v1/control`): envelope
 `{id, cmd, payload}` → reply `{id, ok: true, payload} | {id, ok: false,
-error}`. Commands: `switch_session`, `interrupt`, `mic.set`,
-`say_as_user` (typed-input path — the UI's text box later), `state.get`,
-`config.get|set`.
+error}`. Commands: `switch_session`, `interrupt`, `mic.set` (two orthogonal
+knobs: `{duplex?, attention?}`), `session.spawn|kill|panes` (managed tmux,
+§9.2), `say_as_user` (typed-input path — the UI's text box later),
+`state.get`, `config.get|set`. The generated `PROTOCOL.md`
+(scripts/gen_protocol.py) is the client-facing reference.
 
 The vocabulary lives in `src/voco/protocol/` as dataclasses + hand-rolled
 validators (vocodeck house style: dependency-light, no schema libraries),

@@ -44,7 +44,24 @@ resume. Update the journal at every checkpoint (after each commit).
       live over real MCP stdio handshake against --no-audio daemon
 - [ ] M1 exit: live conversation with first mate on llama-server
       (needs gemma-4-e4b GGUF + user present)
-- [ ] M2 leftovers: tmux managed spawn (M3), remote-attach live test
+- [ ] M2 leftovers: remote-attach live test
+
+## M3 progress (2026-07-03, buildable scope)
+
+- [x] Static gates: ruff (lint+format) + mypy clean; CI (3 OSes)
+- [x] VoiceLoop extraction (daemon slimmed; audio shell non-optional)
+- [x] Attention modes (SPEC §4.5): always|wake|ptt_only|muted as core
+      AttentionGate; wake WINDOW logic tested; wake DETECTOR (openWakeWord
+      adapter) still pending; muted blocks PTT too (spec clarified)
+- [x] tmux managed spawn: adapters/tmux.py + session.spawn|kill|panes
+      control commands + voco new/kill/panes; fake-runner tests; live
+      tmux test pending (tmux not installed on this Mac — validate on
+      WSL2/workspace)
+- [x] Control errors are clean JSON; CLI prints `error: ...`, no tracebacks
+- [x] PROTOCOL.md generated (scripts/gen_protocol.py)
+- [ ] Wake-word adapter (openWakeWord), kokoro-onnx floor runner,
+      config.set persistence — deferred (model downloads / low value
+      until live-audio validation)
 
 ## M0 exit — REMAINING (needs user present / live audio)
 

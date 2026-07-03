@@ -180,7 +180,14 @@ class BridgeServer:
             raise web.HTTPBadRequest(text=str(e)) from e
         if env.type == "state.get":
             return web.json_response(self._registry.snapshot())
-        result = self._on_control(env.type, env.payload)
+        try:
+            result = self._on_control(env.type, env.payload)
+        except ValueError as e:
+            return web.json_response({"ok": False, "error": str(e)}, status=400)
+        except Exception as e:
+            # Adapter failures (tmux missing, ssh down) are operator errors,
+            # not crashes: surface the message, keep the daemon calm.
+            return web.json_response({"ok": False, "error": str(e)}, status=500)
         return web.json_response({"ok": True, **result})
 
     # ---- WS events (SPEC §10) -----------------------------------------------------

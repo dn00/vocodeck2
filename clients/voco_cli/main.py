@@ -60,6 +60,24 @@ def derive_identity() -> dict:
     }
 
 
+def control(client: Client, cmd: str, payload: dict, timeout: float = 35.0) -> int:
+    """Operator command: print the result or the server's error, no tracebacks."""
+    try:
+        result = client._request("POST", f"/v1/control/{cmd}", payload, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        try:
+            body = json.loads(e.read().decode())
+            print(f"error: {body.get('error', e)}", file=sys.stderr)
+        except Exception:
+            print(f"error: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(json.dumps(result))
+    return 0
+
+
 class Client:
     def __init__(self, base_url: str = DEFAULT_URL, token: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
@@ -214,7 +232,27 @@ def main() -> None:
     p_switch = sub.add_parser("switch")
     p_switch.add_argument("name")
     p_mic = sub.add_parser("mic")
-    p_mic.add_argument("mode", choices=["full_duplex", "half_duplex"])
+    p_mic.add_argument(
+        "mode",
+        choices=[
+            "full_duplex",
+            "half_duplex",
+            "always",
+            "wake",
+            "ptt_only",
+            "muted",
+        ],
+    )
+    p_new = sub.add_parser("new")
+    p_new.add_argument("harness", help="command to run, e.g. claude")
+    p_new.add_argument("--name", default=None)
+    p_new.add_argument("--cwd", default=None)
+    p_new.add_argument("--host", default=None)
+    p_kill = sub.add_parser("kill")
+    p_kill.add_argument("name", help="tmux session name (voco-...)")
+    p_kill.add_argument("--host", default=None)
+    p_panes = sub.add_parser("panes")
+    p_panes.add_argument("--host", default=None)
     p_input = sub.add_parser("input")  # typed input path (say_as_user)
     p_input.add_argument("text")
     sub.add_parser("attach-cmd")
@@ -252,29 +290,31 @@ def main() -> None:
                 unread = s["unread_digest"]
                 print(f"{active} {s['display_name']}  [{s['state']}]  unread={unread}")
     elif args.cmd == "switch":
-        print(
-            json.dumps(
-                client._request(
-                    "POST", "/v1/control/switch_session", {"name": args.name}, timeout=5
-                )
-            )
-        )
+        sys.exit(control(client, "switch_session", {"name": args.name}, timeout=5))
     elif args.cmd == "mic":
-        print(
-            json.dumps(
-                client._request(
-                    "POST", "/v1/control/mic.set", {"mode": args.mode}, timeout=5
-                )
+        knob = "duplex" if args.mode in ("full_duplex", "half_duplex") else "attention"
+        sys.exit(control(client, "mic.set", {knob: args.mode}, timeout=5))
+    elif args.cmd == "new":
+        sys.exit(
+            control(
+                client,
+                "session.spawn",
+                {
+                    "harness": args.harness,
+                    "name": args.name,
+                    "cwd": args.cwd,
+                    "host": args.host,
+                },
             )
         )
+    elif args.cmd == "kill":
+        sys.exit(
+            control(client, "session.kill", {"name": args.name, "host": args.host})
+        )
+    elif args.cmd == "panes":
+        sys.exit(control(client, "session.panes", {"host": args.host}))
     elif args.cmd == "input":
-        print(
-            json.dumps(
-                client._request(
-                    "POST", "/v1/control/say_as_user", {"text": args.text}, timeout=5
-                )
-            )
-        )
+        sys.exit(control(client, "say_as_user", {"text": args.text}, timeout=5))
     elif args.cmd == "attach-cmd":
         sys.exit(cmd_attach(args, client))
 

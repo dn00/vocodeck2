@@ -21,9 +21,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from voco.adapters.tmux import TmuxManager
     from voco.voice_loop import VoiceLoop
 
 from voco.core.arbitration import DuplexMode
+from voco.core.attention import AttentionMode
 from voco.core.events import EventBus
 from voco.core.first_mate import build_grounding, execute_action
 from voco.core.phrases import PhraseCommand
@@ -66,6 +68,15 @@ class Daemon:
             on_control=self._control,
         )
         self.voice: VoiceLoop | None = None
+        self._tmux_mgr: TmuxManager | None = None
+        self._port = 7777
+
+    def _tmux(self) -> TmuxManager:
+        if self._tmux_mgr is None:
+            from voco.adapters.tmux import TmuxManager
+
+            self._tmux_mgr = TmuxManager(voco_url=f"http://127.0.0.1:{self._port}")
+        return self._tmux_mgr
 
     # ---- VoiceHost port (decisions stay here; audio reacts in VoiceLoop) ----
 
@@ -113,12 +124,22 @@ class Daemon:
         duplex = DuplexMode(mode)  # raises on garbage — caller surfaces it
         if self.voice is not None:
             self.voice.set_duplex(duplex)
-        self.bus.emit("mic.state", {"mode": mode})
+        self._emit_mic_state()
 
     def _set_muted(self, muted: bool) -> None:
         if self.voice is not None:
-            self.voice.suppress_mic(muted)
-        self.bus.emit("mic.state", {"mode": "mute" if muted else "unmute"})
+            self.voice.set_muted(muted)
+        self._emit_mic_state()
+
+    def _emit_mic_state(self) -> None:
+        v = self.voice
+        self.bus.emit(
+            "mic.state",
+            {
+                "duplex": v.duplex.value if v else None,
+                "attention": v.attention.mode.value if v else None,
+            },
+        )
 
     # ---- control commands (CLI/WS) -----------------------------------------------
 
@@ -133,17 +154,41 @@ class Daemon:
                 self.voice.barge_in()
             return {}
         if cmd == "mic.set":
-            mode = str(payload.get("mode", ""))
-            if mode not in (DuplexMode.FULL.value, DuplexMode.HALF.value):
-                raise ValueError(f"unknown mic mode {mode!r}")
-            self._set_duplex(mode)
-            return {"mode": mode}
+            # Two orthogonal knobs (SPEC §4.4/§4.5); legacy "mode" = duplex.
+            duplex = payload.get("duplex") or payload.get("mode")
+            attention = payload.get("attention")
+            if duplex is not None:
+                self._set_duplex(str(duplex))
+            if attention is not None:
+                if self.voice is None:
+                    raise ValueError("no voice loop running")
+                self.voice.set_attention(AttentionMode(str(attention)))
+                self._emit_mic_state()
+            if duplex is None and attention is None:
+                raise ValueError("mic.set needs duplex and/or attention")
+            return {"duplex": duplex, "attention": attention}
         if cmd == "say_as_user":
             text = str(payload.get("text", "")).strip()
             if not text:
                 raise ValueError("text required")
             asyncio.get_running_loop().create_task(self._route_and_dispatch(text))
             return {}
+        if cmd == "session.spawn":
+            harness = str(payload.get("harness", "")).strip()
+            if not harness:
+                raise ValueError("harness command required")
+            name = self._tmux().spawn(
+                harness,
+                name=str(payload.get("name") or harness),
+                cwd=payload.get("cwd"),
+                host=payload.get("host"),
+            )
+            return {"tmux_session": name}
+        if cmd == "session.kill":
+            self._tmux().kill(str(payload.get("name", "")), host=payload.get("host"))
+            return {}
+        if cmd == "session.panes":
+            return {"panes": self._tmux().list(host=payload.get("host"))}
         if cmd == "config.get":
             return self._public_config()
         if cmd == "config.set":
@@ -193,6 +238,7 @@ class Daemon:
     # ---- run ---------------------------------------------------------------
 
     async def run(self, host: str = "127.0.0.1", port: int = 7777) -> None:
+        self._port = port
         loop = asyncio.get_running_loop()
         self._wire_say_speech()
         runner = await run_server(self.bridge, host=host, port=port)

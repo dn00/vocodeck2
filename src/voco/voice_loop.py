@@ -27,6 +27,7 @@ from voco.adapters.speaker import SpeakerPlayer
 from voco.adapters.stt import build_stt
 from voco.adapters.tts import OpenAICompatibleTts, PhraseBank
 from voco.core.arbitration import DuplexMode, PlaybackItem, PlaybackQueue, Source
+from voco.core.attention import AttentionGate, AttentionMode
 from voco.core.capture import CaptureBuffer
 from voco.core.events import EventBus
 from voco.core.phrases import PhraseCommand
@@ -69,6 +70,12 @@ class VoiceLoop:
         )
 
         self.duplex = DuplexMode(audio_cfg.get("duplex", DuplexMode.FULL.value))
+        self.attention = AttentionGate(
+            AttentionMode(audio_cfg.get("attention", AttentionMode.ALWAYS.value)),
+            now=time.monotonic,
+            wake_window_s=float(audio_cfg.get("wake_window_s", 30.0)),
+        )
+        self._premute = self.attention.mode
         self._ptt_key = str(audio_cfg.get("ptt_key", "f9"))
 
         self.tts = OpenAICompatibleTts(
@@ -181,8 +188,14 @@ class VoiceLoop:
         self.duplex = mode
         self.queue.set_duplex(mode)
 
-    def suppress_mic(self, muted: bool) -> None:
-        self.vad_gate.suppress(muted)
+    def set_attention(self, mode: AttentionMode) -> None:
+        if mode is not AttentionMode.MUTED:
+            self._premute = mode
+        self.attention.set_mode(mode)
+
+    def set_muted(self, muted: bool) -> None:
+        """Phrase-table mute/unmute: MUTED <-> the last non-muted mode."""
+        self.set_attention(AttentionMode.MUTED if muted else self._premute)
 
     def barge_in(self) -> None:
         self.queue.barge_in()
@@ -229,11 +242,15 @@ class VoiceLoop:
             self.vad_gate.suppress(playing)
 
     def _on_vad_speech_start(self) -> None:
+        if not self.attention.allows_vad():
+            return
         if self.duplex is DuplexMode.FULL:
             self.queue.barge_in()  # rule 1
         self.machine.speech_started()
 
     def _on_ptt_press(self) -> None:
+        if not self.attention.allows_ptt():
+            return
         self.queue.barge_in()
         self.machine.ptt_pressed()
 
@@ -301,12 +318,14 @@ class VoiceLoop:
         self._kick_deadline()
 
     def _on_dispatch_ready(self, key: int, text: str, decision: RouteDecision) -> None:
+        self.attention.on_turn_activity()
         turn_id, result = self._host.dispatch(text, decision)
         self.dispatch_feedback(turn_id, result)
         if decision.kind == "ack_forward" and decision.speech:
             self.speak_local(decision.speech, turn_id)
 
     def _on_local_reply(self, key: int, decision: RouteDecision) -> None:
+        self.attention.on_turn_activity()
         if decision.speech:
             self.speak_local(decision.speech, None)
         self._kick_deadline()
