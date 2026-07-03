@@ -6,7 +6,7 @@ frame→probability callable the VadGate expects. Impure edge: onnxruntime.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 
@@ -14,7 +14,7 @@ from voco.core.vad import SAMPLE_RATE
 
 
 def load_silero(model_path: str) -> Callable[[np.ndarray], float]:
-    import onnxruntime as ort  # noqa: PLC0415
+    import onnxruntime as ort
 
     sess = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
     state = np.zeros((2, 1, 128), dtype=np.float32)

@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from aiohttp import WSMsgType, web
 
@@ -79,7 +80,16 @@ class BridgeServer:
         body = await request.json()
         identity = {
             k: body.get(k)
-            for k in ("host", "user", "cwd", "repo", "branch", "worktree", "harness", "pid")
+            for k in (
+                "host",
+                "user",
+                "cwd",
+                "repo",
+                "branch",
+                "worktree",
+                "harness",
+                "pid",
+            )
         }
         if not identity.get("host") or not identity.get("cwd"):
             raise web.HTTPBadRequest(text="host and cwd are required")
@@ -139,7 +149,7 @@ class BridgeServer:
         self._waiters[s.session_id] = fut
         try:
             payload = await asyncio.wait_for(fut, timeout=self._slice)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             payload = {"status": "rearm"}
         finally:
             # Only the current owner may unpark: an evicted poll's cleanup
@@ -167,7 +177,7 @@ class BridgeServer:
         try:
             env = validate_envelope({"cmd": cmd, "payload": body})
         except ValueError as e:
-            raise web.HTTPBadRequest(text=str(e))
+            raise web.HTTPBadRequest(text=str(e)) from e
         if env.type == "state.get":
             return web.json_response(self._registry.snapshot())
         result = self._on_control(env.type, env.payload)

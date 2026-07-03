@@ -14,8 +14,8 @@ swallowed silently here).
 from __future__ import annotations
 
 import hashlib
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import AsyncIterator
 
 import aiohttp
 
@@ -39,8 +39,9 @@ class OpenAICompatibleTts:
         headers = {}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
                 f"{self.base_url}/audio/speech",
                 json={
                     "model": self.model,
@@ -51,10 +52,11 @@ class OpenAICompatibleTts:
                 },
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=120, sock_connect=5),
-            ) as resp:
-                resp.raise_for_status()
-                async for chunk in resp.content.iter_chunked(4096):
-                    yield chunk
+            ) as resp,
+        ):
+            resp.raise_for_status()
+            async for chunk in resp.content.iter_chunked(4096):
+                yield chunk
 
     async def synth_bytes(self, text: str) -> bytes:
         out = bytearray()
@@ -69,7 +71,7 @@ EARCON_NAMES = ["chirp", "line-dead", "chime"]
 
 def _tone(freqs: list[float], ms: int, sample_rate: int) -> bytes:
     """Synthesized earcons — no TTS dependency for the non-verbal sounds."""
-    import numpy as np  # noqa: PLC0415
+    import numpy as np
 
     t = np.linspace(0, ms / 1000, int(sample_rate * ms / 1000), endpoint=False)
     wave = sum(np.sin(2 * np.pi * f * t) for f in freqs) / len(freqs)
@@ -97,18 +99,30 @@ class PhraseBank:
         h = hashlib.sha256(f"{self._tts.voice}:{phrase}".encode()).hexdigest()[:16]
         return f"{h}.pcm"
 
-    async def ensure(self) -> None:
+    async def ensure(self) -> list[str]:
+        """Fill the bank; returns phrases that failed to synthesize.
+
+        Earcons are synthesized locally and never fail; a down TTS server
+        must not prevent the voice loop from starting (the caller reports
+        failures on the event bus).
+        """
         self._dir.mkdir(parents=True, exist_ok=True)
         for name in EARCON_NAMES:
             self._mem[name] = make_earcon(name, self._tts.sample_rate)
+        failed: list[str] = []
         for phrase in ACK_PHRASES:
             path = self._dir / self._key(phrase)
             if path.exists():
                 self._mem[phrase] = path.read_bytes()
-            else:
+                continue
+            try:
                 pcm = await self._tts.synth_bytes(phrase)
-                path.write_bytes(pcm)
-                self._mem[phrase] = pcm
+            except Exception:
+                failed.append(phrase)
+                continue
+            path.write_bytes(pcm)
+            self._mem[phrase] = pcm
+        return failed
 
     def get(self, key: str) -> bytes | None:
         return self._mem.get(key)

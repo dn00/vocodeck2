@@ -1,0 +1,335 @@
+"""The audio-side shell: mic → VAD → turn machine → STT → route → speech.
+
+ROLE: compose the voice pipeline (SPEC §4–§5) around the pure core. Owns
+every audio member non-optionally — the daemon holds `VoiceLoop | None`
+and this module never half-exists. Decisions and dispatch stay in the
+daemon, reached through the VoiceHost port.
+
+INVARIANTS: PortAudio callbacks are marshaled onto the asyncio loop before
+touching core state; speculative STT tasks are revision-keyed and
+cancelled on merge (SPEC §5.2); the rule-0 gate follows every turn-state
+change; deadline waits use the same monotonic clock as the machine.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from pathlib import Path
+from typing import Any, Protocol
+
+import numpy as np
+
+from voco.adapters.hotkey import PttHotkey
+from voco.adapters.microphone import MicStream
+from voco.adapters.silero import load_silero
+from voco.adapters.speaker import SpeakerPlayer
+from voco.adapters.stt import build_stt
+from voco.adapters.tts import OpenAICompatibleTts, PhraseBank
+from voco.core.arbitration import DuplexMode, PlaybackItem, PlaybackQueue, Source
+from voco.core.capture import CaptureBuffer
+from voco.core.events import EventBus
+from voco.core.phrases import PhraseCommand
+from voco.core.router import Routed
+from voco.core.turn import (
+    RouteDecision,
+    TurnConfig,
+    TurnEvents,
+    TurnMachine,
+    TurnState,
+)
+from voco.core.vad import VadConfig, VadGate
+
+
+class VoiceHost(Protocol):
+    """What the daemon provides to the voice loop (decisions + dispatch)."""
+
+    async def route(self, text: str) -> Routed: ...
+
+    def run_phrase(self, cmd: PhraseCommand) -> None: ...
+
+    def dispatch(self, text: str, decision: RouteDecision) -> tuple[str, str]:
+        """Dispatch to a session; returns (turn_id, DispatchResult)."""
+        ...
+
+
+class VoiceLoop:
+    def __init__(self, cfg: dict[str, Any], bus: EventBus, host: VoiceHost) -> None:
+        self._bus = bus
+        self._host = host
+        audio_cfg = cfg.get("audio", {})
+        stt_cfg = dict(cfg.get("stt", {"provider": "faster-whisper"}))
+        tts_cfg = cfg.get(
+            "tts",
+            {
+                "base_url": "http://127.0.0.1:8000/v1",
+                "model": "kokoro",
+                "voice": "af_heart",
+            },
+        )
+
+        self.duplex = DuplexMode(audio_cfg.get("duplex", DuplexMode.FULL.value))
+        self._ptt_key = str(audio_cfg.get("ptt_key", "f9"))
+
+        self.tts = OpenAICompatibleTts(
+            base_url=tts_cfg["base_url"],
+            model=tts_cfg["model"],
+            voice=tts_cfg["voice"],
+            sample_rate=int(tts_cfg.get("sample_rate", 24_000)),
+            api_key=tts_cfg.get("api_key"),
+        )
+        cache = Path(
+            audio_cfg.get(
+                "phrase_bank_dir", Path.home() / ".cache" / "voco" / "phrase-bank"
+            )
+        )
+        self.bank = PhraseBank(self.tts, cache)
+        self.stt = build_stt(stt_cfg.pop("provider"), **stt_cfg)
+
+        self.player = SpeakerPlayer(
+            on_finished=lambda: self.queue.on_item_finished(),
+            on_playing_changed=self._on_playing_changed,
+            sample_rate=self.tts.sample_rate,
+            device=audio_cfg.get("output_device"),
+        )
+        self.queue = PlaybackQueue(self.player, emit=bus.emit)
+        self.queue.set_duplex(self.duplex)
+
+        self.machine = TurnMachine(
+            TurnEvents(
+                capture_started=self._on_capture_started,
+                capture_stopped=self._on_capture_stopped,
+                chirp_requested=self._on_chirp,
+                cancel_speculation=self._on_cancel,
+                route_requested=self._on_route_requested,
+                dispatch_ready=self._on_dispatch_ready,
+                local_reply_ready=self._on_local_reply,
+                turn_state_changed=self._on_turn_state,
+            ),
+            TurnConfig(
+                dispatch_hold_ms=int(audio_cfg.get("dispatch_hold_ms", 800)),
+                reopen_window_ms=int(audio_cfg.get("reopen_window_ms", 1200)),
+            ),
+            now=time.monotonic,
+        )
+
+        self.capture = CaptureBuffer()
+        self.vad_gate = VadGate(
+            VadConfig(
+                threshold=float(audio_cfg.get("vad_threshold", 0.5)),
+                min_speech_ms=int(audio_cfg.get("min_speech_ms", 384)),
+                min_speech_continuation_ms=int(
+                    audio_cfg.get("min_speech_continuation_ms", 192)
+                ),
+                min_silence_ms=int(audio_cfg.get("min_silence_ms", 64)),
+            ),
+            model=load_silero(
+                str(audio_cfg.get("silero_model", "models/silero_vad.onnx"))
+            ),
+            on_speech_started=self._on_vad_speech_start,
+            on_speech_ended=self.machine.speech_ended,
+            reopenable=lambda: (
+                self.machine.state in (TurnState.HOLDING, TurnState.REOPENABLE)
+            ),
+        )
+        self.mic = MicStream(self._on_frame, device=audio_cfg.get("input_device"))
+
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._ptt: PttHotkey | None = None
+        self._deadline_task: asyncio.Task[None] | None = None
+        self._deadline_wakeup = asyncio.Event()
+        self._speculation: dict[tuple[int, int], asyncio.Task[None]] = {}
+
+    # ---- lifecycle ---------------------------------------------------------
+
+    async def start(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+        self.player.bind_loop(loop)
+        failed = await self.bank.ensure()
+        if failed:
+            self._bus.emit(
+                "daemon.error",
+                {
+                    "error": f"phrase bank: {len(failed)} phrases"
+                    " unsynthesized (TTS down?)"
+                },
+            )
+        self.mic.start()
+        try:
+            self._ptt = PttHotkey(
+                loop,
+                on_press=self._on_ptt_press,
+                on_release=self._on_ptt_release,
+                key=self._ptt_key,
+            )
+            self._ptt.start()
+        except Exception as e:
+            # Capability degrades (Wayland / missing pynput); loop stays up.
+            self._bus.emit("daemon.error", {"error": f"ptt unavailable: {e}"})
+        self._deadline_task = loop.create_task(self._deadline_loop())
+
+    def stop(self) -> None:
+        self.mic.stop()
+        if self._ptt is not None:
+            self._ptt.stop()
+        if self._deadline_task is not None:
+            self._deadline_task.cancel()
+
+    # ---- daemon-facing controls ----------------------------------------------
+
+    def set_duplex(self, mode: DuplexMode) -> None:
+        self.duplex = mode
+        self.queue.set_duplex(mode)
+
+    def suppress_mic(self, muted: bool) -> None:
+        self.vad_gate.suppress(muted)
+
+    def barge_in(self) -> None:
+        self.queue.barge_in()
+
+    def note_dispatch(self, turn_id: str) -> None:
+        self.queue.note_dispatch(turn_id)
+
+    def speak_local(self, text: str, turn_id: str | None) -> None:
+        self.queue.enqueue(
+            PlaybackItem(Source.FIRST_MATE, self.tts.stream(text), turn_id=turn_id)
+        )
+
+    def speak_agent(self, text: str, turn_id: str | None) -> None:
+        self.queue.enqueue(
+            PlaybackItem(Source.AGENT, self.tts.stream(text), turn_id=turn_id)
+        )
+
+    def play_bank(self, key: str) -> None:
+        pcm = self.bank.get(key)
+        if pcm:
+            self.queue.enqueue(
+                PlaybackItem(Source.ACK, pcm, duration_ms=self.bank.duration_ms(key))
+            )
+
+    def dispatch_feedback(self, turn_id: str, result: str) -> None:
+        """Shared post-dispatch audio policy (voice and typed paths)."""
+        self.note_dispatch(turn_id)
+        if result in ("no_session", "queued_idle"):
+            self.play_bank("line-dead")
+
+    # ---- audio-thread edges ------------------------------------------------------
+
+    def _on_frame(self, frame: np.ndarray) -> None:
+        assert self._loop is not None
+        self._loop.call_soon_threadsafe(self._process_frame, frame)
+
+    def _process_frame(self, frame: np.ndarray) -> None:
+        self.capture.feed(frame)
+        self.vad_gate.process(frame)
+
+    def _on_playing_changed(self, playing: bool) -> None:
+        # Half-duplex: deaf while we speak (+ grace via VAD run reset).
+        if self.duplex is DuplexMode.HALF:
+            self.vad_gate.suppress(playing)
+
+    def _on_vad_speech_start(self) -> None:
+        if self.duplex is DuplexMode.FULL:
+            self.queue.barge_in()  # rule 1
+        self.machine.speech_started()
+
+    def _on_ptt_press(self) -> None:
+        self.queue.barge_in()
+        self.machine.ptt_pressed()
+
+    def _on_ptt_release(self) -> None:
+        self.machine.ptt_released()
+        self._kick_deadline()
+
+    # ---- turn machine listeners -----------------------------------------------------
+
+    def _on_capture_started(self, key: int, reopened: bool) -> None:
+        if reopened:
+            self.capture.resume_utterance()
+        else:
+            self.capture.clear()
+            self.capture.start_utterance()
+        self._kick_deadline()
+
+    def _on_capture_stopped(self, key: int, revision: int) -> None:
+        self.capture.pause()
+        pcm = self.capture.take()
+        assert self._loop is not None
+        task = self._loop.create_task(self._transcribe(key, revision, pcm))
+        self._speculation[(key, revision)] = task
+        self._kick_deadline()
+
+    async def _transcribe(self, key: int, revision: int, pcm: bytes) -> None:
+        loop = asyncio.get_running_loop()
+        try:
+            text = await loop.run_in_executor(None, self.stt.transcribe, pcm)
+        except Exception as e:
+            self._bus.emit("daemon.error", {"error": f"stt: {e}"})
+            text = ""
+        self._speculation.pop((key, revision), None)
+        self._bus.emit("stt.final", {"text": text})
+        self.machine.stt_final(key, revision, text)
+        self._kick_deadline()
+
+    def _on_chirp(self, key: int) -> None:
+        self.play_bank("chirp")
+
+    def _on_cancel(self, key: int, revision: int) -> None:
+        task = self._speculation.pop((key, revision), None)
+        if task is not None:
+            task.cancel()
+        # Cancel speculative local speech; agent speech is never speculative
+        # so flushing local sources is safe here (SPEC §5.2).
+        self.queue.barge_in()
+
+    def _on_route_requested(self, key: int, revision: int, text: str) -> None:
+        assert self._loop is not None
+        self._loop.create_task(self._route_turn(key, revision, text))
+
+    async def _route_turn(self, key: int, revision: int, text: str) -> None:
+        routed = await self._host.route(text)
+        if routed.phrase is not None:
+            self._host.run_phrase(routed.phrase)
+            # Phrase commands never dispatch: close as a speechless answer.
+            self.machine.route_decided(
+                key, revision, RouteDecision(kind="answer", speech="")
+            )
+            return
+        self.machine.route_decided(
+            key, revision, routed.decision or RouteDecision(kind="forward")
+        )
+        self._kick_deadline()
+
+    def _on_dispatch_ready(self, key: int, text: str, decision: RouteDecision) -> None:
+        turn_id, result = self._host.dispatch(text, decision)
+        self.dispatch_feedback(turn_id, result)
+        if decision.kind == "ack_forward" and decision.speech:
+            self.speak_local(decision.speech, turn_id)
+
+    def _on_local_reply(self, key: int, decision: RouteDecision) -> None:
+        if decision.speech:
+            self.speak_local(decision.speech, None)
+        self._kick_deadline()
+
+    def _on_turn_state(self, key: int, state: TurnState) -> None:
+        self._bus.emit("turn.state", {"turn_id": f"k-{key}", "state": state.value})
+        self.queue.set_gate(state in (TurnState.CAPTURING, TurnState.HOLDING))
+        self._kick_deadline()
+
+    # ---- deadline pump -----------------------------------------------------
+
+    def _kick_deadline(self) -> None:
+        self._deadline_wakeup.set()
+
+    async def _deadline_loop(self) -> None:
+        while True:
+            self._deadline_wakeup.clear()
+            deadline = self.machine.next_deadline()
+            if deadline is None:
+                await self._deadline_wakeup.wait()
+                continue
+            delay = max(0.0, deadline - time.monotonic())
+            try:
+                await asyncio.wait_for(self._deadline_wakeup.wait(), timeout=delay)
+            except TimeoutError:
+                self.machine.on_deadline()

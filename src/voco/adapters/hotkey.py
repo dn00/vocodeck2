@@ -13,7 +13,8 @@ onto the asyncio loop.
 from __future__ import annotations
 
 import asyncio
-from typing import Callable
+from collections.abc import Callable
+from typing import Any
 
 DEFAULT_KEY = "f9"
 
@@ -27,7 +28,7 @@ class PttHotkey:
         key: str = DEFAULT_KEY,
     ) -> None:
         try:
-            from pynput import keyboard  # noqa: PLC0415
+            from pynput import keyboard
         except ImportError as e:  # capability degrades, never crashes (§1.2)
             raise RuntimeError(
                 "pynput not installed — PTT disabled (uv sync --extra ptt)"
@@ -38,7 +39,7 @@ class PttHotkey:
         self._on_release = on_release
         self._target = self._parse(key)
         self._down = False
-        self._listener: object | None = None
+        self._listener: Any = None
 
     def _parse(self, key: str):
         kb = self._keyboard

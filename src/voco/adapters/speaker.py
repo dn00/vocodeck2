@@ -13,7 +13,7 @@ any task; playback state changes notify the half-duplex suppressor.
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable
 
 import numpy as np
 
@@ -74,7 +74,7 @@ class SpeakerPlayer:
                 self._on_finished()
 
     async def _play_pcm(self, pcm: bytes) -> None:
-        import sounddevice as sd  # noqa: PLC0415 (hardware edge, lazy)
+        import sounddevice as sd
 
         data = np.frombuffer(pcm, dtype=np.int16)
         done = asyncio.Event()
@@ -107,7 +107,7 @@ class SpeakerPlayer:
 
     async def _play_stream(self, chunks: AsyncIterator[bytes]) -> None:
         """Streaming TTS: buffer to threshold, then feed the device."""
-        import sounddevice as sd  # noqa: PLC0415
+        import sounddevice as sd
 
         threshold = self._sample_rate * 2 * self._buffer_threshold_ms // 1000
         buffer = bytearray()  # GIL-atomic extend/del; no lock needed

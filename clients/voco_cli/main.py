@@ -65,7 +65,9 @@ class Client:
         self.base_url = base_url.rstrip("/")
         self.token = token or os.environ.get("VOCO_TOKEN")
 
-    def _request(self, method: str, path: str, body: dict | None = None, timeout: float = 55.0) -> dict:
+    def _request(
+        self, method: str, path: str, body: dict | None = None, timeout: float = 55.0
+    ) -> dict:
         url = f"{self.base_url}{path}"
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(url, data=data, method=method)
@@ -120,7 +122,10 @@ class Client:
         try:
             self._with_session(
                 lambda sid: self._request(
-                    "POST", "/v1/bridge/say", {"session_id": sid, "text": text}, timeout=5
+                    "POST",
+                    "/v1/bridge/say",
+                    {"session_id": sid, "text": text},
+                    timeout=5,
                 )
             )
             return "ok"
@@ -133,7 +138,12 @@ class Client:
                 lambda sid: self._request(
                     "POST",
                     "/v1/bridge/screen",
-                    {"session_id": sid, "markdown": markdown, "title": title, "mode": mode},
+                    {
+                        "session_id": sid,
+                        "markdown": markdown,
+                        "title": title,
+                        "mode": mode,
+                    },
                     timeout=5,
                 )
             )
@@ -184,8 +194,10 @@ def cmd_attach(args, client: Client) -> int:
     }
     print("# MCP config (Claude Code: .mcp.json / Codex: config.toml equivalent):")
     print(json.dumps(mcp, indent=2))
-    print("\n# CLI fallback: agents call `voco say \"...\"` and `voco listen`.")
-    print(f"# Remote host: add to ~/.ssh/config -> RemoteForward 7777 localhost:7777")
+    print('\n# CLI fallback: agents call `voco say "..."` and `voco listen`.')
+    print(
+        "# Remote host: add to ~/.ssh/config -> RemoteForward 7777 localhost:7777"
+    )
     return 0
 
 
@@ -223,7 +235,11 @@ def main() -> None:
             print(SOFT_FAIL)
             sys.exit(0)  # fail-soft: never a hard error in an agent turn
     elif args.cmd == "screen":
-        print(client.screen(args.markdown, args.title, "append" if args.append else "show"))
+        print(
+            client.screen(
+                args.markdown, args.title, "append" if args.append else "show"
+            )
+        )
     elif args.cmd in ("status", "sessions"):
         try:
             state = client._request("POST", "/v1/control/state.get", {}, timeout=5)
@@ -235,13 +251,34 @@ def main() -> None:
         else:
             for s in state.get("sessions", []):
                 active = "*" if s["session_id"] == state.get("active_session") else " "
-                print(f"{active} {s['display_name']}  [{s['state']}]  unread={s['unread_digest']}")
+                unread = s["unread_digest"]
+                print(
+                    f"{active} {s['display_name']}  [{s['state']}]  unread={unread}"
+                )
     elif args.cmd == "switch":
-        print(json.dumps(client._request("POST", "/v1/control/switch_session", {"name": args.name}, timeout=5)))
+        print(
+            json.dumps(
+                client._request(
+                    "POST", "/v1/control/switch_session", {"name": args.name}, timeout=5
+                )
+            )
+        )
     elif args.cmd == "mic":
-        print(json.dumps(client._request("POST", "/v1/control/mic.set", {"mode": args.mode}, timeout=5)))
+        print(
+            json.dumps(
+                client._request(
+                    "POST", "/v1/control/mic.set", {"mode": args.mode}, timeout=5
+                )
+            )
+        )
     elif args.cmd == "input":
-        print(json.dumps(client._request("POST", "/v1/control/say_as_user", {"text": args.text}, timeout=5)))
+        print(
+            json.dumps(
+                client._request(
+                    "POST", "/v1/control/say_as_user", {"text": args.text}, timeout=5
+                )
+            )
+        )
     elif args.cmd == "attach-cmd":
         sys.exit(cmd_attach(args, client))
 

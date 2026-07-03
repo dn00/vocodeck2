@@ -32,7 +32,7 @@ class NullStt:
 
 class FasterWhisperStt:
     def __init__(self, model_size: str = "small", device: str = "auto") -> None:
-        from faster_whisper import WhisperModel  # noqa: PLC0415
+        from faster_whisper import WhisperModel
 
         compute = "int8" if device in ("cpu", "auto") else "float16"
         self._model = WhisperModel(model_size, device=device, compute_type=compute)

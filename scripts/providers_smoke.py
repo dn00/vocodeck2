@@ -71,13 +71,19 @@ def check_stt(cfg: dict) -> None:
     t0 = time.perf_counter()
     stt.transcribe(tone.tobytes())
     wall = time.perf_counter() - t0
-    report(f"stt ({provider})", f"OK  load {load_s:.1f}s, 1s-audio in {wall*1000:.0f}ms")
+    report(
+        f"stt ({provider})", f"OK  load {load_s:.1f}s, 1s-audio in {wall * 1000:.0f}ms"
+    )
 
 
 async def check_tts(cfg: dict) -> None:
     tts_cfg = cfg.get(
         "tts",
-        {"base_url": "http://127.0.0.1:8000/v1", "model": "kokoro", "voice": "af_heart"},
+        {
+            "base_url": "http://127.0.0.1:8000/v1",
+            "model": "kokoro",
+            "voice": "af_heart",
+        },
     )
     from voco.adapters.tts import OpenAICompatibleTts
 
@@ -99,7 +105,7 @@ async def check_tts(cfg: dict) -> None:
     secs = total_bytes / (2 * tts.sample_rate)
     report(
         f"tts ({tts_cfg['base_url']})",
-        f"OK  TTFA {first*1000:.0f}ms, {secs:.1f}s audio in {total*1000:.0f}ms",
+        f"OK  TTFA {first * 1000:.0f}ms, {secs:.1f}s audio in {total * 1000:.0f}ms",
     )
 
 
@@ -111,8 +117,9 @@ async def check_llm(cfg: dict) -> None:
     import aiohttp
 
     t0 = time.perf_counter()
-    async with aiohttp.ClientSession() as s:
-        async with s.post(
+    async with (
+        aiohttp.ClientSession() as s,
+        s.post(
             f"{llm_cfg['base_url'].rstrip('/')}/chat/completions",
             json={
                 "model": llm_cfg.get("model", ""),
@@ -120,10 +127,13 @@ async def check_llm(cfg: dict) -> None:
                 "max_tokens": 4,
             },
             timeout=aiohttp.ClientTimeout(total=30),
-        ) as resp:
-            resp.raise_for_status()
-            await resp.json()
-    report("first mate (llm)", f"OK  round trip {(time.perf_counter()-t0)*1000:.0f}ms")
+        ) as resp,
+    ):
+        resp.raise_for_status()
+        await resp.json()
+    report(
+        "first mate (llm)", f"OK  round trip {(time.perf_counter() - t0) * 1000:.0f}ms"
+    )
 
 
 def check_devices() -> None:
@@ -141,7 +151,9 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=None)
     args = parser.parse_args()
     cfg = tomllib.loads(args.config.read_text()) if args.config else {}
-    model_path = Path(cfg.get("audio", {}).get("silero_model", "models/silero_vad.onnx"))
+    model_path = Path(
+        cfg.get("audio", {}).get("silero_model", "models/silero_vad.onnx")
+    )
 
     print("voco providers smoke:")
     for name, fn in [

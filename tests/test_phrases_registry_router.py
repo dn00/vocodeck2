@@ -9,7 +9,6 @@ from voco.core.registry import Registry
 from voco.core.router import Router
 from voco.core.turn import RouteDecision
 
-
 # ---- phrases ---------------------------------------------------------------
 
 
@@ -56,7 +55,7 @@ def test_only_session_auto_activates_and_detach_leaves_none_active():
     r = Registry()
     a = r.register(ident(), ["say", "listen"])
     assert r.active is a
-    b = r.register(ident(cwd="/repo/b"), ["say", "listen"])
+    r.register(ident(cwd="/repo/b"), ["say", "listen"])
     assert r.active is a  # no auto-election beyond the first
     r.detach(a.session_id)
     assert r.active is None  # SPEC §5.4 rule 6: announce and wait

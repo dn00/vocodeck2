@@ -7,9 +7,9 @@ import asyncio
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from voco.server.http import BridgeServer
 from voco.core.events import EventBus
 from voco.core.registry import Registry
+from voco.server.http import BridgeServer
 
 
 @pytest.fixture
@@ -84,7 +84,10 @@ async def test_queued_input_delivered_on_next_listen(client):
     info = await register(client)
     sid = info["session_id"]
     # Not parked: dispatch queues (idle).
-    assert client.registry.dispatch("first", client.registry.mint_turn_id()) == "queued_idle"
+    assert (
+        client.registry.dispatch("first", client.registry.mint_turn_id())
+        == "queued_idle"
+    )
     payload = await _listen_json(client, sid)
     assert payload["status"] == "transcript" and payload["text"] == "first"
 

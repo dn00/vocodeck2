@@ -47,7 +47,10 @@ def test_grounding_contains_only_observed_facts_with_ages():
 
 
 def test_parse_clean_json_and_json_wrapped_in_prose():
-    raw = '{"route": "ack_forward", "speech": "Sending that over.", "target": null, "action": null}'
+    raw = (
+        '{"route": "ack_forward", "speech": "Sending that over.",'
+        ' "target": null, "action": null}'
+    )
     d = parse_decision(raw, ROSTER)
     assert d.kind == "ack_forward" and d.speech == "Sending that over."
     wrapped = f"Sure! Here is the JSON:\n```json\n{raw}\n```"
@@ -70,7 +73,11 @@ def test_targeted_forward_resolves_fuzzy_and_drops_unknown():
 
 def test_action_validation_drops_unknown_and_malformed():
     good = json.dumps(
-        {"route": "answer", "speech": "Switching.", "action": {"type": "switch_session", "target": "marcus"}}
+        {
+            "route": "answer",
+            "speech": "Switching.",
+            "action": {"type": "switch_session", "target": "marcus"},
+        }
     )
     d = parse_decision(good, ROSTER)
     assert d.action == {"type": "switch_session", "target": "Marcus"}
@@ -79,11 +86,19 @@ def test_action_validation_drops_unknown_and_malformed():
     )
     assert parse_decision(bad_type, ROSTER).action is None
     bad_target = json.dumps(
-        {"route": "answer", "speech": "ok", "action": {"type": "switch_session", "target": "nobody"}}
+        {
+            "route": "answer",
+            "speech": "ok",
+            "action": {"type": "switch_session", "target": "nobody"},
+        }
     )
     assert parse_decision(bad_target, ROSTER).action is None
     bad_mode = json.dumps(
-        {"route": "answer", "speech": "ok", "action": {"type": "mic_mode", "mode": "loud"}}
+        {
+            "route": "answer",
+            "speech": "ok",
+            "action": {"type": "mic_mode", "mode": "loud"},
+        }
     )
     assert parse_decision(bad_mode, ROSTER).action is None
 
@@ -105,7 +120,10 @@ def test_execute_switch_and_mic_actions():
     )
     assert r.active is b
     execute_action(
-        {"type": "mic_mode", "mode": "half_duplex"}, r, mic_calls.append, mute_calls.append
+        {"type": "mic_mode", "mode": "half_duplex"},
+        r,
+        mic_calls.append,
+        mute_calls.append,
     )
     assert mic_calls == ["half_duplex"]
     execute_action({"type": "mute"}, r, mic_calls.append, mute_calls.append)

@@ -18,19 +18,20 @@ INVARIANTS:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Callable, Protocol
+from collections.abc import Callable
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Protocol
 
 
-class Source(str, Enum):
+class Source(StrEnum):
     ACK = "ack"  # cached PCM earcons/fillers
     FIRST_MATE = "first_mate"  # the local voice tier (SPEC §7)
     AGENT = "agent"
     CHIME = "chime"
 
 
-class DuplexMode(str, Enum):
+class DuplexMode(StrEnum):
     FULL = "full_duplex"
     HALF = "half_duplex"
 
@@ -57,7 +58,7 @@ class PlaybackQueue:
     def __init__(
         self,
         player: Player,
-        emit: Callable[[str, dict], None] | None = None,
+        emit: Callable[[str, dict], object] | None = None,
     ) -> None:
         self._player = player
         self._emit = emit or (lambda t, p: None)

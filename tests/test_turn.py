@@ -25,12 +25,20 @@ class Recorder:
     def events(self) -> TurnEvents:
         return TurnEvents(
             capture_started=lambda k, r: self.calls.append(("capture_started", k, r)),
-            capture_stopped=lambda k, rev: self.calls.append(("capture_stopped", k, rev)),
+            capture_stopped=lambda k, rev: self.calls.append(
+                ("capture_stopped", k, rev)
+            ),
             chirp_requested=lambda k: self.calls.append(("chirp", k)),
             cancel_speculation=lambda k, rev: self.calls.append(("cancel", k, rev)),
-            route_requested=lambda k, rev, t: self.calls.append(("route_req", k, rev, t)),
-            dispatch_ready=lambda k, t, d: self.calls.append(("dispatch", k, t, d.kind)),
-            local_reply_ready=lambda k, d: self.calls.append(("local_reply", k, d.kind)),
+            route_requested=lambda k, rev, t: self.calls.append(
+                ("route_req", k, rev, t)
+            ),
+            dispatch_ready=lambda k, t, d: self.calls.append(
+                ("dispatch", k, t, d.kind)
+            ),
+            local_reply_ready=lambda k, d: self.calls.append(
+                ("local_reply", k, d.kind)
+            ),
             turn_state_changed=lambda k, s: self.calls.append(("state", k, s)),
         )
 
@@ -181,7 +189,7 @@ def test_local_reply_stays_reopenable_then_closes():
 
 
 def test_empty_stt_final_abandons_turn():
-    m, rec, clock = make()
+    m, rec, _clock = make()
     m.speech_started()
     m.speech_ended()
     key = m.current_key
@@ -192,7 +200,7 @@ def test_empty_stt_final_abandons_turn():
 
 
 def test_ptt_press_during_holding_merges():
-    m, rec, clock = make()
+    m, rec, _clock = make()
     m.speech_started()
     m.speech_ended()
     key = m.current_key

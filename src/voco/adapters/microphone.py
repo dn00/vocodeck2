@@ -6,7 +6,8 @@ marshals them onto the event loop and into core.capture/core.vad).
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 
@@ -23,10 +24,10 @@ class MicStream:
     ) -> None:
         self._on_frame = on_frame
         self._device = device
-        self._stream = None
+        self._stream: Any = None
 
     def start(self) -> None:
-        import sounddevice as sd  # noqa: PLC0415  (hardware edge, lazy)
+        import sounddevice as sd
 
         def callback(indata, frames, time_info, status) -> None:
             self._on_frame(indata[:, 0].copy())

@@ -12,11 +12,12 @@ once via daemon.error to the remaining subscribers).
 from __future__ import annotations
 
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from voco.protocol.messages import Envelope, make_event
 
-Subscriber = Callable[[Envelope], None]
+Subscriber = Callable[[Envelope], object]
 
 
 class EventBus:

@@ -21,7 +21,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Callable, Protocol
+from collections.abc import Callable
+from typing import Any, Protocol
 
 from voco.core.phrases import resolve_name
 from voco.core.registry import Registry
@@ -34,6 +35,8 @@ class FirstMatePort(Protocol):
     """The tier the Router consults (SPEC §7). None = decline → forward."""
 
     async def route(self, text: str, grounding: dict) -> RouteDecision | None: ...
+
+
 ROUTES = {"answer", "forward", "ack_forward"}
 MAX_SAY_LINES = 5
 
@@ -59,7 +62,8 @@ OUTPUT: exactly one JSON object, nothing else:
 {"route": "answer" | "forward" | "ack_forward",
  "speech": "<1-2 short plain sentences, no markdown>",
  "target": null | "<call name>",
- "action": null | {"type": "switch_session"|"mute"|"unmute"|"mic_mode"|"read_digest", ...}}
+ "action": null | {"type": "switch_session"|"mute"|"unmute"|
+                   "mic_mode"|"read_digest", ...}}
 
 - route "forward": the utterance is for the agent. speech may be "" or a
   brief routing ack. Use "target" ONLY when the user names a session

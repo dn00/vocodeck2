@@ -21,12 +21,27 @@ import hashlib
 import secrets
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 NAME_POOL = [
-    "Helena", "Marcus", "Iris", "Felix", "Nova", "Orion", "Dana", "Silas",
-    "Petra", "Leo", "Wanda", "Otto", "Zara", "Hugo", "Freya", "Ezra",
+    "Helena",
+    "Marcus",
+    "Iris",
+    "Felix",
+    "Nova",
+    "Orion",
+    "Dana",
+    "Silas",
+    "Petra",
+    "Leo",
+    "Wanda",
+    "Otto",
+    "Zara",
+    "Hugo",
+    "Freya",
+    "Ezra",
 ]
 
 SessionState = Literal["parked", "working", "idle"]
@@ -82,7 +97,7 @@ DispatchResult = Literal["live", "queued", "queued_idle", "no_session"]
 class Registry:
     def __init__(
         self,
-        emit: Callable[[str, dict], None] | None = None,
+        emit: Callable[[str, dict], object] | None = None,
         now: Callable[[], float] = time.time,
     ) -> None:
         self._emit = emit or (lambda t, p: None)
@@ -187,7 +202,9 @@ class Registry:
         self._turn_counter += 1
         return f"t-{self._turn_counter}"
 
-    def dispatch(self, text: str, turn_id: str, target: Session | None = None) -> DispatchResult:
+    def dispatch(
+        self, text: str, turn_id: str, target: Session | None = None
+    ) -> DispatchResult:
         s = target or self.active
         if s is None:
             return "no_session"

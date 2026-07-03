@@ -19,7 +19,7 @@ import asyncio
 import os
 import time
 
-from voco_cli.main import SOFT_FAIL, Client
+from voco_cli.main import Client
 
 LISTEN_BUDGET_S = float(os.environ.get("VOCO_MCP_LISTEN_BUDGET_S", "240"))
 
@@ -36,8 +36,8 @@ as the user's next instruction.
 
 
 def build_server():
-    from mcp.server import Server  # noqa: PLC0415
-    from mcp.types import TextContent, Tool  # noqa: PLC0415
+    from mcp.server import Server
+    from mcp.types import TextContent, Tool
 
     client = Client()
     server = Server("voco", instructions=INSTRUCTIONS)
@@ -130,11 +130,11 @@ def _listen_budgeted(client: Client) -> str:
 
 def main() -> None:
     try:
-        import mcp.server.stdio  # noqa: PLC0415
-    except ImportError:
+        import mcp.server.stdio
+    except ImportError as e:
         raise SystemExit(
             "voco-mcp requires the 'mcp' package: uv sync --extra mcp"
-        )
+        ) from e
 
     async def run() -> None:
         server = build_server()

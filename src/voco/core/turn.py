@@ -23,12 +23,13 @@ INVARIANTS:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Callable, Literal
+from collections.abc import Callable
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Literal
 
 
-class TurnState(str, Enum):
+class TurnState(StrEnum):
     IDLE = "idle"
     CAPTURING = "capturing"
     HOLDING = "holding"

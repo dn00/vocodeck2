@@ -14,7 +14,7 @@ dependencies = [
 stt = ["faster-whisper>=1.0"]
 ptt = ["pynput>=1.7"]
 mcp = ["mcp>=1.0"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.4", "mypy>=1.10"]
 
 [project.scripts]
 voco-d = "voco.daemon:main"
@@ -35,3 +35,22 @@ asyncio_mode = "auto"
 
 [tool.uv]
 package = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+src = ["src", "clients", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["SIM105", "SIM108", "RUF001", "RUF002", "RUF003"]
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src:clients"
+packages = ["voco"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true

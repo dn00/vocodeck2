@@ -64,7 +64,10 @@ def test_rule1_barge_in_flushes_playing_and_queued():
     assert player.stops == 1
     q.on_item_finished()  # no-op: nothing playing
     assert len(player.played) == 1  # nothing new started
-    assert ("speech.interrupted", {"source": "first_mate", "turn_id": "t-1", "reason": "barge-in"}) in events
+    assert (
+        "speech.interrupted",
+        {"source": "first_mate", "turn_id": "t-1", "reason": "barge-in"},
+    ) in events
 
 
 def test_rule2_current_turn_agent_say_preempts_first_mate():
