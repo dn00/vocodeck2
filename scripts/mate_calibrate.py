@@ -218,29 +218,30 @@ async def mate_raw(mate: OpenAIChatFirstMate, text: str) -> str | None:
 
     from voco.core.first_mate import SYSTEM_PROMPT
 
-    async with aiohttp.ClientSession(
-        timeout=aiohttp.ClientTimeout(total=60)
-    ) as session, session.post(
-        f"{mate._base_url}/chat/completions",
-        json={
-            "model": mate._model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": (
-                        "GROUNDING (daemon-observed facts):\n"
-                        + _json.dumps(GROUNDING, ensure_ascii=False)
-                        + "\n\nUSER SAID:\n"
-                        + text
-                    ),
-                },
-            ],
-            "max_tokens": 160,
-            "temperature": 0.2,
-            "response_format": {"type": "json_object"},
-        },
-    ) as resp:
+    async with (
+        aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session,
+        session.post(
+            f"{mate._base_url}/chat/completions",
+            json={
+                "model": mate._model,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": (
+                            "GROUNDING (daemon-observed facts):\n"
+                            + _json.dumps(GROUNDING, ensure_ascii=False)
+                            + "\n\nUSER SAID:\n"
+                            + text
+                        ),
+                    },
+                ],
+                "max_tokens": 160,
+                "temperature": 0.2,
+                "response_format": {"type": "json_object"},
+            },
+        ) as resp,
+    ):
         resp.raise_for_status()
         data = await resp.json()
     return data["choices"][0]["message"]["content"]
