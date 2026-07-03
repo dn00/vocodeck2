@@ -67,7 +67,17 @@ resume. Update the journal at every checkpoint (after each commit).
       VAD→machine→STT→route→dispatch, muted gating, wake arming,
       full-duplex barge-in — 55 tests total
 - [x] CI: PROTOCOL.md drift check
-- [ ] kokoro-onnx floor runner, config.set persistence — deferred
+- [x] voco-tts-floor (kokoro-onnx OpenAI-compatible server, extras:
+      floor) — commit f6dde91
+- [x] Machine round-trip validation (scripts/roundtrip_smoke.py):
+      floor TTS → real silero VAD → real faster-whisper, 3/3 exact.
+      CAUGHT + FIXED a production blocker: silero v5 needs a 64-sample
+      context window prepended per frame (bare frames score ~0, VAD
+      would never trigger live).
+- Measured on this M1 (CPU): kokoro-onnx TTFA ~400-500ms warm (no
+  streaming — single chunk); faster-whisper small ~1.2s/utterance →
+  Mac profile wants whisper-mlx or a smaller model at calibration.
+- [ ] config.set persistence — deferred
 - Known limitation (wake mode): if the wake word and the command share
   one breath with no pause, the VAD speech-run started before arming and
   speech_started won't refire until a silence gap — "voco, <pause>, do X"
