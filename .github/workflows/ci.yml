@@ -23,3 +23,6 @@ jobs:
       - run: uv run ruff format --check src clients tests scripts
       - run: uv run mypy
       - run: uv run pytest tests/ -q
+      - name: PROTOCOL.md must match the protocol package
+        if: runner.os == 'Linux'
+        run: uv run python scripts/gen_protocol.py && git diff --exit-code PROTOCOL.md

@@ -59,9 +59,19 @@ resume. Update the journal at every checkpoint (after each commit).
       WSL2/workspace)
 - [x] Control errors are clean JSON; CLI prints `error: ...`, no tracebacks
 - [x] PROTOCOL.md generated (scripts/gen_protocol.py)
-- [ ] Wake-word adapter (openWakeWord), kokoro-onnx floor runner,
-      config.set persistence — deferred (model downloads / low value
-      until live-audio validation)
+- [x] VoiceLoopDeps: impure edges injected with production defaults;
+      wake scoring wired into the frame path (chime on wake)
+- [x] adapters/wake.py: openWakeWord loader (lazy; buffers 32ms→80ms
+      chunks); model download + "voco" vs "hey voco" tuning = live task
+- [x] Headless end-to-end pipeline tests (test_voice_loop.py): frames→
+      VAD→machine→STT→route→dispatch, muted gating, wake arming,
+      full-duplex barge-in — 55 tests total
+- [x] CI: PROTOCOL.md drift check
+- [ ] kokoro-onnx floor runner, config.set persistence — deferred
+- Known limitation (wake mode): if the wake word and the command share
+  one breath with no pause, the VAD speech-run started before arming and
+  speech_started won't refire until a silence gap — "voco, <pause>, do X"
+  works; same-breath needs a VAD reset-on-wake (v2 refinement).
 
 ## M0 exit — REMAINING (needs user present / live audio)
 

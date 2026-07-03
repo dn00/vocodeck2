@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -54,8 +56,29 @@ class VoiceHost(Protocol):
         ...
 
 
+@dataclass
+class VoiceLoopDeps:
+    """Impure edges, injected with production defaults (house standard)."""
+
+    load_vad_model: Callable[[str], Callable[[np.ndarray], float]] = load_silero
+    stt_builder: Callable[..., Any] = build_stt
+    tts_factory: Callable[..., Any] = OpenAICompatibleTts
+    mic_factory: Callable[..., Any] = MicStream
+    player_factory: Callable[..., Any] = SpeakerPlayer
+    hotkey_factory: Callable[..., Any] | None = PttHotkey
+    wake_loader: Callable[[str], Callable[[np.ndarray], float]] | None = None
+
+
 class VoiceLoop:
-    def __init__(self, cfg: dict[str, Any], bus: EventBus, host: VoiceHost) -> None:
+    def __init__(
+        self,
+        cfg: dict[str, Any],
+        bus: EventBus,
+        host: VoiceHost,
+        deps: VoiceLoopDeps | None = None,
+    ) -> None:
+        deps = deps or VoiceLoopDeps()
+        self._deps = deps
         self._bus = bus
         self._host = host
         audio_cfg = cfg.get("audio", {})
@@ -78,7 +101,7 @@ class VoiceLoop:
         self._premute = self.attention.mode
         self._ptt_key = str(audio_cfg.get("ptt_key", "f9"))
 
-        self.tts = OpenAICompatibleTts(
+        self.tts = deps.tts_factory(
             base_url=tts_cfg["base_url"],
             model=tts_cfg["model"],
             voice=tts_cfg["voice"],
@@ -91,9 +114,10 @@ class VoiceLoop:
             )
         )
         self.bank = PhraseBank(self.tts, cache)
-        self.stt = build_stt(stt_cfg.pop("provider"), **stt_cfg)
+        self.stt = deps.stt_builder(stt_cfg.pop("provider"), **stt_cfg)
 
-        self.player = SpeakerPlayer(
+        self.queue: PlaybackQueue  # assigned below; the lambda closes over it
+        self.player = deps.player_factory(
             on_finished=lambda: self.queue.on_item_finished(),
             on_playing_changed=self._on_playing_changed,
             sample_rate=self.tts.sample_rate,
@@ -130,7 +154,7 @@ class VoiceLoop:
                 ),
                 min_silence_ms=int(audio_cfg.get("min_silence_ms", 64)),
             ),
-            model=load_silero(
+            model=deps.load_vad_model(
                 str(audio_cfg.get("silero_model", "models/silero_vad.onnx"))
             ),
             on_speech_started=self._on_vad_speech_start,
@@ -139,7 +163,14 @@ class VoiceLoop:
                 self.machine.state in (TurnState.HOLDING, TurnState.REOPENABLE)
             ),
         )
-        self.mic = MicStream(self._on_frame, device=audio_cfg.get("input_device"))
+        self.mic = deps.mic_factory(
+            self._on_frame, device=audio_cfg.get("input_device")
+        )
+        self._wake_scorer: Callable[[np.ndarray], float] | None = None
+        wake_model = audio_cfg.get("wake_model")
+        if wake_model and deps.wake_loader is not None:
+            self._wake_scorer = deps.wake_loader(str(wake_model))
+        self._wake_threshold = float(audio_cfg.get("wake_threshold", 0.5))
 
         self._loop: asyncio.AbstractEventLoop | None = None
         self._ptt: PttHotkey | None = None
@@ -163,7 +194,9 @@ class VoiceLoop:
             )
         self.mic.start()
         try:
-            self._ptt = PttHotkey(
+            if self._deps.hotkey_factory is None:
+                raise RuntimeError("hotkey factory disabled")
+            self._ptt = self._deps.hotkey_factory(
                 loop,
                 on_press=self._on_ptt_press,
                 on_release=self._on_ptt_release,
@@ -234,6 +267,14 @@ class VoiceLoop:
 
     def _process_frame(self, frame: np.ndarray) -> None:
         self.capture.feed(frame)
+        if (
+            self._wake_scorer is not None
+            and self.attention.mode is AttentionMode.WAKE
+            and not self.attention.allows_vad()
+            and self._wake_scorer(frame) >= self._wake_threshold
+        ):
+            self.attention.on_wake_word()
+            self.play_bank("chime")  # audible: the deck is listening
         self.vad_gate.process(frame)
 
     def _on_playing_changed(self, playing: bool) -> None:
