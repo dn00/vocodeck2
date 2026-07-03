@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from aiohttp import WSMsgType, web
@@ -72,14 +73,31 @@ class BridgeServer:
         app.router.add_get("/v1/bridge/listen", self._listen)
         app.router.add_post("/v1/control/{cmd}", self._control)
         app.router.add_get("/v1/events", self._events_ws)
+        app.router.add_get("/", self._ui)
+        app.router.add_get("/ui", self._ui)
         return app
 
     def _check_auth(self, request: web.Request) -> None:
         if self._token is None:
             return
         header = request.headers.get("Authorization", "")
-        if header != f"Bearer {self._token}":
-            raise web.HTTPUnauthorized(text="bad token")
+        if header == f"Bearer {self._token}":
+            return
+        # Browsers cannot set headers on a WebSocket: the UI passes the
+        # token as ?token= instead (loopback-only surface; SPEC §8.1).
+        if request.query.get("token") == self._token:
+            return
+        raise web.HTTPUnauthorized(text="bad token")
+
+    # ---- debug UI (self-contained page; no secrets, so no auth) -------------
+
+    async def _ui(self, request: web.Request) -> web.Response:
+        page = Path(__file__).with_name("ui.html")
+        if not page.exists():
+            raise web.HTTPNotFound(text="ui.html missing from install")
+        return web.Response(
+            text=page.read_text(encoding="utf-8"), content_type="text/html"
+        )
 
     async def _register(self, request: web.Request) -> web.Response:
         self._check_auth(request)
@@ -95,6 +113,11 @@ class BridgeServer:
                 "worktree",
                 "harness",
                 "pid",
+                # Transport facts that unlock capabilities (derive-don't-ask):
+                # a tmux pane/session enables inject; host_alias routes it.
+                "tmux_pane",
+                "tmux_session",
+                "host_alias",
             )
         }
         if not identity.get("host") or not identity.get("cwd"):

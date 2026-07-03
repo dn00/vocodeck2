@@ -305,9 +305,14 @@ class Registry:
         else:
             s.screen_markdown = markdown
             s.screen_title = title
+        # Full current content rides along so UIs render without a refetch.
         self._emit(
             "screen.updated",
-            {"session_id": session_id, "title": s.screen_title},
+            {
+                "session_id": session_id,
+                "title": s.screen_title,
+                "markdown": s.screen_markdown,
+            },
         )
 
     # ---- snapshot (SPEC §10) ---------------------------------------------------
@@ -322,7 +327,14 @@ class Registry:
                     "state": s.state,
                     "capabilities": s.capabilities,
                     "unread_digest": s.unread_digest,
+                    "queued": len(s.queued),
                     "screen_title": s.screen_title,
+                    "screen_markdown": s.screen_markdown,
+                    "say_tail": [
+                        {"ts": line.ts, "text": line.text}
+                        for line in list(s.say_log)[-10:]
+                    ],
+                    "last_seen": s.last_seen,
                 }
                 for s in self._sessions.values()
             ],

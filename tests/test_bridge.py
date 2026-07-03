@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
+import aiohttp
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
@@ -138,6 +139,63 @@ async def test_bearer_token_enforced_when_configured():
             headers={"Authorization": "Bearer sekrit"},
         )
         assert resp.status == 200
+    finally:
+        await c.close()
+
+
+async def test_register_with_tmux_pane_gets_inject_capability(client):
+    resp = await client.post(
+        "/v1/bridge/register", json={**IDENT, "cwd": "/repo/tm", "tmux_pane": "%3"}
+    )
+    assert resp.status == 200
+    state = await (await client.post("/v1/control/state.get", json={})).json()
+    s = next(x for x in state["sessions"] if "tm" in x["display_name"])
+    assert "inject" in s["capabilities"]  # would be dropped if the bridge
+    # didn't forward tmux_pane into identity (regression: live-smoke find)
+
+
+async def test_snapshot_carries_screen_says_and_queue(client):
+    info = await register(client)
+    sid = info["session_id"]
+    seen = []
+    client.bus.subscribe(seen.append)
+    await client.post(
+        "/v1/bridge/screen",
+        json={"session_id": sid, "markdown": "# plan", "title": "Plan", "mode": "show"},
+    )
+    await client.post("/v1/bridge/say", json={"session_id": sid, "text": "hi there"})
+    client.registry.dispatch("do it", client.registry.mint_turn_id())
+    state = await (await client.post("/v1/control/state.get", json={})).json()
+    s = state["sessions"][0]
+    assert s["screen_markdown"] == "# plan"
+    assert s["say_tail"][-1]["text"] == "hi there"
+    assert s["queued"] == 1
+    # screen.updated rides the full content so UIs never refetch.
+    assert any(
+        e.type == "screen.updated" and e.payload.get("markdown") == "# plan"
+        for e in seen
+    )
+
+
+async def test_ui_served_without_auth_ws_token_via_query():
+    bus = EventBus()
+    registry = Registry(emit=bus.emit)
+    server = BridgeServer(registry, bus, token="sekrit", listen_slice_s=0.2)
+    c = TestClient(TestServer(server.build_app()))
+    await c.start_server()
+    try:
+        for path in ("/", "/ui"):
+            resp = await c.get(path)
+            assert resp.status == 200
+            assert "text/html" in resp.headers["Content-Type"]
+            assert "voco" in await resp.text()
+        # Browsers cannot set WS headers: ?token= must authenticate.
+        ws = await c.ws_connect("/v1/events?token=sekrit")
+        snap = await ws.receive_json()
+        assert snap["type"] == "snapshot"
+        await ws.close()
+        with pytest.raises(aiohttp.WSServerHandshakeError):
+            await c.ws_connect("/v1/events")  # no token still 401s
     finally:
         await c.close()
 

@@ -1,0 +1,482 @@
+<!doctype html>
+<!-- voco debug UI — served by voco-d at / (SPEC §10 consumer).
+     Self-contained: no CDN, no build step; talks ONLY the public WS
+     protocol (snapshot + events + command envelopes), so it doubles as
+     the reference client for the future VocoDeck UI port. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>voco</title>
+<style>
+  :root {
+    --bg: #0b0e11; --panel: #11161b; --panel2: #0e1216; --border: #1e252c;
+    --text: #c9d4dc; --dim: #647383; --accent: #22d3ee; --accent-dim: #164e5a;
+    --green: #4ade80; --amber: #fbbf24; --red: #f87171; --purple: #c084fc;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    flex: 0 0 auto;
+  }
+  header .logo { color: var(--accent); font-weight: 700; letter-spacing: 1px; }
+  #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+  #dot.on { background: var(--green); }
+  .chip {
+    padding: 1px 8px; border: 1px solid var(--border); border-radius: 9px;
+    color: var(--dim); font-size: 11px; white-space: nowrap;
+  }
+  .chip b { color: var(--text); font-weight: 500; }
+  header .spacer { flex: 1; }
+  select, button, input[type=text] {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 4px; padding: 3px 8px; font: inherit; font-size: 12px;
+  }
+  select:focus, input[type=text]:focus { outline: 1px solid var(--accent-dim); }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent-dim); color: var(--accent); }
+  button.danger:hover { border-color: var(--red); color: var(--red); }
+  #tokenbar {
+    display: none; gap: 8px; align-items: center; padding: 6px 12px;
+    background: #2a1215; border-bottom: 1px solid #7f1d1d; flex: 0 0 auto;
+  }
+  #tokenbar.show { display: flex; }
+  main { flex: 1 1 auto; display: flex; min-height: 0; }
+  #sidebar {
+    flex: 0 0 300px; border-right: 1px solid var(--border); overflow-y: auto;
+    background: var(--panel2); padding: 8px;
+  }
+  .card {
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
+    margin-bottom: 8px; cursor: pointer; background: var(--panel);
+  }
+  .card:hover { border-color: var(--accent-dim); }
+  .card.selected { border-color: var(--accent); }
+  .card .row1 { display: flex; align-items: center; gap: 6px; }
+  .card .name { font-weight: 700; }
+  .card.active .name::after { content: " ●"; color: var(--accent); font-size: 10px; }
+  .state { font-size: 10px; padding: 0 6px; border-radius: 8px; margin-left: auto; }
+  .state.parked  { color: var(--green); border: 1px solid var(--green); }
+  .state.working { color: var(--amber); border: 1px solid var(--amber); }
+  .state.idle    { color: var(--dim);   border: 1px solid var(--dim); }
+  .card .meta { color: var(--dim); font-size: 11px; margin-top: 2px; word-break: break-all; }
+  .badges { display: flex; gap: 6px; margin-top: 5px; flex-wrap: wrap; }
+  .badge { font-size: 10px; color: var(--dim); border: 1px solid var(--border);
+           border-radius: 8px; padding: 0 6px; }
+  .badge.hot { color: var(--amber); border-color: var(--amber); }
+  .card .acts { display: flex; gap: 6px; margin-top: 6px; }
+  .card .acts button { font-size: 11px; padding: 1px 7px; }
+  #empty { color: var(--dim); padding: 14px 10px; font-size: 12px; }
+  #empty code { color: var(--accent); }
+  #content { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+  #tabs { display: flex; gap: 2px; padding: 6px 10px 0; flex: 0 0 auto;
+          border-bottom: 1px solid var(--border); background: var(--panel); }
+  #tabs .tab {
+    padding: 4px 14px; border: 1px solid var(--border); border-bottom: none;
+    border-radius: 6px 6px 0 0; color: var(--dim); cursor: pointer; background: var(--panel2);
+  }
+  #tabs .tab.on { color: var(--accent); background: var(--bg); }
+  #tabs .tools { margin-left: auto; display: flex; gap: 8px; align-items: center;
+                 padding-bottom: 4px; color: var(--dim); font-size: 11px; }
+  #panel { flex: 1 1 auto; overflow-y: auto; padding: 14px 16px; min-height: 0; }
+  #panel h1, #panel h2, #panel h3 { margin: 10px 0 6px; color: var(--accent); }
+  #panel h1 { font-size: 16px; } #panel h2 { font-size: 14px; } #panel h3 { font-size: 13px; }
+  #panel p { margin: 6px 0; } #panel ul { margin: 6px 0 6px 20px; }
+  #panel pre.code, #panel pre.term {
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px; overflow-x: auto; margin: 8px 0; white-space: pre-wrap;
+  }
+  #panel pre.term { color: #9fb2c0; font-size: 12px; }
+  #panel code { color: var(--purple); }
+  #panel a { color: var(--accent); }
+  #panel .saytitle { color: var(--dim); font-size: 11px; margin-top: 16px;
+                     border-top: 1px solid var(--border); padding-top: 8px; }
+  #panel .say { color: var(--text); margin: 4px 0; }
+  #panel .say .t { color: var(--dim); font-size: 11px; margin-right: 8px; }
+  #panel .placeholder { color: var(--dim); }
+  #logwrap { flex: 0 0 180px; border-top: 1px solid var(--border);
+             display: flex; flex-direction: column; min-height: 0; background: var(--panel2); }
+  #logbar { display: flex; gap: 12px; align-items: center; padding: 4px 10px;
+            color: var(--dim); font-size: 11px; border-bottom: 1px solid var(--border); }
+  #log { flex: 1 1 auto; overflow-y: auto; padding: 4px 10px; font-size: 11.5px; }
+  #log .ln { white-space: nowrap; }
+  #log .ts { color: var(--dim); } #log .seq { color: var(--dim); }
+  #log .ty { display: inline-block; min-width: 150px; }
+  #log .pl { color: var(--dim); }
+  .t-session { color: var(--accent); } .t-stt { color: var(--purple); }
+  .t-speech { color: var(--green); } .t-error { color: var(--red); }
+  .t-turn { color: var(--amber); } .t-other { color: var(--text); }
+  footer { flex: 0 0 auto; display: flex; gap: 8px; padding: 8px 12px;
+           border-top: 1px solid var(--border); background: var(--panel); }
+  footer input { flex: 1; padding: 6px 10px; }
+  footer .hint { color: var(--dim); font-size: 11px; align-self: center; white-space: nowrap; }
+  #toast { position: fixed; bottom: 60px; right: 16px; background: #2a1215;
+           border: 1px solid var(--red); color: var(--red); border-radius: 6px;
+           padding: 8px 12px; display: none; max-width: 420px; z-index: 9; }
+</style>
+</head>
+<body>
+<header>
+  <span id="dot"></span><span class="logo">voco</span>
+  <span class="chip">duplex <b id="micDuplex">–</b></span>
+  <span class="chip">attention <b id="micAttention">–</b></span>
+  <span class="spacer"></span>
+  <select id="selDuplex" title="duplex mode">
+    <option value="">duplex…</option>
+    <option value="full_duplex">full_duplex</option>
+    <option value="half_duplex">half_duplex</option>
+  </select>
+  <select id="selAttention" title="attention mode">
+    <option value="">attention…</option>
+    <option value="always">always</option>
+    <option value="wake">wake</option>
+    <option value="ptt_only">ptt_only</option>
+    <option value="muted">muted</option>
+  </select>
+  <button id="btnInterrupt" title="barge-in + Escape to active session">■ interrupt</button>
+</header>
+<div id="tokenbar">
+  <span>daemon requires a token:</span>
+  <input type="text" id="tokenInput" placeholder="VOCO bridge token" size="36">
+  <button id="tokenSave">connect</button>
+</div>
+<main>
+  <div id="sidebar"></div>
+  <div id="content">
+    <div id="tabs">
+      <div class="tab on" data-tab="screen">screen</div>
+      <div class="tab" data-tab="term">terminal</div>
+      <div class="tools">
+        <label id="followWrap"><input type="checkbox" id="chkFollow" checked> follow active</label>
+        <button id="btnPeek" style="display:none">refresh</button>
+        <label id="autoWrap" style="display:none"><input type="checkbox" id="chkAuto"> auto 2s</label>
+      </div>
+    </div>
+    <div id="panel"></div>
+    <div id="logwrap">
+      <div id="logbar">
+        <span>events</span>
+        <label><input type="checkbox" id="chkVerbose"> show stt.partial</label>
+        <span id="logCount" style="margin-left:auto"></span>
+      </div>
+      <div id="log"></div>
+    </div>
+  </div>
+</main>
+<footer>
+  <input type="text" id="sayInput"
+         placeholder="type as user — routed like speech (phrases, first mate, dispatch)">
+  <button id="saySend">send</button>
+  <span class="hint">Enter ↵</span>
+</footer>
+<div id="toast"></div>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const S = {
+  sessions: [], active: null, selected: null, tab: "screen",
+  term: new Map(),          // call name -> last peek text
+  gotSnapshot: false, reqId: 0, pending: new Map(), backoff: 1000,
+};
+let ws = null, syncTimer = null, autoTimer = null;
+
+/* ---- connection ---------------------------------------------------------- */
+
+function wsUrl() {
+  const token = localStorage.getItem("voco_token");
+  const q = token ? "?token=" + encodeURIComponent(token) : "";
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  return proto + "//" + location.host + "/v1/events" + q;
+}
+
+function connect() {
+  ws = new WebSocket(wsUrl());
+  ws.onopen = () => { $("dot").classList.add("on"); S.backoff = 1000; };
+  ws.onmessage = ev => handle(JSON.parse(ev.data));
+  ws.onclose = () => {
+    $("dot").classList.remove("on");
+    S.pending.clear();
+    // Never authenticated? Likely a token problem: ask for one.
+    if (!S.gotSnapshot) $("tokenbar").classList.add("show");
+    setTimeout(connect, S.backoff);
+    S.backoff = Math.min(S.backoff * 2, 5000);
+  };
+}
+
+function send(cmd, payload) {
+  return new Promise((resolve, reject) => {
+    if (!ws || ws.readyState !== 1) return reject(new Error("not connected"));
+    const id = "r" + (++S.reqId);
+    S.pending.set(id, { resolve, reject });
+    ws.send(JSON.stringify({ id, cmd, payload: payload || {} }));
+  });
+}
+
+function handle(msg) {
+  if (msg.ok !== undefined) {              // command reply
+    const p = S.pending.get(msg.id);
+    if (p) {
+      S.pending.delete(msg.id);
+      msg.ok ? p.resolve(msg.payload || {}) : p.reject(new Error(msg.error));
+    }
+    return;
+  }
+  logEvent(msg);                            // event envelope
+  if (msg.type === "snapshot") {
+    S.gotSnapshot = true;
+    $("tokenbar").classList.remove("show");
+    applyState(msg.payload);
+    return;
+  }
+  if (msg.type === "mic.state") {
+    $("micDuplex").textContent = msg.payload.duplex || "–";
+    $("micAttention").textContent = msg.payload.attention || "–";
+    return;
+  }
+  if (msg.type === "screen.updated" && msg.payload.markdown !== undefined) {
+    const s = S.sessions.find(x => x.session_id === msg.payload.session_id);
+    if (s) {
+      s.screen_markdown = msg.payload.markdown;
+      s.screen_title = msg.payload.title;
+      if (isSelected(s)) renderPanel();
+    }
+  }
+  // Anything session-shaped: re-sync the model (cheap; few sessions).
+  if (/^(session|digest|input|agent|screen|route)\./.test(msg.type)) sync();
+}
+
+function sync() {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    send("state.get").then(applyState).catch(() => {});
+  }, 200);
+}
+
+function applyState(state) {
+  S.sessions = state.sessions || [];
+  S.active = state.active_session;
+  if ($("chkFollow").checked && S.active) S.selected = S.active;
+  if (!S.sessions.some(s => s.session_id === S.selected))
+    S.selected = S.active || (S.sessions[0] && S.sessions[0].session_id) || null;
+  renderSidebar(); renderPanel();
+}
+
+/* ---- rendering ------------------------------------------------------------ */
+
+const esc = t => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function isSelected(s) { return s.session_id === S.selected; }
+function selectedSession() {
+  return S.sessions.find(s => s.session_id === S.selected) || null;
+}
+
+function renderSidebar() {
+  const el = $("sidebar");
+  if (!S.sessions.length) {
+    el.innerHTML = `<div id="empty">no sessions attached<br><br>
+      in an agent terminal: <code>voco listen</code><br>
+      or spawn one: <code>voco new claude</code></div>`;
+    return;
+  }
+  el.innerHTML = S.sessions.map(s => {
+    const cls = ["card", isSelected(s) ? "selected" : "",
+                 s.session_id === S.active ? "active" : ""].join(" ");
+    const badges = [
+      s.unread_digest ? `<span class="badge hot">${s.unread_digest} unread</span>` : "",
+      s.queued ? `<span class="badge hot">${s.queued} queued</span>` : "",
+      ...s.capabilities.map(c => `<span class="badge">${esc(c)}</span>`),
+    ].join("");
+    const canPeek = s.capabilities.includes("inject");
+    return `<div class="${cls}" data-sid="${s.session_id}">
+      <div class="row1"><span class="name">${esc(s.name)}</span>
+        <span class="state ${s.state}">${s.state}</span></div>
+      <div class="meta">${esc(s.display_name)}</div>
+      <div class="badges">${badges}</div>
+      <div class="acts">
+        <button data-act="switch" title="make this the voice-active session">⚡ activate</button>
+        ${canPeek ? '<button data-act="peek" title="mirror its terminal">▤ peek</button>' : ""}
+        <button data-act="detach" class="danger" title="forget this session">✕</button>
+      </div></div>`;
+  }).join("");
+}
+
+// Minimal markdown: escape first, then re-introduce our own tags only.
+function md(src) {
+  const blocks = [];
+  src = src.replace(/```([\s\S]*?)```/g, (_, code) =>
+    "\x00" + (blocks.push(`<pre class="code">${esc(code.trim())}</pre>`) - 1) + "\x00");
+  const lines = esc(src).split("\n");
+  const out = []; let inList = false;
+  for (const line of lines) {
+    const li = line.match(/^\s*[-*] (.*)/);
+    if (li) { if (!inList) { out.push("<ul>"); inList = true; } out.push(`<li>${inline(li[1])}</li>`); continue; }
+    if (inList) { out.push("</ul>"); inList = false; }
+    const h = line.match(/^(#{1,3}) (.*)/);
+    if (h) { out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue; }
+    if (line.trim() === "") { out.push(""); continue; }
+    out.push(`<p>${inline(line)}</p>`);
+  }
+  if (inList) out.push("</ul>");
+  return out.join("\n").replace(/\x00(\d+)\x00/g, (_, i) => blocks[i]);
+}
+function inline(t) {
+  return t
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
+             '<a href="$2" target="_blank" rel="noopener">$1</a>');
+}
+
+function renderPanel() {
+  const s = selectedSession();
+  const panel = $("panel");
+  const isTerm = S.tab === "term";
+  $("btnPeek").style.display = isTerm ? "" : "none";
+  $("autoWrap").style.display = isTerm ? "" : "none";
+  if (!s) { panel.innerHTML = '<p class="placeholder">no session selected</p>'; return; }
+  if (isTerm) {
+    const txt = S.term.get(s.name);
+    panel.innerHTML = txt !== undefined
+      ? `<pre class="term">${esc(txt)}</pre>`
+      : `<p class="placeholder">${s.capabilities.includes("inject")
+          ? "press refresh to mirror " + esc(s.name) + "'s terminal"
+          : esc(s.name) + " is not in tmux — no terminal to mirror"}</p>`;
+    return;
+  }
+  let html = "";
+  if (s.screen_title) html += `<h1>${esc(s.screen_title)}</h1>`;
+  html += s.screen_markdown && s.screen_markdown.trim()
+    ? md(s.screen_markdown)
+    : '<p class="placeholder">nothing on screen yet</p>';
+  if (s.say_tail && s.say_tail.length) {
+    html += '<div class="saytitle">recent says</div>';
+    html += s.say_tail.map(l => {
+      const t = new Date(l.ts * 1000).toTimeString().slice(0, 8);
+      return `<div class="say"><span class="t">${t}</span>${esc(l.text)}</div>`;
+    }).join("");
+  }
+  panel.innerHTML = html;
+}
+
+/* ---- event log ------------------------------------------------------------ */
+
+let logN = 0;
+function typeClass(t) {
+  if (t === "daemon.error") return "t-error";
+  if (t.startsWith("session") || t === "snapshot") return "t-session";
+  if (t.startsWith("stt")) return "t-stt";
+  if (t.startsWith("speech") || t === "agent.say") return "t-speech";
+  if (t.startsWith("turn") || t.startsWith("route")) return "t-turn";
+  return "t-other";
+}
+function logEvent(env) {
+  if (env.type === "stt.partial" && !$("chkVerbose").checked) return;
+  const log = $("log");
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 30;
+  const ln = document.createElement("div");
+  ln.className = "ln";
+  const t = new Date((env.ts || 0) * 1000).toTimeString().slice(0, 8);
+  let pl = JSON.stringify(env.payload || {});
+  if (pl.length > 160) pl = pl.slice(0, 160) + "…";
+  ln.innerHTML = `<span class="ts">${t}</span> <span class="seq">${env.seq}</span> ` +
+    `<span class="ty ${typeClass(env.type)}">${esc(env.type)}</span> ` +
+    `<span class="pl">${esc(pl)}</span>`;
+  log.appendChild(ln);
+  while (log.childElementCount > 500) log.removeChild(log.firstChild);
+  $("logCount").textContent = "seq " + env.seq;
+  if (atBottom) log.scrollTop = log.scrollHeight;
+  logN++;
+}
+
+/* ---- actions --------------------------------------------------------------- */
+
+function toast(text) {
+  const el = $("toast");
+  el.textContent = text; el.style.display = "block";
+  clearTimeout(el._t); el._t = setTimeout(() => el.style.display = "none", 4000);
+}
+const fail = e => toast(e.message || String(e));
+
+function doPeek() {
+  const s = selectedSession();
+  if (!s || !s.capabilities.includes("inject")) return;
+  send("session.peek", { name: s.name })
+    .then(r => { S.term.set(s.name, r.text || ""); if (S.tab === "term") renderPanel(); })
+    .catch(fail);
+}
+
+$("sidebar").addEventListener("click", ev => {
+  const card = ev.target.closest(".card"); if (!card) return;
+  const sid = card.dataset.sid;
+  const s = S.sessions.find(x => x.session_id === sid); if (!s) return;
+  const act = ev.target.dataset && ev.target.dataset.act;
+  if (act === "switch") { send("switch_session", { name: s.name }).catch(fail); return; }
+  if (act === "peek") { S.selected = sid; $("chkFollow").checked = false; setTab("term"); doPeek(); return; }
+  if (act === "detach") {
+    if (confirm(`forget session ${s.name}? (its terminal keeps running)`))
+      send("session.detach", { name: s.name }).catch(fail);
+    return;
+  }
+  S.selected = sid; $("chkFollow").checked = false;
+  renderSidebar(); renderPanel();
+});
+
+function setTab(tab) {
+  S.tab = tab;
+  document.querySelectorAll("#tabs .tab").forEach(el =>
+    el.classList.toggle("on", el.dataset.tab === tab));
+  renderPanel();
+}
+document.querySelectorAll("#tabs .tab").forEach(el =>
+  el.addEventListener("click", () => setTab(el.dataset.tab)));
+
+$("btnPeek").addEventListener("click", doPeek);
+$("chkAuto").addEventListener("change", ev => {
+  clearInterval(autoTimer);
+  if (ev.target.checked) autoTimer = setInterval(() => {
+    if (S.tab === "term") doPeek();
+  }, 2000);
+});
+$("chkFollow").addEventListener("change", ev => {
+  if (ev.target.checked && S.active) { S.selected = S.active; renderSidebar(); renderPanel(); }
+});
+$("chkVerbose").addEventListener("change", () => {});
+
+$("btnInterrupt").addEventListener("click", () => send("interrupt").catch(fail));
+$("selDuplex").addEventListener("change", ev => {
+  if (ev.target.value) send("mic.set", { duplex: ev.target.value }).catch(fail);
+  ev.target.value = "";
+});
+$("selAttention").addEventListener("change", ev => {
+  if (ev.target.value) send("mic.set", { attention: ev.target.value }).catch(fail);
+  ev.target.value = "";
+});
+
+function sendSay() {
+  const text = $("sayInput").value.trim();
+  if (!text) return;
+  send("say_as_user", { text }).then(() => { $("sayInput").value = ""; }).catch(fail);
+}
+$("saySend").addEventListener("click", sendSay);
+$("sayInput").addEventListener("keydown", ev => { if (ev.key === "Enter") sendSay(); });
+
+$("tokenSave").addEventListener("click", () => {
+  localStorage.setItem("voco_token", $("tokenInput").value.trim());
+  $("tokenbar").classList.remove("show");
+  try { ws.close(); } catch (e) { /* reconnect loop handles it */ }
+});
+$("tokenInput").addEventListener("keydown", ev => {
+  if (ev.key === "Enter") $("tokenSave").click();
+});
+
+connect();
+</script>
+</body>
+</html>
