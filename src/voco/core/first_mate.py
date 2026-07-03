@@ -131,6 +131,66 @@ def build_grounding(registry: Registry, mic_mode: str, now: float) -> dict[str, 
     }
 
 
+_SPEECH_KEY = re.compile(r'"speech"\s*:\s*"')
+_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f"}
+
+
+def extract_speech_prefix(buf: str) -> tuple[str, bool]:
+    """Decode the (possibly incomplete) JSON `speech` string value from a
+    partial completion. Returns (speech so far, value complete?). Pure and
+    restart-safe: called on the full accumulated buffer each delta —
+    O(len) per call, and completions are a couple hundred chars."""
+    m = _SPEECH_KEY.search(buf)
+    if m is None:
+        return "", False
+    out: list[str] = []
+    i = m.end()
+    while i < len(buf):
+        c = buf[i]
+        if c == '"':
+            return "".join(out), True
+        if c == "\\":
+            if i + 1 >= len(buf):
+                break  # escape split across deltas: wait for more
+            e = buf[i + 1]
+            if e == "u":
+                if i + 6 > len(buf):
+                    break
+                try:
+                    out.append(chr(int(buf[i + 2 : i + 6], 16)))
+                except ValueError:
+                    out.append("�")
+                i += 6
+                continue
+            out.append(_ESCAPES.get(e, e))
+            i += 2
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out), False
+
+
+class SpeechStream:
+    """Incremental speech extraction over streamed completion deltas:
+    feed() raw text chunks, get back only the NEW decoded speech text.
+    The final decision still comes from parse_decision on the full buffer
+    — streaming never changes what gets parsed (contract preserved)."""
+
+    def __init__(self) -> None:
+        self.buffer = ""
+        self._emitted = 0
+        self.done = False
+
+    def feed(self, delta: str) -> str:
+        self.buffer += delta
+        text, complete = extract_speech_prefix(self.buffer)
+        new = text[self._emitted :]
+        self._emitted = len(text)
+        if complete:
+            self.done = True
+        return new
+
+
 def _extract_json(text: str) -> dict | None:
     """First {...} block, tolerant of prose/markdown fences around it."""
     match = re.search(r"\{.*\}", text, re.DOTALL)

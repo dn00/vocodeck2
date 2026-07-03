@@ -63,6 +63,7 @@ SCHEMA: dict[str, dict[str, tuple[type, ...]]] = {
         "api_key": (str,),
         "json_mode": (bool,),
         "timeout_ms": (int, float),
+        "stream": (bool,),
     },
     "bridge": {"token": (str,)},
     "state": {"dir": (str,)},

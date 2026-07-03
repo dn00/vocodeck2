@@ -14,6 +14,7 @@ change; deadline waits use the same monotonic clock as the machine.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -68,6 +69,77 @@ class VoiceLoopDeps:
     player_factory: Callable[..., Any] = SpeakerPlayer
     hotkey_factory: Callable[..., Any] | None = PttHotkey
     wake_loader: Callable[[str], Callable[[np.ndarray], float]] | None = None
+
+
+_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
+
+
+class MateSpeechChannel:
+    """Streams first-mate speech into ONE playback item while the JSON
+    completion is still generating: text deltas are cut at sentence
+    boundaries and synthesized per sentence, so the first clause is
+    audible before the model has finished the rest of its output.
+
+    INVARIANTS: nothing is enqueued until a full sentence exists (a
+    cancelled channel that never completed a sentence leaves no trace);
+    finish() flushes the remainder and reports whether anything streamed
+    (the daemon blanks decision.speech to prevent double-speak);
+    cancel() drops un-emitted text but never claws back queued audio."""
+
+    def __init__(self, voice: VoiceLoop) -> None:
+        self._voice = voice
+        self._pending = ""
+        self._sentences: asyncio.Queue[str | None] = asyncio.Queue()
+        self._item_enqueued = False
+        self._closed = False
+        self.consumed = False
+
+    def push(self, delta: str) -> None:
+        if self._closed:
+            return
+        self._pending += delta
+        parts = _SENTENCE_BOUNDARY.split(self._pending)
+        for sentence in parts[:-1]:
+            self._emit(sentence)
+        self._pending = parts[-1]
+
+    def finish(self) -> bool:
+        """Stream completed normally: flush the tail, close the item."""
+        if not self._closed:
+            self._emit(self._pending)
+            self._pending = ""
+            self._close()
+        return self.consumed
+
+    def cancel(self) -> None:
+        """Timeout/misroute: drop un-spoken text; queued audio finishes."""
+        self._pending = ""
+        self._close()
+
+    def _close(self) -> None:
+        self._closed = True
+        if self._item_enqueued:
+            self._sentences.put_nowait(None)
+
+    def _emit(self, sentence: str) -> None:
+        sentence = sentence.strip()
+        if not sentence:
+            return
+        self.consumed = True
+        if not self._item_enqueued:
+            self._item_enqueued = True
+            self._voice.queue.enqueue(
+                PlaybackItem(Source.FIRST_MATE, self._synth(), turn_id=None)
+            )
+        self._sentences.put_nowait(sentence)
+
+    async def _synth(self):
+        while True:
+            sentence = await self._sentences.get()
+            if sentence is None:
+                return
+            async for chunk in self._voice.tts.stream(sentence):
+                yield chunk
 
 
 class VoiceLoop:
@@ -239,6 +311,9 @@ class VoiceLoop:
 
     def note_dispatch(self, turn_id: str) -> None:
         self.queue.note_dispatch(turn_id)
+
+    def open_mate_speech_channel(self) -> MateSpeechChannel:
+        return MateSpeechChannel(self)
 
     def speak_local(self, text: str, turn_id: str | None) -> None:
         self.queue.enqueue(

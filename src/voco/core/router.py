@@ -13,6 +13,7 @@ any failure, timeout, or malformed output coerces to plain `forward`
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from voco.core import phrases
@@ -44,16 +45,27 @@ class Router:
             raise ValueError("timeout must be > 0")
         self._timeout_s = seconds
 
-    async def decide(self, text: str, names: list[str], grounding: dict) -> Routed:
+    async def decide(
+        self,
+        text: str,
+        names: list[str],
+        grounding: dict,
+        speech_sink: Callable[[str], None] | None = None,
+    ) -> Routed:
         cmd = phrases.match(text, names)
         if cmd is not None:
             return Routed(phrase=cmd)
         if self._mate is None:
             return Routed(decision=RouteDecision(kind="forward"))
+        # Streaming is capability-sniffed, not part of FirstMatePort: a
+        # sink without a streaming mate silently uses the plain call.
+        stream_fn = getattr(self._mate, "route_stream", None)
+        if speech_sink is not None and stream_fn is not None:
+            call = stream_fn(text, grounding, speech_sink)
+        else:
+            call = self._mate.route(text, grounding)
         try:
-            decision = await asyncio.wait_for(
-                self._mate.route(text, grounding), timeout=self._timeout_s
-            )
+            decision = await asyncio.wait_for(call, timeout=self._timeout_s)
         except Exception:
             decision = None
         if decision is None:

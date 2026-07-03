@@ -37,6 +37,11 @@ sample_rate = 24000
 # timeout_ms = 800               # M1 measured p50 ~2000ms (gen-bound): either
 #                                # raise this (slower dispatch) or use a smaller
 #                                # model; 3090 expected well under 800
+# stream = true                 # speak the mate's first sentence while the
+#                                # rest of its JSON is still generating —
+#                                # measured M1 2026-07-04: first speech delta
+#                                # 0.75-1.6s vs 1.8s+ plain (mate_stream_smoke).
+#                                # Default off until validated by ear.
 
 # [bridge]
 # token = ""                     # bearer token; default-on for remote attach

@@ -18,6 +18,7 @@ import signal
 import sys
 import time
 import tomllib
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -85,11 +86,14 @@ class Daemon:
         if mate_cfg:
             from voco.adapters.first_mate import OpenAIChatFirstMate
 
+            # Socket budget rides ABOVE the router timeout so the router,
+            # not the transport, decides when a call is too late.
             mate = OpenAIChatFirstMate(
                 base_url=mate_cfg["base_url"],
                 model=mate_cfg.get("model", ""),
                 api_key=mate_cfg.get("api_key"),
                 json_mode=bool(mate_cfg.get("json_mode", True)),
+                total_timeout_s=float(mate_cfg.get("timeout_ms", 800)) / 1000.0 + 1.5,
             )
         self.router = Router(
             first_mate=mate,
@@ -130,7 +134,29 @@ class Daemon:
             self.voice.duplex.value if self.voice else "headless",
             time.time(),
         )
-        routed = await self.router.decide(text, self.registry.call_names(), grounding)
+        channel = None
+        sink = None
+        if self.voice is not None and bool(
+            self.cfg.get("first_mate", {}).get("stream", False)
+        ):
+            channel = self.voice.open_mate_speech_channel()
+            sink = channel.push
+        routed = await self.router.decide(
+            text, self.registry.call_names(), grounding, speech_sink=sink
+        )
+        if channel is not None:
+            d = routed.decision
+            # Only mate kinds that SPEAK get their stream kept; a timeout
+            # coercion or plain forward drops un-spoken text. Streamed
+            # speech blanks the decision so downstream never double-speaks.
+            if (
+                d is not None
+                and d.kind in ("answer", "ack_forward")
+                and (channel.finish())
+            ):
+                routed = Routed(phrase=routed.phrase, decision=replace(d, speech=""))
+            else:
+                channel.cancel()
         if routed.decision is not None and routed.decision.action is not None:
             execute_action(
                 routed.decision.action,
