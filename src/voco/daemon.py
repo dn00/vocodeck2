@@ -273,11 +273,13 @@ class Daemon:
             self.registry.detach(s.session_id)
             return {"detached": s.call_name}
         if cmd == "session.peek":
+            from voco.core.pane_state import classify
+
             target, host = self._peek_target(payload)
             text = await self._run_blocking(
                 lambda: self._tmux().capture_pane(target, host=host)
             )
-            return {"text": text}
+            return {"text": text, "hint": classify(text)}
         if cmd == "config.get":
             return self._public_config()
         if cmd == "config.set":

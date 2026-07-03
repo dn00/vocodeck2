@@ -183,6 +183,7 @@ const $ = id => document.getElementById(id);
 const S = {
   sessions: [], active: null, selected: null, tab: "screen",
   term: new Map(),          // call name -> last peek text
+  termHint: new Map(),      // call name -> waiting|working|shell|null
   gotSnapshot: false, reqId: 0, pending: new Map(), backoff: 1000,
 };
 let ws = null, syncTimer = null, autoTimer = null;
@@ -343,8 +344,13 @@ function renderPanel() {
   if (!s) { panel.innerHTML = '<p class="placeholder">no session selected</p>'; return; }
   if (isTerm) {
     const txt = S.term.get(s.name);
+    const hint = S.termHint.get(s.name);
+    const hintChip = hint
+      ? `<span class="chip" style="color:${hint === "waiting" ? "var(--amber)" :
+          hint === "working" ? "var(--green)" : "var(--dim)"}">${esc(hint)}</span> `
+      : "";
     panel.innerHTML = txt !== undefined
-      ? `<pre class="term">${esc(txt)}</pre>`
+      ? hintChip + `<pre class="term">${esc(txt)}</pre>`
       : `<p class="placeholder">${s.capabilities.includes("inject")
           ? "press refresh to mirror " + esc(s.name) + "'s terminal"
           : esc(s.name) + " is not in tmux — no terminal to mirror"}</p>`;
@@ -408,7 +414,11 @@ function doPeek() {
   const s = selectedSession();
   if (!s || !s.capabilities.includes("inject")) return;
   send("session.peek", { name: s.name })
-    .then(r => { S.term.set(s.name, r.text || ""); if (S.tab === "term") renderPanel(); })
+    .then(r => {
+      S.term.set(s.name, r.text || "");
+      S.termHint.set(s.name, r.hint || null);
+      if (S.tab === "term") renderPanel();
+    })
     .catch(fail);
 }
 

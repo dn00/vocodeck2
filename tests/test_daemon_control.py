@@ -54,7 +54,15 @@ async def test_peek_by_call_name_uses_session_pane(daemon):
     )
     result = await d._control("session.peek", {"name": s.call_name})
     assert result["text"] == "line one\nline two\n"
+    assert result["hint"] is None  # ordinary output: no state claim
     assert runner.calls[-1] == ["tmux", "capture-pane", "-p", "-t", "%7"]
+
+
+async def test_peek_hint_flags_waiting_prompt(daemon):
+    d, runner = daemon
+    runner.stdout = "Do you want to proceed?\n❯ 1. Yes\n  2. No\n"
+    result = await d._control("session.peek", {"target": "voco-x"})
+    assert result["hint"] == "waiting"
 
 
 async def test_peek_raw_target_and_remote_host(daemon):
