@@ -134,3 +134,17 @@ def test_execute_switch_and_mic_actions():
         {"type": "read_digest", "target": None}, r, mic_calls.append, mute_calls.append
     )
     assert b.unread_digest == 0  # None target = active session
+
+
+def test_fallback_target_prefix_known_names_only():
+    from voco.core.first_mate import fallback_target
+
+    roster = ["Helena", "Marcus"]
+    assert fallback_target("tell marcus to run the tests", roster) == "Marcus"
+    assert fallback_target("Ask Helena about the diff", roster) == "Helena"
+    # STT misspelling still resolves (conservative fuzz, same as switch).
+    assert fallback_target("tell Markus to go ahead", roster) == "Marcus"
+    # Not a leading forward verb -> no guess.
+    assert fallback_target("can you tell Marcus something", roster) is None
+    # Unknown name -> no guess (active session is the honest default).
+    assert fallback_target("tell Bob to stop", roster) is None

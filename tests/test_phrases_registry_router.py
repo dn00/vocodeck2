@@ -121,3 +121,30 @@ def test_router_coerces_bad_first_mate_output():
     router = Router(first_mate=SlowLlm())
     routed = asyncio.run(router.decide("how are you", [], {}))
     assert routed.decision.kind == "forward"
+
+
+def test_router_timeout_keeps_spoken_destination():
+    """Misroute guard: a mate deadline miss must not land 'tell Marcus ...'
+    on the active session — wrong-target delivery is worse than no ack."""
+
+    class SlowLlm:
+        async def route(self, text: str, grounding: dict) -> RouteDecision | None:
+            await asyncio.sleep(5)
+            return None
+
+    router = Router(first_mate=SlowLlm(), timeout_s=0.05)
+    routed = asyncio.run(
+        router.decide("tell Marcus to check the build", ["Helena", "Marcus"], {})
+    )
+    assert routed.decision.kind == "forward"
+    assert routed.decision.target == "Marcus"
+    # Unknown names never guess a target.
+    routed = asyncio.run(router.decide("tell Bob to stop", ["Helena"], {}))
+    assert routed.decision.target is None
+
+
+def test_degraded_mode_never_targets():
+    # SPEC §14.9: without the mate tier there is no targeted forwarding.
+    router = Router(first_mate=None)
+    routed = asyncio.run(router.decide("tell Marcus to run tests", ["Marcus"], {}))
+    assert routed.decision.kind == "forward" and routed.decision.target is None

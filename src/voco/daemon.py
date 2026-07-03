@@ -40,9 +40,14 @@ DEFAULT_CONFIG = Path.home() / ".config" / "voco" / "config.toml"
 
 def load_config(path: Path | None) -> dict[str, Any]:
     p = path or DEFAULT_CONFIG
-    if p.exists():
+    if not p.exists():
+        if path is not None:  # explicit --config that doesn't exist is an error
+            raise SystemExit(f"voco-d: config not found: {p}")
+        return {}
+    try:
         return tomllib.loads(p.read_text())
-    return {}
+    except tomllib.TOMLDecodeError as e:
+        raise SystemExit(f"voco-d: bad config {p}: {e}") from e
 
 
 class Daemon:
@@ -324,6 +329,19 @@ class Daemon:
             if decision.kind == "ack_forward" and decision.speech:
                 self.voice.speak_local(decision.speech, turn_id)
 
+    # ---- operational errors reach the operator, not just the bus -----------------
+
+    def _wire_error_log(self) -> None:
+        def on_event(env) -> None:
+            if env.type == "daemon.error":
+                stamp = time.strftime("%H:%M:%S", time.localtime(env.ts))
+                print(
+                    f"voco-d {stamp} ERROR {env.payload.get('error', '?')}",
+                    file=sys.stderr,
+                )
+
+        self.bus.subscribe(on_event)
+
     # ---- agent says become speech --------------------------------------------------
 
     def _wire_say_speech(self) -> None:
@@ -347,7 +365,14 @@ class Daemon:
             except NotImplementedError:
                 pass  # Windows: KeyboardInterrupt in main() is the fallback
         self._wire_say_speech()
-        runner = await run_server(self.bridge, host=host, port=port)
+        self._wire_error_log()
+        try:
+            runner = await run_server(self.bridge, host=host, port=port)
+        except OSError as e:
+            raise SystemExit(
+                f"voco-d: cannot bind {host}:{port} ({e.strerror or e}); "
+                "is another voco-d running?"
+            ) from e
         if not self.no_audio:
             from voco.voice_loop import VoiceLoop
 

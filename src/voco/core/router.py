@@ -16,7 +16,7 @@ import asyncio
 from dataclasses import dataclass
 
 from voco.core import phrases
-from voco.core.first_mate import FirstMatePort
+from voco.core.first_mate import FirstMatePort, fallback_target
 from voco.core.phrases import PhraseCommand
 from voco.core.turn import RouteDecision
 
@@ -51,7 +51,13 @@ class Router:
         except Exception:
             decision = None
         if decision is None:
-            return Routed(decision=RouteDecision(kind="forward"))
+            # Mate missed its deadline: forward, but never to the WRONG
+            # session — a spoken 'tell <name>' keeps its destination.
+            return Routed(
+                decision=RouteDecision(
+                    kind="forward", target=fallback_target(text, names)
+                )
+            )
         if decision.kind == "answer" and not decision.speech.strip():
             # Coercion rule: an empty local answer is a misroute (SPEC §7.3).
             decision = RouteDecision(kind="forward")

@@ -84,6 +84,21 @@ OUTPUT: exactly one JSON object, nothing else:
 """
 
 
+_FORWARD_PREFIX = re.compile(r"^\s*(?:tell|ask)\s+([a-z]+)\b", re.IGNORECASE)
+
+
+def fallback_target(text: str, roster: list[str]) -> str | None:
+    """Misroute guard for mate-tier deadline misses: when the mate is
+    configured but times out, 'tell/ask <known name> ...' keeps its spoken
+    destination instead of silently landing on the active session.
+    Registry facts + conservative fuzz only — this is NOT targeted
+    forwarding for degraded mode (SPEC §14.9: no mate, no targets)."""
+    m = _FORWARD_PREFIX.match(text)
+    if m is None:
+        return None
+    return resolve_name(m.group(1), roster)
+
+
 def build_grounding(registry: Registry, mic_mode: str, now: float) -> dict[str, Any]:
     sessions = []
     for s in registry.all():
@@ -99,6 +114,7 @@ def build_grounding(registry: Registry, mic_mode: str, now: float) -> dict[str, 
                 "harness": s.identity.get("harness"),
                 "state": s.state,
                 "unread_digest": s.unread_digest,
+                "queued_inputs": len(s.queued),
                 "recent_says": says,
             }
         )
