@@ -195,9 +195,7 @@ def cmd_attach(args, client: Client) -> int:
     print("# MCP config (Claude Code: .mcp.json / Codex: config.toml equivalent):")
     print(json.dumps(mcp, indent=2))
     print('\n# CLI fallback: agents call `voco say "..."` and `voco listen`.')
-    print(
-        "# Remote host: add to ~/.ssh/config -> RemoteForward 7777 localhost:7777"
-    )
+    print("# Remote host: add to ~/.ssh/config -> RemoteForward 7777 localhost:7777")
     return 0
 
 
@@ -252,9 +250,7 @@ def main() -> None:
             for s in state.get("sessions", []):
                 active = "*" if s["session_id"] == state.get("active_session") else " "
                 unread = s["unread_digest"]
-                print(
-                    f"{active} {s['display_name']}  [{s['state']}]  unread={unread}"
-                )
+                print(f"{active} {s['display_name']}  [{s['state']}]  unread={unread}")
     elif args.cmd == "switch":
         print(
             json.dumps(
