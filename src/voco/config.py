@@ -65,6 +65,7 @@ SCHEMA: dict[str, dict[str, tuple[type, ...]]] = {
         "timeout_ms": (int, float),
     },
     "bridge": {"token": (str,)},
+    "state": {"dir": (str,)},
 }
 
 _POSITIVE_MS = {

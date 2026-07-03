@@ -80,8 +80,8 @@ async def test_peek_without_terminal_raises(daemon):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals only")
-async def test_sigterm_shuts_down_cleanly():
-    d = Daemon({}, no_audio=True)
+async def test_sigterm_shuts_down_cleanly(tmp_path):
+    d = Daemon({"state": {"dir": str(tmp_path)}}, no_audio=True)
     task = asyncio.create_task(d.run(port=0))
     await asyncio.sleep(0.2)  # let the server come up + handlers install
     os.kill(os.getpid(), signal.SIGTERM)

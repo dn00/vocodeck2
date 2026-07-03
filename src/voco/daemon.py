@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from voco.voice_loop import VoiceLoop
 
 from voco import config as config_mod
+from voco.adapters.state_store import StateStore
 from voco.core.arbitration import DuplexMode
 from voco.core.attention import AttentionMode
 from voco.core.events import EventBus
@@ -103,6 +104,14 @@ class Daemon:
         self.voice: VoiceLoop | None = None
         self._tmux_mgr: TmuxManager | None = None
         self._port = 7777
+        self._state = StateStore(
+            Path(
+                cfg.get("state", {}).get(
+                    "dir", Path.home() / ".local" / "state" / "voco"
+                )
+            )
+        )
+        self._state_save_task: asyncio.Task[None] | None = None
 
     def _tmux(self) -> TmuxManager:
         if self._tmux_mgr is None:
@@ -391,6 +400,51 @@ class Daemon:
             if decision.kind == "ack_forward" and decision.speech:
                 self.voice.speak_local(decision.speech, turn_id)
 
+    # ---- durable sessions (SPEC §13 queue-loss gap closed) ------------------------
+
+    _STATE_EVENTS: ClassVar[set[str]] = {
+        "session.attached",
+        "session.detached",
+        "session.activated",
+        "session.state",
+        "input.queued",
+        "agent.say",
+        "screen.updated",
+        "digest.updated",
+    }
+
+    def _restore_state(self) -> None:
+        data, err = self._state.load()
+        if err:
+            self.bus.emit("daemon.error", {"error": f"state: {err}"})
+        if data:
+            n = self.registry.restore(data)
+            if n:
+                print(f"voco-d: restored {n} session(s) from {self._state.path}")
+
+    def _wire_state_saver(self) -> None:
+        def on_event(env) -> None:
+            if env.type in self._STATE_EVENTS:
+                self._schedule_state_save()
+
+        self.bus.subscribe(on_event)
+
+    def _schedule_state_save(self) -> None:
+        """Debounced: one pending save absorbs every change in its window
+        (dump happens after the sleep, on the loop — always consistent)."""
+        if self._state_save_task is not None and not self._state_save_task.done():
+            return
+
+        async def save_soon() -> None:
+            await asyncio.sleep(0.5)
+            data = self.registry.dump()
+            try:
+                await self._run_blocking(lambda: self._state.save(data))
+            except Exception as e:
+                self.bus.emit("daemon.error", {"error": f"state save: {e}"})
+
+        self._state_save_task = asyncio.get_running_loop().create_task(save_soon())
+
     # ---- operational errors reach the operator, not just the bus -----------------
 
     def _wire_error_log(self) -> None:
@@ -428,6 +482,8 @@ class Daemon:
                 pass  # Windows: KeyboardInterrupt in main() is the fallback
         self._wire_say_speech()
         self._wire_error_log()
+        self._restore_state()
+        self._wire_state_saver()
         try:
             runner = await run_server(self.bridge, host=host, port=port)
         except OSError as e:
@@ -458,6 +514,12 @@ class Daemon:
             await runner.cleanup()
             if self.voice is not None:
                 self.voice.stop()
+            if self._state_save_task is not None:
+                self._state_save_task.cancel()
+            try:
+                self._state.save(self.registry.dump())  # final synchronous save
+            except Exception as e:
+                print(f"voco-d: state save failed: {e}", file=sys.stderr)
             print("voco-d: shut down cleanly")
 
 

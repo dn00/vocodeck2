@@ -315,6 +315,78 @@ class Registry:
             },
         )
 
+    # ---- durability (dump/restore across daemon restarts) -----------------------
+
+    STATE_VERSION = 1
+
+    def dump(self) -> dict:
+        """Full persistable state — tokens included (the store must hold it
+        at 0600). Pure: dict out, no fs."""
+        return {
+            "v": self.STATE_VERSION,
+            "turn_counter": self._turn_counter,
+            "active_session": self._active_id,
+            "sessions": [
+                {
+                    "session_id": s.session_id,
+                    "identity": s.identity,
+                    "call_name": s.call_name,
+                    "capabilities": s.capabilities,
+                    "outstanding_turn_id": s.outstanding_turn_id,
+                    "queued": [q.__dict__ for q in s.queued],
+                    "say_log": [line.__dict__ for line in s.say_log],
+                    "unread_digest": s.unread_digest,
+                    "screen_title": s.screen_title,
+                    "screen_markdown": s.screen_markdown,
+                    "last_seen": s.last_seen,
+                }
+                for s in self._sessions.values()
+            ],
+        }
+
+    def restore(self, data: dict) -> int:
+        """Rebuild from a dump; returns sessions restored. Defensive: a
+        malformed entry is skipped, never fatal — losing one session beats
+        refusing to boot. Restored sessions are never parked (no live poll
+        survived the old daemon); outstanding turns are kept and
+        self-correct on the agent's next listen."""
+        if not isinstance(data, dict) or data.get("v") != self.STATE_VERSION:
+            return 0
+        restored = 0
+        for raw in data.get("sessions", []):
+            try:
+                s = Session(
+                    session_id=str(raw["session_id"]),
+                    identity=dict(raw["identity"]),
+                    call_name=str(raw["call_name"]),
+                    capabilities=list(raw["capabilities"]),
+                    outstanding_turn_id=raw.get("outstanding_turn_id"),
+                    queued=[QueuedInput(**q) for q in raw.get("queued", [])],
+                    unread_digest=int(raw.get("unread_digest", 0)),
+                    screen_title=raw.get("screen_title"),
+                    screen_markdown=str(raw.get("screen_markdown", "")),
+                    last_seen=float(raw.get("last_seen", 0.0)),
+                )
+                for line in raw.get("say_log", []):
+                    s.say_log.append(SayLine(**line))
+            except (KeyError, TypeError, ValueError):
+                continue
+            self._sessions[s.session_id] = s
+            key = (
+                s.identity.get("host"),
+                s.identity.get("cwd"),
+                s.identity.get("harness"),
+            )
+            self._by_identity[key] = s.session_id
+            restored += 1
+        counter = data.get("turn_counter", 0)
+        if isinstance(counter, int) and counter > self._turn_counter:
+            self._turn_counter = counter
+        active = data.get("active_session")
+        if active in self._sessions:
+            self._active_id = active
+        return restored
+
     # ---- snapshot (SPEC §10) ---------------------------------------------------
 
     def snapshot(self) -> dict:
