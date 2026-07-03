@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+uv.lock
+dist/
+.pytest_cache/
+models/
+*.onnx
+phrase-bank/
+.DS_Store
