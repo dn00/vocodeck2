@@ -30,8 +30,13 @@ class Routed:
 
 
 class Router:
-    def __init__(self, first_mate: FirstMatePort | None = None) -> None:
+    def __init__(
+        self,
+        first_mate: FirstMatePort | None = None,
+        timeout_s: float = FIRST_MATE_TIMEOUT_S,
+    ) -> None:
         self._mate = first_mate
+        self._timeout_s = timeout_s
 
     async def decide(self, text: str, names: list[str], grounding: dict) -> Routed:
         cmd = phrases.match(text, names)
@@ -41,7 +46,7 @@ class Router:
             return Routed(decision=RouteDecision(kind="forward"))
         try:
             decision = await asyncio.wait_for(
-                self._mate.route(text, grounding), timeout=FIRST_MATE_TIMEOUT_S
+                self._mate.route(text, grounding), timeout=self._timeout_s
             )
         except Exception:
             decision = None

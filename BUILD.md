@@ -78,6 +78,30 @@ resume. Update the journal at every checkpoint (after each commit).
   streaming — single chunk); faster-whisper small ~1.2s/utterance →
   Mac profile wants whisper-mlx or a smaller model at calibration.
 - [ ] config.set persistence — deferred
+
+## First-mate calibration vs REAL Gemma 4 E4B (2026-07-03, M1, llama.cpp)
+
+Harness: scripts/mate_calibrate.py (16-utterance suite, realistic
+grounding). Model: ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M via llama-server
+(cached in ~/.cache/huggingface, ~4.2GB — the same file the Mac profile
+uses).
+
+- Run 1 (naive): parse 3/16 — Gemma 4 THINKING TOKENS ate the completion
+  budget (the exact failure the Reddit thread warned about). Fixes:
+  `--reasoning-budget 0` server flag + response_format json_object
+  (llama.cpp grammar-enforces it; adapter now sends it, config
+  `json_mode`).
+- Run 2: parse 16/16, route 14/16. Prompt tightened: code/file questions
+  are ALWAYS work questions; asking-about-a-session ≠ switch action.
+- Run 3 (final): parse 16/16, route 15/16, targets 2/2, actions 2/2,
+  ZERO authority violations. Residual: pure deck commands sometimes route
+  forward alongside the (correct) action — benign stray message; phrase
+  table catches canonical switch phrasings first anyway.
+- Latency M1 Metal: p50 ~2.0s (generation-bound) → over the 800ms router
+  timeout; on Mac the mate coerces to forward (fast dispatch, no local
+  answers) unless timeout_ms is raised (now config) or a smaller model is
+  used. 3090 expected well under budget — re-run harness there.
+- Router timeout now configurable: [first_mate] timeout_ms.
 - Known limitation (wake mode): if the wake word and the command share
   one breath with no pause, the VAD speech-run started before arming and
   speech_started won't refire until a silence gap — "voco, <pause>, do X"

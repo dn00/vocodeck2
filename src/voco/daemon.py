@@ -59,8 +59,12 @@ class Daemon:
                 base_url=mate_cfg["base_url"],
                 model=mate_cfg.get("model", ""),
                 api_key=mate_cfg.get("api_key"),
+                json_mode=bool(mate_cfg.get("json_mode", True)),
             )
-        self.router = Router(first_mate=mate)
+        self.router = Router(
+            first_mate=mate,
+            timeout_s=float((mate_cfg or {}).get("timeout_ms", 800)) / 1000.0,
+        )
         self.bridge = BridgeServer(
             self.registry,
             self.bus,

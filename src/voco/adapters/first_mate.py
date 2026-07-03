@@ -28,11 +28,13 @@ class OpenAIChatFirstMate:
         model: str,
         api_key: str | None = None,
         max_tokens: int = 160,
+        json_mode: bool = True,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._api_key = api_key
         self._max_tokens = max_tokens
+        self._json_mode = json_mode
         self._session: aiohttp.ClientSession | None = None
 
     async def route(self, text: str, grounding: dict) -> RouteDecision | None:
@@ -60,6 +62,9 @@ class OpenAIChatFirstMate:
             "max_tokens": self._max_tokens,
             "temperature": 0.2,
         }
+        if self._json_mode:
+            # llama.cpp grammar-enforces this; steering-only elsewhere.
+            body["response_format"] = {"type": "json_object"}
         try:
             async with self._session.post(
                 f"{self._base_url}/chat/completions", json=body, headers=headers
