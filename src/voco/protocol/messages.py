@@ -34,6 +34,7 @@ EVENT_TYPES = {
     "screen.updated",
     "input.queued",
     "digest.updated",
+    "pane.hint",
     "mic.state",
     "daemon.error",
 }

@@ -66,6 +66,11 @@ SCHEMA: dict[str, dict[str, tuple[type, ...]]] = {
     },
     "bridge": {"token": (str,)},
     "state": {"dir": (str,)},
+    "watcher": {
+        "enabled": (bool,),
+        "interval_s": (int, float),
+        "speak": (bool,),
+    },
 }
 
 _POSITIVE_MS = {

@@ -112,6 +112,7 @@ class Daemon:
             )
         )
         self._state_save_task: asyncio.Task[None] | None = None
+        self._watcher_task: asyncio.Task[None] | None = None
 
     def _tmux(self) -> TmuxManager:
         if self._tmux_mgr is None:
@@ -445,6 +446,30 @@ class Daemon:
 
         self._state_save_task = asyncio.get_running_loop().create_task(save_soon())
 
+    # ---- pane watcher (proactive eyes on unattended terminals) --------------------
+
+    def _start_watcher(self, loop: asyncio.AbstractEventLoop) -> None:
+        cfg = self.cfg.get("watcher", {})
+        if not cfg.get("enabled", True):
+            return
+        from voco.watcher import PaneWatcher
+
+        watcher = PaneWatcher(
+            self.registry,
+            self._tmux(),
+            interval_s=float(cfg.get("interval_s", 3.0)),
+            on_waiting=self._on_pane_waiting if cfg.get("speak", True) else None,
+        )
+        self._watcher_task = loop.create_task(watcher.run())
+
+    def _on_pane_waiting(self, session) -> None:
+        """Confirmed waiting edge: say so. Loop-domain speech — an observed
+        fact about the deck, hedged because it comes from heuristics."""
+        if self.voice is not None:
+            self.voice.speak_local(
+                f"{session.call_name} looks like they're waiting on you.", None
+            )
+
     # ---- operational errors reach the operator, not just the bus -----------------
 
     def _wire_error_log(self) -> None:
@@ -484,6 +509,7 @@ class Daemon:
         self._wire_error_log()
         self._restore_state()
         self._wire_state_saver()
+        self._start_watcher(loop)
         try:
             runner = await run_server(self.bridge, host=host, port=port)
         except OSError as e:
@@ -514,6 +540,8 @@ class Daemon:
             await runner.cleanup()
             if self.voice is not None:
                 self.voice.stop()
+            if self._watcher_task is not None:
+                self._watcher_task.cancel()
             if self._state_save_task is not None:
                 self._state_save_task.cancel()
             try:

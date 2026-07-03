@@ -75,6 +75,8 @@ class Session:
     screen_title: str | None = None
     screen_markdown: str = ""
     last_seen: float = 0.0
+    # Watcher observation (ephemeral, not persisted): waiting|working|shell.
+    pane_hint: str | None = None
 
     @property
     def state(self) -> SessionState:
@@ -294,6 +296,18 @@ class Registry:
         )
         return is_active
 
+    def set_pane_hint(self, session_id: str, hint: str | None) -> bool:
+        """Watcher observation; emits pane.hint only on change."""
+        s = self._sessions.get(session_id)
+        if s is None or s.pane_hint == hint:
+            return False
+        prev, s.pane_hint = s.pane_hint, hint
+        self._emit(
+            "pane.hint",
+            {"session_id": session_id, "hint": hint, "prev": prev},
+        )
+        return True
+
     def set_screen(
         self, session_id: str, markdown: str, title: str | None, mode: str
     ) -> None:
@@ -400,6 +414,7 @@ class Registry:
                     "capabilities": s.capabilities,
                     "unread_digest": s.unread_digest,
                     "queued": len(s.queued),
+                    "pane_hint": s.pane_hint,
                     "screen_title": s.screen_title,
                     "screen_markdown": s.screen_markdown,
                     "say_tail": [

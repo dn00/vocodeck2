@@ -119,6 +119,7 @@ def build_grounding(registry: Registry, mic_mode: str, now: float) -> dict[str, 
                 "state": s.state,
                 "unread_digest": s.unread_digest,
                 "queued_inputs": len(s.queued),
+                "terminal": s.pane_hint,  # watcher observation, may be null
                 "recent_says": says,
             }
         )

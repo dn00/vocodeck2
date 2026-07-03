@@ -299,6 +299,8 @@ function renderSidebar() {
     const badges = [
       s.unread_digest ? `<span class="badge hot">${s.unread_digest} unread</span>` : "",
       s.queued ? `<span class="badge hot">${s.queued} queued</span>` : "",
+      s.pane_hint ? `<span class="badge${s.pane_hint === "waiting" ? " hot" : ""}">` +
+                    `▤ ${esc(s.pane_hint)}</span>` : "",
       ...s.capabilities.map(c => `<span class="badge">${esc(c)}</span>`),
     ].join("");
     const canPeek = s.capabilities.includes("inject");
