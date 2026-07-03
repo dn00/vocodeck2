@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import signal
 import sys
 import time
 import tomllib
@@ -244,11 +245,36 @@ class Daemon:
             return {}
         if cmd == "session.panes":
             return {"panes": self._tmux().list(host=payload.get("host"))}
+        if cmd == "session.detach":
+            name = str(payload.get("name", "")).strip()
+            s = self.registry.by_call_name(name)
+            if s is None:
+                raise ValueError(f"no session named {name!r}")
+            self.registry.detach(s.session_id)
+            return {"detached": s.call_name}
+        if cmd == "session.peek":
+            return {"text": self._peek(payload)}
         if cmd == "config.get":
             return self._public_config()
         if cmd == "config.set":
             raise ValueError("config.set lands with persistent config (M3)")
         raise ValueError(f"unknown command {cmd!r}")
+
+    def _peek(self, payload: dict) -> str:
+        """Terminal mirror: capture the pane behind a registered session
+        (by call name) or a raw tmux target (spawned but not yet attached)."""
+        target = payload.get("target")
+        host = payload.get("host")
+        if not target:
+            name = str(payload.get("name", "")).strip()
+            s = self.registry.by_call_name(name)
+            if s is None:
+                raise ValueError(f"no session named {name!r}")
+            if s.inject_target is None:
+                raise ValueError(f"{s.call_name} has no terminal to peek (not in tmux)")
+            target = s.inject_target
+            host = s.identity.get("host_alias")
+        return self._tmux().capture_pane(str(target), host=host)
 
     def _public_config(self) -> dict:
         """Config snapshot minus secrets (tokens, api keys)."""
@@ -295,6 +321,12 @@ class Daemon:
     async def run(self, host: str = "127.0.0.1", port: int = 7777) -> None:
         self._port = port
         loop = asyncio.get_running_loop()
+        stop = asyncio.Event()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, stop.set)
+            except NotImplementedError:
+                pass  # Windows: KeyboardInterrupt in main() is the fallback
         self._wire_say_speech()
         runner = await run_server(self.bridge, host=host, port=port)
         if not self.no_audio:
@@ -312,12 +344,15 @@ class Daemon:
             + (" (no audio)" if self.voice is None else "")
         )
         try:
-            await asyncio.Event().wait()
+            await stop.wait()
         finally:
+            # Order matters: unpark agents first (they exit their listen
+            # cleanly), then close the server, then the audio shell.
             await self.bridge.shutdown()
             await runner.cleanup()
             if self.voice is not None:
                 self.voice.stop()
+            print("voco-d: shut down cleanly")
 
 
 def main() -> None:

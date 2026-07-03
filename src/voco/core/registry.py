@@ -197,6 +197,8 @@ class Registry:
         s = self._sessions.pop(session_id, None)
         if s is None:
             return
+        # A parked listener exits cleanly instead of timing out into a 410.
+        self.try_deliver(session_id, {"status": "detach"})
         self._by_identity.pop(
             (s.identity.get("host"), s.identity.get("cwd"), s.identity.get("harness")),
             None,

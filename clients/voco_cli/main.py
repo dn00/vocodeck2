@@ -62,7 +62,13 @@ def derive_identity() -> dict:
     }
 
 
-def control(client: Client, cmd: str, payload: dict, timeout: float = 35.0) -> int:
+def control(
+    client: Client,
+    cmd: str,
+    payload: dict,
+    timeout: float = 35.0,
+    render=None,
+) -> int:
     """Operator command: print the result or the server's error, no tracebacks."""
     try:
         result = client._request("POST", f"/v1/control/{cmd}", payload, timeout=timeout)
@@ -76,7 +82,10 @@ def control(client: Client, cmd: str, payload: dict, timeout: float = 35.0) -> i
     except Exception as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-    print(json.dumps(result))
+    if render is not None:
+        render(result)
+    else:
+        print(json.dumps(result))
     return 0
 
 
@@ -291,6 +300,13 @@ def main() -> None:
     p_kill.add_argument("--host", default=None)
     p_panes = sub.add_parser("panes")
     p_panes.add_argument("--host", default=None)
+    p_detach = sub.add_parser("detach")
+    p_detach.add_argument("name", help="session call name (see `voco sessions`)")
+    p_peek = sub.add_parser("peek")
+    p_peek.add_argument(
+        "name", help="session call name, or raw tmux target (voco-... / %%N)"
+    )
+    p_peek.add_argument("--host", default=None)
     sub.add_parser("watch")
     p_input = sub.add_parser("input")  # typed input path (say_as_user)
     p_input.add_argument("text")
@@ -352,6 +368,23 @@ def main() -> None:
         )
     elif args.cmd == "panes":
         sys.exit(control(client, "session.panes", {"host": args.host}))
+    elif args.cmd == "detach":
+        sys.exit(control(client, "session.detach", {"name": args.name}, timeout=5))
+    elif args.cmd == "peek":
+        # Call names go through the registry; voco-*/% targets hit tmux raw.
+        raw = args.name.startswith(("voco-", "%"))
+        payload = (
+            {"target": args.name, "host": args.host} if raw else {"name": args.name}
+        )
+        sys.exit(
+            control(
+                client,
+                "session.peek",
+                payload,
+                timeout=15,
+                render=lambda r: print(r.get("text", ""), end=""),
+            )
+        )
     elif args.cmd == "watch":
         sys.exit(cmd_watch(client))
     elif args.cmd == "input":

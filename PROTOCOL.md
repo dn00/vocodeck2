@@ -61,8 +61,10 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 - `interrupt`
 - `mic.set`
 - `say_as_user`
+- `session.detach`
 - `session.kill`
 - `session.panes`
+- `session.peek`
 - `session.spawn`
 - `state.get`
 - `switch_session`

@@ -56,6 +56,8 @@ COMMAND_TYPES = {
     "session.spawn",
     "session.kill",
     "session.panes",
+    "session.detach",
+    "session.peek",
     "say_as_user",
     "state.get",
     "config.get",

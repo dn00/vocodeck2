@@ -1,0 +1,80 @@
+"""Daemon control surface (detach/peek) + graceful shutdown."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import signal
+import sys
+
+import pytest
+
+from voco.adapters.tmux import RunResult, TmuxManager
+from voco.daemon import Daemon
+
+
+class FakeRunner:
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+        self.stdout = "line one\nline two\n"
+
+    def __call__(self, argv: list[str]) -> RunResult:
+        self.calls.append(argv)
+        return RunResult(0, self.stdout, "")
+
+
+@pytest.fixture
+def daemon() -> tuple[Daemon, FakeRunner]:
+    d = Daemon({}, no_audio=True)
+    runner = FakeRunner()
+    d._tmux_mgr = TmuxManager(runner)
+    return d, runner
+
+
+def test_detach_removes_session_and_clears_active(daemon):
+    d, _ = daemon
+    s = d.registry.register({"host": "mac", "cwd": "/a", "harness": "claude"}, ["say"])
+    result = d._control("session.detach", {"name": s.call_name})
+    assert result == {"detached": s.call_name}
+    assert d.registry.get(s.session_id) is None
+    assert d.registry.active is None  # no auto-election
+
+
+def test_detach_unknown_name_raises(daemon):
+    d, _ = daemon
+    with pytest.raises(ValueError, match="no session named"):
+        d._control("session.detach", {"name": "Nobody"})
+
+
+def test_peek_by_call_name_uses_session_pane(daemon):
+    d, runner = daemon
+    s = d.registry.register(
+        {"host": "mac", "cwd": "/a", "harness": "claude", "tmux_pane": "%7"},
+        ["say", "listen"],
+    )
+    result = d._control("session.peek", {"name": s.call_name})
+    assert result["text"] == "line one\nline two\n"
+    assert runner.calls[-1] == ["tmux", "capture-pane", "-p", "-t", "%7"]
+
+
+def test_peek_raw_target_and_remote_host(daemon):
+    d, runner = daemon
+    d._control("session.peek", {"target": "voco-claude", "host": "ws"})
+    assert runner.calls[-1][:3] == ["ssh", "-T", "ws"]
+    assert runner.calls[-1][-1] == "voco-claude"
+
+
+def test_peek_without_terminal_raises(daemon):
+    d, _ = daemon
+    s = d.registry.register({"host": "mac", "cwd": "/b", "harness": "codex"}, ["say"])
+    with pytest.raises(ValueError, match="no terminal to peek"):
+        d._control("session.peek", {"name": s.call_name})
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals only")
+async def test_sigterm_shuts_down_cleanly():
+    d = Daemon({}, no_audio=True)
+    task = asyncio.create_task(d.run(port=0))
+    await asyncio.sleep(0.2)  # let the server come up + handlers install
+    os.kill(os.getpid(), signal.SIGTERM)
+    await asyncio.wait_for(task, timeout=5)

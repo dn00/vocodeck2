@@ -92,6 +92,16 @@ async def test_queued_input_delivered_on_next_listen(client):
     assert payload["status"] == "transcript" and payload["text"] == "first"
 
 
+async def test_detach_unparks_listener_with_detach_status(client):
+    info = await register(client)
+    sid = info["session_id"]
+    listen = asyncio.create_task(_listen_json(client, sid))
+    await asyncio.sleep(0.05)  # let the poll park
+    client.registry.detach(sid)
+    payload = await listen
+    assert payload == {"status": "detach"}  # clean exit, not a slice timeout
+
+
 async def test_unknown_session_is_410(client):
     resp = await client.get("/v1/bridge/listen?session_id=deadbeef")
     assert resp.status == 410
