@@ -596,9 +596,10 @@ informational only.
 Events (daemon → clients): `snapshot`,
 `session.attached|detached|renamed|state`, `session.activated`,
 `stt.partial|final`, `turn.state`, `route.decision`,
-`speech.started|interrupted|finished` (source: agent|gemma|ack),
-`agent.say`, `screen.updated`, `input.queued`, `digest.updated`,
-`mic.state`, `daemon.error`. All turn-scoped events (`turn.state`,
+`speech.started|interrupted|finished` (source: agent|first_mate|ack|chime
+— role names on the wire, never model names), `agent.say`,
+`screen.updated`, `input.queued`, `digest.updated`, `mic.state`,
+`daemon.error`. All turn-scoped events (`turn.state`,
 `route.decision`, `speech.*`, `agent.say`, `input.queued`) carry `turn_id`.
 
 Commands (client → daemon, over WS or `/v1/control`): envelope
@@ -624,20 +625,26 @@ vocodeck2/
   pyproject.toml              # uv-managed; console scripts below
   src/voco/
     protocol/                 # message vocabulary + validators (zero deps)
-    core/                     # transport-free: turn machine, arbitration,
-                              #   registry, contract enforcement, phrase
-                              #   table, name pool
-    audio/                    # capture, playback, VAD, PTT (ports + impls)
-    providers/                # stt/, tts/, llm/ adapters (HTTP clients)
-    bridge/                   # HTTP endpoints (thin over core)
-    ws/                       # event server (thin over core)
+    core/                     # ALL pure logic: turn machine, arbitration,
+                              #   registry, router, phrase table, first-mate
+                              #   contract (grounding/parse/actions), VAD
+                              #   hysteresis, capture buffer, event bus
+    adapters/                 # impure edges, named by ROLE (not tech):
+                              #   first_mate.py (chat endpoint), stt.py,
+                              #   tts.py, microphone.py, speaker.py,
+                              #   silero.py, hotkey.py
+    server/                   # HTTP bridge + control + WS events (thin)
     daemon.py                 # composition root (voco-d entry)
-  adapters/
+  clients/                    # processes that talk TO the daemon
     voco_cli/                 # console script: voco-cli (alias: voco)
     voco_mcp/                 # stdio MCP server: voco-mcp
   configs/                    # windows-3090.toml, mac-m1.toml, cpu.toml
   tests/                      # pytest; fake clocks/providers; race tests
 ```
+
+Naming rule: role names, not model or vendor names, in code and on the
+wire (`first_mate`, never `gemma`, in modules/enums/events) — models are
+config; roles are architecture.
 
 Console scripts: `voco-d` (daemon), `voco-cli` + alias `voco` (CLI),
 `voco-mcp` (bridge). Python package: `voco`.

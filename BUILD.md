@@ -31,6 +31,21 @@ resume. Update the journal at every checkpoint (after each commit).
 13. [x] `scripts/providers_smoke.py` — verified: VAD 0.11ms/frame on M1
 14. [x] README, configs (windows-3090 / mac-m1 / cpu), 37 tests green
 
+## M1 + M2 progress (2026-07-03, after M0)
+
+- [x] Restructure (user feedback): core=pure / adapters=role-named edges /
+      server=transport / clients=cli+mcp; Source.GEMMA → FIRST_MATE
+- [x] core/first_mate.py — contract prompt, grounding, parse/coerce,
+      closed action verbs, execute_action; FirstMatePort
+- [x] adapters/first_mate.py — OpenAIChatFirstMate (llama-server etc.)
+- [x] daemon wiring: [first_mate] config, grounding per utterance,
+      immediate action execution, targeted forward
+- [x] clients/voco_mcp — voice_say/voice_screen/voice_listen; verified
+      live over real MCP stdio handshake against --no-audio daemon
+- [ ] M1 exit: live conversation with first mate on llama-server
+      (needs gemma-4-e4b GGUF + user present)
+- [ ] M2 leftovers: tmux managed spawn (M3), remote-attach live test
+
 ## M0 exit — REMAINING (needs user present / live audio)
 
 - [ ] `uv sync --extra stt` + providers_smoke with mlx-audio running (Mac)
