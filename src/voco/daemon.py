@@ -177,17 +177,19 @@ class Daemon:
         elif cmd.kind in ("mute", "unmute"):
             self._set_muted(cmd.kind == "mute")
 
-    def dispatch(self, text: str, decision: RouteDecision) -> tuple[str, str]:
+    def dispatch(
+        self, text: str, decision: RouteDecision, origin: str = "voice"
+    ) -> tuple[str, str]:
         turn_id = self.registry.mint_turn_id()
         self.bus.emit(
             "route.decision",
-            {"turn_id": turn_id, "kind": decision.kind, "text": text},
+            {"turn_id": turn_id, "kind": decision.kind, "text": text, "origin": origin},
         )
         target = (
             self.registry.by_call_name(decision.target) if decision.target else None
         )
         session = target or self.registry.active
-        result = self.registry.dispatch(text, turn_id, target=target)
+        result = self.registry.dispatch(text, turn_id, target=target, origin=origin)
         if result == "queued_idle" and session is not None:
             self._schedule_nudge(session.session_id)
         return turn_id, result
@@ -426,7 +428,7 @@ class Daemon:
             if decision.speech and self.voice is not None:
                 self.voice.speak_local(decision.speech, None)
             return
-        turn_id, result = self.dispatch(text, decision)
+        turn_id, result = self.dispatch(text, decision, origin="typed")
         if self.voice is not None:
             self.voice.dispatch_feedback(turn_id, result)
             if decision.kind == "ack_forward" and decision.speech:

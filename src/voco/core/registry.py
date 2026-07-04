@@ -59,6 +59,7 @@ class QueuedInput:
     ts: float
     turn_id: str
     text: str
+    origin: str = "voice"  # voice | typed (UI box / `voco input`)
 
 
 @dataclass
@@ -222,8 +223,18 @@ class Registry:
         self._turn_counter += 1
         return f"t-{self._turn_counter}"
 
+    def _queued_payload(self, items: list[QueuedInput]) -> list[dict]:
+        """Delivery view of queued inputs: age is computed at delivery time
+        so a slow agent sees HOW stale each line is (live-test backlog)."""
+        now = self._now()
+        return [{**q.__dict__, "age_s": max(0, round(now - q.ts))} for q in items]
+
     def dispatch(
-        self, text: str, turn_id: str, target: Session | None = None
+        self,
+        text: str,
+        turn_id: str,
+        target: Session | None = None,
+        origin: str = "voice",
     ) -> DispatchResult:
         s = target or self.active
         if s is None:
@@ -233,7 +244,9 @@ class Registry:
             "status": "transcript",
             "turn_id": turn_id,
             "text": text,
-            "queued": [q.__dict__ for q in s.queued],
+            "origin": origin,
+            "age_s": 0,
+            "queued": self._queued_payload(s.queued),
         }
         if s.parked and self.try_deliver(s.session_id, payload):
             s.queued.clear()
@@ -241,10 +254,17 @@ class Registry:
             s.outstanding_turn_id = turn_id
             self._emit("session.state", {"session_id": s.session_id, "state": s.state})
             return "live"
-        s.queued.append(QueuedInput(ts=self._now(), turn_id=turn_id, text=text))
+        s.queued.append(
+            QueuedInput(ts=self._now(), turn_id=turn_id, text=text, origin=origin)
+        )
         self._emit(
             "input.queued",
-            {"session_id": s.session_id, "turn_id": turn_id, "text": text},
+            {
+                "session_id": s.session_id,
+                "turn_id": turn_id,
+                "text": text,
+                "origin": origin,
+            },
         )
         return "queued_idle" if was_idle else "queued"
 
@@ -263,7 +283,9 @@ class Registry:
                 "status": "transcript",
                 "turn_id": first.turn_id,
                 "text": first.text,
-                "queued": [q.__dict__ for q in rest],
+                "origin": first.origin,
+                "age_s": max(0, round(self._now() - first.ts)),
+                "queued": self._queued_payload(rest),
             }
             s.queued.clear()
             s.outstanding_turn_id = first.turn_id

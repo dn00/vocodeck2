@@ -29,6 +29,40 @@ DEFAULT_URL = os.environ.get("VOCO_URL", "http://127.0.0.1:7777")
 CACHE_DIR = Path(os.environ.get("VOCO_CACHE", Path.home() / ".cache" / "voco"))
 SOFT_FAIL = "voice daemon unreachable — continue without voice"
 RETRY_WINDOW_S = 600  # sustained-failure ceiling for listen (SPEC §8.4)
+STALE_AFTER_S = 60  # backlog older than this gets an age mark
+
+
+def _fmt_age(age_s: int) -> str:
+    if age_s < 60:
+        return f"{age_s}s ago"
+    if age_s < 3600:
+        return f"{age_s // 60}m ago"
+    return f"{age_s // 3600}h ago"
+
+
+def _marks(entry: dict) -> list[str]:
+    marks = []
+    if entry.get("origin") == "typed":
+        marks.append("typed")
+    age = int(entry.get("age_s") or 0)
+    if age >= STALE_AFTER_S:
+        marks.append(_fmt_age(age))
+    return marks
+
+
+def format_transcript(result: dict) -> str:
+    """Render a listen payload for an agent: the backlog is marked with
+    age/origin so a slow agent sees WHAT is stale instead of an
+    undifferentiated wall of text (live-test bug); the last line is
+    always the current instruction."""
+    lines = []
+    for q in result.get("queued", []):
+        note = ", ".join(["queued while working", *_marks(q)])
+        lines.append(f"[{note}] {q['text']}")
+    marks = _marks(result)
+    main = result.get("text", "")
+    lines.append(f"[{', '.join(marks)}] {main}" if marks else main)
+    return "\n".join(lines)
 
 
 def _git(args: list[str], cwd: str) -> str | None:
@@ -468,9 +502,7 @@ def main() -> None:
     elif args.cmd == "listen":
         result = client.listen()
         if result.get("status") == "transcript":
-            for q in result.get("queued", []):
-                print(f"[queued while working] {q['text']}")
-            print(result["text"])
+            print(format_transcript(result))
         else:
             print(SOFT_FAIL)
             sys.exit(0)  # fail-soft: never a hard error in an agent turn

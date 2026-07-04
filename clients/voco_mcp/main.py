@@ -19,7 +19,7 @@ import asyncio
 import os
 import time
 
-from voco_cli.main import Client
+from voco_cli.main import Client, format_transcript
 
 LISTEN_BUDGET_S = float(os.environ.get("VOCO_MCP_LISTEN_BUDGET_S", "240"))
 
@@ -117,11 +117,7 @@ def _listen_budgeted(client: Client) -> str:
         result = client.listen_once()
         status = result.get("status")
         if status == "transcript":
-            lines = [
-                f"[queued while working] {q['text']}" for q in result.get("queued", [])
-            ]
-            lines.append(result["text"])
-            return "\n".join(lines)
+            return format_transcript(result)
         if status == "detach":
             return "voice daemon shutting down — stop listening."
         # rearm (real or synthesized): keep parking within budget

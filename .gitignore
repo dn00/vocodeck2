@@ -8,3 +8,8 @@ models/
 *.onnx
 phrase-bank/
 .DS_Store
+# per-machine (daemon-written config overrides; hand-authored MCP wiring
+# with absolute paths — `voco setup` will generate it); code index
+*.local.toml
+.mcp.json
+.codegraph/
