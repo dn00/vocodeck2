@@ -496,3 +496,26 @@ slice, 130 tests green + ruff + mypy + PROTOCOL drift after each:
   0 < incomplete <= hold. SPEC §4.1 row + min_silence-stays-64 note.
   Test fixtures punctuated like real Whisper finals ("run the tests.") —
   unpunctuated canned text now (correctly) triggers patience. 161 tests.
+- 2026-07-04 (later): core-loop hardening, cross-checked with a Codex
+  (gpt-5.5) review of turn.py/vad.py/capture.py/voice_loop.py. Codex
+  found no BLOCKERs; its three WARNINGs all fixed here, two of which we
+  had independently queued:
+  - `_route_turn`: a raising router no longer strands the turn in
+    ROUTING (no deadline, utterance lost) — degrades to forward-verbatim
+    (§6 floor) + daemon.error; run_phrase failure still delivers the
+    answer decision; `_kick_deadline()` now runs on EVERY path incl. the
+    phrase branch (Codex: fragile kick coverage).
+  - `VadGate.suppress(True)` mid-speech closes the open segment instead
+    of swallowing speech_ended (stranded CAPTURING w/ playback gated) or
+    emitting it stale after unsuppress (duplex hot-switch echo rescue).
+  - Ours beyond Codex: the deadline pump survives a raising
+    `on_deadline()` (the pump is the heartbeat — one bad dispatch edge
+    must not kill every future expiry); `_maybe_dispatch` closes the
+    turn in a `finally` so a raising dispatch listener can't leave a
+    dispatched-but-open zombie key; `looks_complete` strips trailing
+    closers ('he said "stop."'); NEW `turn.patience` wire event
+    ({turn_id, wait_ms}, turn-scoped) so the deliberate endpointing wait
+    is distinguishable from a stall in the UI/live tests.
+  Codex NOTEs (no action): pullback structurally sound; no lost-wakeup
+  in the pump; unpunctuated-but-complete shorts pay the patience delay —
+  that's the endpointing calibration item, not a bug. 168 tests.

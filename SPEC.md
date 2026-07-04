@@ -601,11 +601,13 @@ informational only.
 
 Events (daemon → clients): `snapshot`,
 `session.attached|detached|renamed|state`, `session.activated`,
-`stt.partial|final`, `turn.state`, `route.decision`,
+`stt.partial|final`, `turn.state`, `turn.patience` (`{turn_id, wait_ms}`:
+semantic endpointing extended the hold — the wait is deliberate, not a
+stall; §4.1), `route.decision`,
 `speech.started|interrupted|finished` (source: agent|first_mate|ack|chime
 — role names on the wire, never model names), `agent.say`,
 `screen.updated`, `input.queued`, `digest.updated`, `mic.state`,
-`daemon.error`. All turn-scoped events (`turn.state`,
+`daemon.error`. All turn-scoped events (`turn.state`, `turn.patience`,
 `route.decision`, `speech.*`, `agent.say`, `input.queued`) carry `turn_id`.
 
 Commands (client → daemon, over WS or `/v1/control`): envelope

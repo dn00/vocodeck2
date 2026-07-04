@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import pytest
+
 from voco.core.turn import (
     RouteDecision,
     TurnConfig,
@@ -232,6 +234,9 @@ def test_looks_complete_semantics():
     assert looks_complete("stop!")
     assert looks_complete("")  # nothing to wait for
     assert looks_complete("   ")
+    # Closers may trail the terminal punctuation.
+    assert looks_complete('he said "stop."')
+    assert not looks_complete('he said "stop')
 
 
 def test_incomplete_transcript_pulls_routing_back_to_holding_and_merges():
@@ -330,6 +335,60 @@ def test_patience_window_already_past_dispatches_normally():
     assert m.state is TurnState.ROUTING  # too late to be patient
     m.route_decided(key, 0, RouteDecision(kind="forward"))
     assert rec.of("dispatch") == [("dispatch", key, "one is", "forward")]
+
+
+def test_patience_extension_is_observable():
+    rec = Recorder()
+    clock = Clock()
+    events = rec.events()
+    extensions: list[tuple[int, float]] = []
+    events.patience_extended = lambda k, until: extensions.append((k, until))
+    m = TurnMachine(events, TurnConfig(), now=clock.now)
+    m.speech_started()
+    clock.advance(m, 2.0)
+    m.speech_ended()
+    key = m.current_key
+    m.stt_final(key, 0, "one is")
+    assert extensions == [(key, 4.0)]  # VAD close 2.0 + 2000ms patience
+
+
+def test_complete_transcript_emits_no_patience_event():
+    rec = Recorder()
+    clock = Clock()
+    events = rec.events()
+    extensions: list[tuple[int, float]] = []
+    events.patience_extended = lambda k, until: extensions.append((k, until))
+    m = TurnMachine(events, TurnConfig(), now=clock.now)
+    m.speech_started()
+    m.speech_ended()
+    key = m.current_key
+    m.stt_final(key, 0, "run the tests.")
+    assert extensions == []
+
+
+def test_dispatch_edge_failure_still_closes_the_turn():
+    """A raising dispatch listener must not leave a dispatched-but-open
+    zombie: its key is dead to revision checks, so later speech would
+    merge into a turn that can never route again."""
+    rec = Recorder()
+    clock = Clock()
+    events = rec.events()
+
+    def boom(key: int, text: str, decision: RouteDecision) -> None:
+        raise RuntimeError("dispatch edge blew up")
+
+    events.dispatch_ready = boom
+    m = TurnMachine(events, TurnConfig(), now=clock.now)
+    m.speech_started()
+    m.speech_ended()
+    key = m.current_key
+    clock.advance(m, 1.0)  # hold satisfied -> ROUTING
+    m.stt_final(key, 0, "run the tests.")
+    with pytest.raises(RuntimeError):
+        m.route_decided(key, 0, RouteDecision(kind="forward"))
+    assert m.state is TurnState.IDLE  # one-way door held despite the raise
+    m.speech_started()  # and the next utterance opens a NEW turn
+    assert m.current_key != key
 
 
 def test_set_patience_applies_to_the_next_hold():

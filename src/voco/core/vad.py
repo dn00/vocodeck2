@@ -64,6 +64,15 @@ class VadGate:
         self._suppressed = suppressed
         if suppressed:
             self._speech_run_ms = 0
+            self._silence_run_ms = 0
+            if self._in_speech:
+                # Mid-speech suppression (duplex hot-switch during the
+                # echo rescue): close the segment NOW. Swallowing it
+                # strands the machine in CAPTURING (playback gated, gate
+                # deaf); deferring it emits a stale speech_ended for
+                # pre-suppression speech after the gate reopens.
+                self._in_speech = False
+                self._ended()
 
     def process(self, frame: np.ndarray) -> None:
         if self._suppressed:

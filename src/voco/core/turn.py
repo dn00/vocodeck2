@@ -72,7 +72,9 @@ def looks_complete(text: str) -> bool:
     """Does this transcript look like a finished thought? Errs toward
     incomplete (extra patience) — fragments hurt more than a late
     dispatch (live-test: 'one is' / 'testing' dispatched separately)."""
-    t = text.strip()
+    # Closing quotes/brackets may trail the terminal punctuation
+    # ('he said "stop."') — strip them before reading the tail.
+    t = text.strip().rstrip("\"'”’»)]}")
     if not t:
         return True  # nothing to wait for
     if t.endswith(("...", "…")):
@@ -98,6 +100,10 @@ class TurnEvents:
     dispatch_ready: Callable[[int, str, RouteDecision], None]  # closes turn
     local_reply_ready: Callable[[int, RouteDecision], None]
     turn_state_changed: Callable[[int, TurnState], None]
+    # Optional: patience kept the door open — (key, extended deadline).
+    # Observability only; the deliberate wait must be distinguishable
+    # from a stuck turn in live tests and the UI.
+    patience_extended: Callable[[int, float], None] | None = None
 
 
 @dataclass
@@ -257,12 +263,15 @@ class TurnMachine:
         extended = base + self._cfg.incomplete_hold_ms / 1000.0
         if self._now() >= extended:
             return  # the patience window already passed; dispatch normally
-        if (self._turn.hold_deadline or 0.0) < extended:
-            self._turn.hold_deadline = extended
+        if (self._turn.hold_deadline or 0.0) >= extended:
+            return  # base hold already covers the patience window
+        self._turn.hold_deadline = extended
         self._turn.reopen_deadline = max(self._turn.reopen_deadline or 0.0, extended)
         if self._turn.hold_satisfied:
             self._turn.hold_satisfied = False
             self._to(TurnState.HOLDING)
+        if self._events.patience_extended is not None:
+            self._events.patience_extended(self._turn.key, extended)
 
     # ---- deadlines ------------------------------------------------------
 
@@ -334,8 +343,13 @@ class TurnMachine:
             self._to(TurnState.REOPENABLE)
             return
         t.dispatched = True  # one-way door
-        self._events.dispatch_ready(t.key, t.text, t.decision)
-        self._close_turn()
+        try:
+            self._events.dispatch_ready(t.key, t.text, t.decision)
+        finally:
+            # Even a raising dispatch edge must not leave a dispatched
+            # turn open: its key is dead (revision checks reject it), so
+            # later speech would merge into a zombie that can never route.
+            self._close_turn()
 
     def _close_turn(self) -> None:
         self._turn = None

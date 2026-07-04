@@ -225,6 +225,7 @@ class VoiceLoop:
                 dispatch_ready=self._on_dispatch_ready,
                 local_reply_ready=self._on_local_reply,
                 turn_state_changed=self._on_turn_state,
+                patience_extended=self._on_patience,
             ),
             TurnConfig(
                 dispatch_hold_ms=int(audio_cfg.get("dispatch_hold_ms", 800)),
@@ -492,18 +493,32 @@ class VoiceLoop:
         self._loop.create_task(self._route_turn(key, revision, text))
 
     async def _route_turn(self, key: int, revision: int, text: str) -> None:
-        routed = await self._host.route(text)
+        try:
+            routed = await self._host.route(text)
+        except Exception as e:
+            # A dead router must not strand the turn in ROUTING (no
+            # deadline, no decision, utterance silently lost): degrade to
+            # forward-verbatim, the same floor as the no-mate tier (§6).
+            self._bus.emit("daemon.error", {"error": f"route: {e}"})
+            routed = Routed(decision=RouteDecision(kind="forward"))
         if routed.phrase is not None:
-            self._host.run_phrase(routed.phrase)
+            try:
+                self._host.run_phrase(routed.phrase)
+            except Exception as e:
+                # The phrase failed but the turn still needs its decision.
+                self._bus.emit("daemon.error", {"error": f"phrase: {e}"})
             # Phrase commands never dispatch: close as a speechless answer.
-            self.machine.route_decided(
-                key, revision, RouteDecision(kind="answer", speech="")
-            )
-            return
-        self.machine.route_decided(
-            key, revision, routed.decision or RouteDecision(kind="forward")
-        )
-        self._kick_deadline()
+            decision = RouteDecision(kind="answer", speech="")
+        else:
+            decision = routed.decision or RouteDecision(kind="forward")
+        try:
+            self.machine.route_decided(key, revision, decision)
+        except Exception as e:
+            # A raising dispatch edge: the machine already closed the turn
+            # (one-way door); surface it instead of an unhandled task.
+            self._bus.emit("daemon.error", {"error": f"dispatch: {e}"})
+        finally:
+            self._kick_deadline()  # every path, incl. phrase + stale
 
     def _on_dispatch_ready(self, key: int, text: str, decision: RouteDecision) -> None:
         self.attention.on_turn_activity()
@@ -523,6 +538,17 @@ class VoiceLoop:
         self.queue.set_gate(state in (TurnState.CAPTURING, TurnState.HOLDING))
         self._kick_deadline()
 
+    def _on_patience(self, key: int, until: float) -> None:
+        # The deliberate wait must be visible: UI/live tests can tell
+        # "waiting for the user to finish" from "stuck".
+        self._bus.emit(
+            "turn.patience",
+            {
+                "turn_id": f"k-{key}",
+                "wait_ms": max(0, int((until - time.monotonic()) * 1000)),
+            },
+        )
+
     # ---- deadline pump -----------------------------------------------------
 
     def _kick_deadline(self) -> None:
@@ -539,4 +565,10 @@ class VoiceLoop:
             try:
                 await asyncio.wait_for(self._deadline_wakeup.wait(), timeout=delay)
             except TimeoutError:
-                self.machine.on_deadline()
+                try:
+                    self.machine.on_deadline()
+                except Exception as e:
+                    # The pump is the loop's heartbeat: one raising
+                    # listener (dispatch edge, registry) must not stop
+                    # every future hold/reopen expiry.
+                    self._bus.emit("daemon.error", {"error": f"deadline: {e}"})

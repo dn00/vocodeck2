@@ -26,6 +26,7 @@ EVENT_TYPES = {
     "stt.partial",
     "stt.final",
     "turn.state",
+    "turn.patience",
     "route.decision",
     "speech.started",
     "speech.interrupted",
@@ -43,6 +44,7 @@ EVENT_TYPES = {
 # Turn-scoped events MUST carry payload.turn_id (review finding 5).
 TURN_SCOPED = {
     "turn.state",
+    "turn.patience",
     "route.decision",
     "speech.started",
     "speech.interrupted",

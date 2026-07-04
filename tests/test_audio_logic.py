@@ -75,6 +75,22 @@ def test_suppress_blocks_events_half_duplex():
     assert s.events == ["start"]
 
 
+def test_suppress_mid_speech_closes_the_segment():
+    """Duplex hot-switch while the user is speaking (echo rescue): the
+    gate must close the open segment, not swallow speech_ended (stranding
+    the machine in CAPTURING) or emit it stale after unsuppress."""
+    s = Script()
+    s.run([0.9] * frames_for(384))
+    assert s.events == ["start"]
+    s.gate.suppress(True)
+    assert s.events == ["start", "end"]
+    assert not s.gate.in_speech
+    # Nothing stale fires once the gate reopens onto silence.
+    s.gate.suppress(False)
+    s.run([0.1] * 4)
+    assert s.events == ["start", "end"]
+
+
 def test_entry_run_tolerates_sub_gap_dips():
     """A single dipped frame must not restart the 384ms accumulation —
     that pushed speech_started far past the pre-roll (clipping bug)."""

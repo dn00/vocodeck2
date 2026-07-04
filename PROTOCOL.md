@@ -54,6 +54,7 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 - `speech.started` *(turn-scoped: payload carries `turn_id`)*
 - `stt.final`
 - `stt.partial`
+- `turn.patience` *(turn-scoped: payload carries `turn_id`)*
 - `turn.state` *(turn-scoped: payload carries `turn_id`)*
 
 ## Commands (clients → daemon)

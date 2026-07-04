@@ -121,6 +121,89 @@ async def test_full_pipeline_speech_to_dispatch(tmp_path):
         voice.stop()
 
 
+async def wait_for(predicate, tries: int = 50) -> None:
+    for _ in range(tries):
+        if predicate():
+            return
+        await asyncio.sleep(0.02)
+
+
+@pytest.mark.asyncio
+async def test_route_failure_degrades_to_forward_verbatim(tmp_path):
+    """A dead router (mate down, bug) must not strand the turn in ROUTING
+    with no deadline — the utterance forwards verbatim (SPEC §6 floor)."""
+    voice, host, events = make_loop(tmp_path)
+
+    async def broken_route(text: str) -> Routed:
+        raise RuntimeError("mate exploded")
+
+    host.route = broken_route  # type: ignore[method-assign]
+    await voice.start(asyncio.get_running_loop())
+    try:
+        await feed(voice, 4, speech_frame)
+        await feed(voice, 3, silence_frame)
+        await wait_for(lambda: host.dispatched)
+        assert host.dispatched, "turn stranded in ROUTING"
+        text, decision = host.dispatched[0]
+        assert text == "run the tests." and decision.kind == "forward"
+        assert any(t == "daemon.error" for t, _ in events)
+    finally:
+        voice.stop()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_edge_failure_does_not_kill_the_pump(tmp_path):
+    """A raising dispatch edge closes the turn (machine one-way door) and
+    is caught by the deadline pump: the NEXT utterance still dispatches."""
+    voice, host, events = make_loop(tmp_path)
+    real = host.dispatch
+    calls = {"n": 0}
+
+    def flaky(text, decision):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("registry hiccup")
+        return real(text, decision)
+
+    host.dispatch = flaky  # type: ignore[method-assign]
+    await voice.start(asyncio.get_running_loop())
+    try:
+        await feed(voice, 4, speech_frame)
+        await feed(voice, 3, silence_frame)
+        # NB: start() already emits a daemon.error for the disabled PTT
+        # hotkey — wait on the flaky call itself, not on any error.
+        await wait_for(lambda: calls["n"] >= 1)
+        assert calls["n"] == 1
+        assert any(
+            t == "daemon.error" and "registry hiccup" in str(p) for t, p in events
+        )
+        assert voice.machine.state is TurnState.IDLE
+        assert not host.dispatched
+        await feed(voice, 4, speech_frame)
+        await feed(voice, 3, silence_frame)
+        await wait_for(lambda: host.dispatched)
+        assert host.dispatched, "pump died after the first failure"
+    finally:
+        voice.stop()
+
+
+@pytest.mark.asyncio
+async def test_incomplete_transcript_emits_turn_patience(tmp_path):
+    """The deliberate wait is visible on the wire: UI/live tests can tell
+    'waiting for the user to finish' from 'stuck'."""
+    voice, host, events = make_loop(tmp_path, canned="one is")
+    await voice.start(asyncio.get_running_loop())
+    try:
+        await feed(voice, 4, speech_frame)
+        await feed(voice, 3, silence_frame)
+        await wait_for(lambda: host.dispatched)
+        assert host.dispatched  # patience expired -> fragment dispatched
+        patience = [p for t, p in events if t == "turn.patience"]
+        assert patience and patience[0]["wait_ms"] >= 0
+    finally:
+        voice.stop()
+
+
 @pytest.mark.asyncio
 async def test_no_onset_clipping_with_production_entry_threshold(tmp_path):
     """Live-test bug: the first 1-2 words were lost. With the production
