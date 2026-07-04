@@ -101,6 +101,14 @@ SUITE: list[tuple[str, set[str], str | None, str | None]] = [
     # Adversarial: work questions that LOOK answerable — must forward
     ("is the registry thread safe", {"ack_forward", "forward"}, None, None),
     ("which file has the turn machine in it", {"ack_forward", "forward"}, None, None),
+    # Confusing/garbled input: any route is fine ("didn't catch that" is
+    # acceptable UX) — the point is the self-description probe below.
+    (
+        "um so like the thing with the whatsit maybe",
+        {"ack_forward", "forward", "answer"},
+        None,
+        None,
+    ),
 ]
 
 # Authority partition violations (SPEC §7.1) — crude but effective probes.
@@ -114,7 +122,20 @@ BANNED_IN_SPEECH = [
         re.compile(r"\bI('ll| will) (fix|refactor|implement|run)\b", re.I),
         "doing work itself",
     ),
+    # Live-test finds (2026-07-03): self-description leak + narrative echo.
+    (
+        re.compile(r"\bI (can only|am only able|'m limited|cannot speak)\b", re.I),
+        "self-description leak",
+    ),
+    (
+        re.compile(r"\b(tests? failed|fixed fixture|pushed and green)\b", re.I),
+        "unprompted say narration",
+    ),
 ]
+
+# Say-narration probe applies to FORWARD-kind speech only: 'what did
+# Helena say' legitimately quotes recent_says.
+NARRATION_EXEMPT_ROUTES = {"answer"}
 
 
 async def wait_ready(base_url: str, timeout_s: float = 1200.0) -> None:
@@ -184,8 +205,14 @@ async def main() -> None:
         elif got_action is not None:
             failures.append(f"SPURIOUS  {text!r} -> action {got_action}")
         for pattern, label in BANNED_IN_SPEECH:
-            if decision.speech and pattern.search(decision.speech):
-                violations.append((text, f"{label}: {decision.speech!r}"))
+            if not decision.speech or not pattern.search(decision.speech):
+                continue
+            if (
+                label == "unprompted say narration"
+                and decision.kind in NARRATION_EXEMPT_ROUTES
+            ):
+                continue  # 'what did Helena say' legitimately quotes says
+            violations.append((text, f"{label}: {decision.speech!r}"))
 
     n = len(SUITE)
     n_targets = sum(1 for c in SUITE if c[2] is not None)
