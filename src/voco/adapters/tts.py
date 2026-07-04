@@ -35,7 +35,7 @@ class OpenAICompatibleTts:
         self.sample_rate = sample_rate
         self._api_key = api_key
 
-    async def stream(self, text: str) -> AsyncIterator[bytes]:
+    async def stream(self, text: str, voice: str | None = None) -> AsyncIterator[bytes]:
         headers = {}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
@@ -45,7 +45,9 @@ class OpenAICompatibleTts:
                 f"{self.base_url}/audio/speech",
                 json={
                     "model": self.model,
-                    "voice": self.voice,
+                    # Per-call override: the mate speaks with its own voice
+                    # so the user can tell WHO is talking (live-test ask).
+                    "voice": voice or self.voice,
                     "input": text,
                     "response_format": "pcm",
                     "stream": True,

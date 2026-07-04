@@ -153,9 +153,11 @@ async def test_router_prefers_stream_and_times_out_to_forward():
 class FakeTts:
     def __init__(self) -> None:
         self.synthesized: list[str] = []
+        self.voices: list[str | None] = []
 
-    def stream(self, text: str):
+    def stream(self, text: str, voice: str | None = None):
         self.synthesized.append(text)
+        self.voices.append(voice)
 
         async def gen():
             yield f"pcm:{text}".encode()
@@ -172,9 +174,10 @@ class FakeQueue:
 
 
 class FakeVoice:
-    def __init__(self) -> None:
+    def __init__(self, mate_voice: str | None = None) -> None:
         self.tts = FakeTts()
         self.queue = FakeQueue()
+        self.mate_voice = mate_voice
 
 
 async def drain(agen) -> list[bytes]:

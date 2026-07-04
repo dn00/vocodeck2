@@ -316,6 +316,46 @@ async def test_wake_scorer_deaf_during_half_duplex_playback(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_speech_synthesizes_sentence_by_sentence(tmp_path):
+    """Triage: TTFA must not scale with message length — one playback
+    item, per-sentence synth calls; the mate speaks with its own voice."""
+    bus = EventBus()
+    host = Host()
+    cfg = {
+        **CFG,
+        "audio": {**CFG["audio"], "phrase_bank_dir": str(tmp_path / "bank")},
+        "first_mate": {"base_url": "http://none", "voice": "af_sky"},
+    }
+    deps = VoiceLoopDeps(
+        load_vad_model=lambda path: ScriptedVad(),
+        stt_builder=lambda provider, **kw: FakeStt(""),
+        tts_factory=FakeTts,
+        mic_factory=FakeMic,
+        player_factory=FakePlayer,
+        hotkey_factory=None,
+    )
+    voice = VoiceLoop(cfg, bus, host=host, deps=deps)
+    voice.speak_agent("First part. Second part! Third?", turn_id=None)
+    voice.speak_local("Mate here. Two lines.", turn_id=None)
+    player: FakePlayer = voice.player  # type: ignore[assignment]
+    assert len(player.items) == 1  # agent plays; mate queued behind it
+    async for _ in player.items[0].content:  # drain drives per-sentence synth
+        pass
+    player.finish_current()  # queue pumps the mate item next
+    assert len(player.items) == 2
+    async for _ in player.items[1].content:
+        pass
+    tts: FakeTts = voice.tts  # type: ignore[assignment]
+    assert tts.synthesized == [
+        ("First part.", None),  # agent: shared voice
+        ("Second part!", None),
+        ("Third?", None),
+        ("Mate here.", "af_sky"),  # mate: its own voice
+        ("Two lines.", "af_sky"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_full_duplex_speech_barges_in_on_playback(tmp_path):
     voice, _host, events = make_loop(tmp_path)
     await voice.start(asyncio.get_running_loop())

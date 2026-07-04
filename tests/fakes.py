@@ -16,13 +16,14 @@ class FakeTts:
     sample_rate = 24_000
 
     def __init__(self, **kwargs: Any) -> None:
-        pass
+        self.synthesized: list[tuple[str, str | None]] = []
 
     async def synth_bytes(self, text: str) -> bytes:
         return b"\x00\x00" * 240  # 10ms of silence
 
-    def stream(self, text: str):
+    def stream(self, text: str, voice: str | None = None):
         async def chunks():
+            self.synthesized.append((text, voice))
             yield b"\x00\x00" * 240
 
         return chunks()

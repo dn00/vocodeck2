@@ -65,6 +65,7 @@ SCHEMA: dict[str, dict[str, tuple[type, ...]]] = {
         "timeout_ms": (int, float),
         "late_window_ms": (int, float),
         "stream": (bool,),
+        "voice": (str,),
     },
     "bridge": {"token": (str,)},
     "state": {"dir": (str,)},

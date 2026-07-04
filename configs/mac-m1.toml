@@ -36,6 +36,8 @@ timeout_ms = 800                 # dispatch waits this long AT MOST; past it the
 late_window_ms = 8000            # background budget for late speech/actions/
                                  # reroutes; playback TTL drops anything staler
 stream = true
+voice = "af_sky"                 # distinct from [tts] voice: the user can
+                                 # tell the mate and the agent apart by ear
 
 # [bridge]
 # token = ""                     # bearer token; default-on for remote attach

@@ -146,7 +146,9 @@ class MateSpeechChannel:
             sentence = await self._sentences.get()
             if sentence is None:
                 return
-            async for chunk in self._voice.tts.stream(sentence):
+            async for chunk in self._voice.tts.stream(
+                sentence, voice=self._voice.mate_voice
+            ):
                 yield chunk
 
 
@@ -173,6 +175,9 @@ class VoiceLoop:
             },
         )
 
+        # The mate's own TTS voice (None = share the agent voice): the
+        # user must be able to tell WHO is speaking (live-test ask).
+        self.mate_voice: str | None = cfg.get("first_mate", {}).get("voice")
         self.duplex = DuplexMode(audio_cfg.get("duplex", DuplexMode.FULL.value))
         self.attention = AttentionGate(
             AttentionMode(audio_cfg.get("attention", AttentionMode.ALWAYS.value)),
@@ -329,14 +334,35 @@ class VoiceLoop:
     def open_mate_speech_channel(self) -> MateSpeechChannel:
         return MateSpeechChannel(self)
 
+    def _sentence_synth(self, text: str, voice: str | None):
+        """Synthesize sentence-by-sentence inside ONE playback item: the
+        first sentence is audible at ~one-sentence TTFA instead of
+        scaling with message length (triage: sentence-chunked TTS)."""
+        sentences = [
+            s.strip() for s in _SENTENCE_BOUNDARY.split(text) if s.strip()
+        ] or [text]
+
+        async def gen():
+            for sentence in sentences:
+                async for chunk in self.tts.stream(sentence, voice=voice):
+                    yield chunk
+
+        return gen()
+
     def speak_local(self, text: str, turn_id: str | None) -> None:
         self.queue.enqueue(
-            PlaybackItem(Source.FIRST_MATE, self.tts.stream(text), turn_id=turn_id)
+            PlaybackItem(
+                Source.FIRST_MATE,
+                self._sentence_synth(text, self.mate_voice),
+                turn_id=turn_id,
+            )
         )
 
     def speak_agent(self, text: str, turn_id: str | None) -> None:
         self.queue.enqueue(
-            PlaybackItem(Source.AGENT, self.tts.stream(text), turn_id=turn_id)
+            PlaybackItem(
+                Source.AGENT, self._sentence_synth(text, None), turn_id=turn_id
+            )
         )
 
     def play_bank(self, key: str) -> None:
