@@ -42,6 +42,7 @@ class BridgeServer:
         token: str | None = None,
         listen_slice_s: float = LISTEN_SLICE_S,
         on_control: Callable[[str, dict], Awaitable[dict]] | None = None,
+        snapshot_extra: Callable[[], dict] | None = None,
     ) -> None:
         self._registry = registry
         self._bus = bus
@@ -51,10 +52,19 @@ class BridgeServer:
         # Async so subprocess-backed commands (tmux/ssh) never block the
         # loop that pumps WS events and listen polls.
         self._on_control = on_control or _no_control
+        # Daemon-owned live state (mic duplex/attention) merged into every
+        # snapshot so UIs render current truth without waiting for events.
+        self._snapshot_extra = snapshot_extra
         self._waiters: dict[str, asyncio.Future[dict]] = {}
         registry.try_deliver = self._try_deliver
 
     # ---- delivery port for the registry -----------------------------------
+
+    def _snapshot(self) -> dict:
+        snap = self._registry.snapshot()
+        if self._snapshot_extra is not None:
+            snap.update(self._snapshot_extra())
+        return snap
 
     def _try_deliver(self, session_id: str, payload: dict) -> bool:
         fut = self._waiters.pop(session_id, None)
@@ -208,7 +218,7 @@ class BridgeServer:
         except ValueError as e:
             raise web.HTTPBadRequest(text=str(e)) from e
         if env.type == "state.get":
-            return web.json_response(self._registry.snapshot())
+            return web.json_response(self._snapshot())
         try:
             result = await self._on_control(env.type, env.payload)
         except ValueError as e:
@@ -239,7 +249,7 @@ class BridgeServer:
             lambda env: loop.call_soon_threadsafe(push, env)
         )
         # Per-connection snapshot (SPEC §10): stamped but not broadcast.
-        push(self._bus.make("snapshot", self._registry.snapshot()))
+        push(self._bus.make("snapshot", self._snapshot()))
         sender = asyncio.create_task(self._pump_ws(ws, queue))
         # Commands run as tasks and reply through the event queue: the
         # receive loop stays responsive during a slow peek/spawn, and one
@@ -281,9 +291,7 @@ class BridgeServer:
         except (json.JSONDecodeError, ValueError) as e:
             return CommandReply(id=None, ok=False, error=str(e)).to_dict()
         if env.type == "state.get":
-            return CommandReply(
-                id=req_id, ok=True, payload=self._registry.snapshot()
-            ).to_dict()
+            return CommandReply(id=req_id, ok=True, payload=self._snapshot()).to_dict()
         try:
             result = await self._on_control(env.type, env.payload)
             return CommandReply(id=req_id, ok=True, payload=result).to_dict()

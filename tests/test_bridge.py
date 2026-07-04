@@ -200,6 +200,32 @@ async def test_ui_served_without_auth_ws_token_via_query():
         await c.close()
 
 
+async def test_snapshot_extra_merges_daemon_state():
+    """UI truth source: mic state rides every snapshot (WS + state.get)."""
+    bus = EventBus()
+    registry = Registry(emit=bus.emit)
+    mic = {"duplex": "full_duplex", "attention": "always"}
+    server = BridgeServer(
+        registry, bus, listen_slice_s=0.2, snapshot_extra=lambda: {"mic": dict(mic)}
+    )
+    c = TestClient(TestServer(server.build_app()))
+    await c.start_server()
+    try:
+        ws = await c.ws_connect("/v1/events")
+        snap = await ws.receive_json()
+        assert snap["payload"]["mic"] == mic
+        # Live state changes show up in the NEXT snapshot (reconnect/state.get).
+        mic["duplex"] = "half_duplex"
+        await ws.send_json({"id": "1", "cmd": "state.get", "payload": {}})
+        reply = await ws.receive_json()
+        assert reply["payload"]["mic"]["duplex"] == "half_duplex"
+        await ws.close()
+        resp = await c.post("/v1/control/state.get", json={})
+        assert (await resp.json())["mic"]["duplex"] == "half_duplex"
+    finally:
+        await c.close()
+
+
 async def test_ws_snapshot_then_events(client):
     await register(client)
     ws = await client.ws_connect("/v1/events")

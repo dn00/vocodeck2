@@ -43,6 +43,8 @@
   button { cursor: pointer; }
   button:hover { border-color: var(--accent-dim); color: var(--accent); }
   button.danger:hover { border-color: var(--red); color: var(--red); }
+  button.flash { border-color: var(--green); color: var(--green); }
+  select:disabled { opacity: 0.4; cursor: not-allowed; }
   #tokenbar {
     display: none; gap: 8px; align-items: center; padding: 6px 12px;
     background: #2a1215; border-bottom: 1px solid #7f1d1d; flex: 0 0 auto;
@@ -128,13 +130,13 @@
   <span class="chip">duplex <b id="micDuplex">–</b></span>
   <span class="chip">attention <b id="micAttention">–</b></span>
   <span class="spacer"></span>
-  <select id="selDuplex" title="duplex mode">
-    <option value="">duplex…</option>
+  <select id="selDuplex" title="duplex mode" disabled>
+    <option value="" hidden>duplex…</option>
     <option value="full_duplex">full_duplex</option>
     <option value="half_duplex">half_duplex</option>
   </select>
-  <select id="selAttention" title="attention mode">
-    <option value="">attention…</option>
+  <select id="selAttention" title="attention mode" disabled>
+    <option value="" hidden>attention…</option>
     <option value="always">always</option>
     <option value="wake">wake</option>
     <option value="ptt_only">ptt_only</option>
@@ -184,6 +186,7 @@ const S = {
   sessions: [], active: null, selected: null, tab: "screen",
   term: new Map(),          // call name -> last peek text
   termHint: new Map(),      // call name -> waiting|working|shell|null
+  mic: null,                // {duplex, attention} — null until known
   gotSnapshot: false, reqId: 0, pending: new Map(), backoff: 1000,
 };
 let ws = null, syncTimer = null, autoTimer = null;
@@ -240,8 +243,7 @@ function handle(msg) {
     return;
   }
   if (msg.type === "mic.state") {
-    $("micDuplex").textContent = msg.payload.duplex || "–";
-    $("micAttention").textContent = msg.payload.attention || "–";
+    applyMic(msg.payload);
     return;
   }
   if (msg.type === "screen.updated" && msg.payload.markdown !== undefined) {
@@ -267,10 +269,25 @@ function sync() {
 function applyState(state) {
   S.sessions = state.sessions || [];
   S.active = state.active_session;
+  if (state.mic !== undefined) applyMic(state.mic);
   if ($("chkFollow").checked && S.active) S.selected = S.active;
   if (!S.sessions.some(s => s.session_id === S.selected))
     S.selected = S.active || (S.sessions[0] && S.sessions[0].session_id) || null;
   renderSidebar(); renderPanel();
+}
+
+// Single source of truth for the mic controls: chips AND dropdowns always
+// mirror daemon state (snapshot or mic.state event), never a local click.
+function applyMic(mic) {
+  S.mic = mic || null;
+  const d = mic && mic.duplex, a = mic && mic.attention;
+  $("micDuplex").textContent = d || "–";
+  $("micAttention").textContent = a || "–";
+  $("selDuplex").value = d || "";
+  $("selAttention").value = a || "";
+  // null = headless daemon (no voice loop): the knobs do nothing.
+  $("selDuplex").disabled = !d;
+  $("selAttention").disabled = !a;
 }
 
 /* ---- rendering ------------------------------------------------------------ */
@@ -419,6 +436,11 @@ function toast(text) {
 }
 const fail = e => toast(e.message || String(e));
 
+function flash(el) {
+  el.classList.add("flash");
+  clearTimeout(el._f); el._f = setTimeout(() => el.classList.remove("flash"), 400);
+}
+
 function doPeek() {
   const s = selectedSession();
   if (!s || !s.capabilities.includes("inject")) return;
@@ -468,14 +490,19 @@ $("chkFollow").addEventListener("change", ev => {
 });
 $("chkVerbose").addEventListener("change", () => {});
 
-$("btnInterrupt").addEventListener("click", () => send("interrupt").catch(fail));
+$("btnInterrupt").addEventListener("click", () => {
+  send("interrupt")
+    .then(() => flash($("btnInterrupt")))
+    .catch(fail);
+});
+// On failure, snap back to daemon truth instead of keeping the local pick.
 $("selDuplex").addEventListener("change", ev => {
-  if (ev.target.value) send("mic.set", { duplex: ev.target.value }).catch(fail);
-  ev.target.value = "";
+  if (ev.target.value) send("mic.set", { duplex: ev.target.value })
+    .catch(e => { fail(e); applyMic(S.mic); });
 });
 $("selAttention").addEventListener("change", ev => {
-  if (ev.target.value) send("mic.set", { attention: ev.target.value }).catch(fail);
-  ev.target.value = "";
+  if (ev.target.value) send("mic.set", { attention: ev.target.value })
+    .catch(e => { fail(e); applyMic(S.mic); });
 });
 
 function sendSay() {

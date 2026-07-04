@@ -104,6 +104,7 @@ class Daemon:
             self.bus,
             token=cfg.get("bridge", {}).get("token"),
             on_control=self._control,
+            snapshot_extra=lambda: {"mic": self._mic_payload()},
         )
         self.voice: VoiceLoop | None = None
         self._tmux_mgr: TmuxManager | None = None
@@ -250,15 +251,15 @@ class Daemon:
             self.voice.set_muted(muted)
         self._emit_mic_state()
 
-    def _emit_mic_state(self) -> None:
+    def _mic_payload(self) -> dict:
         v = self.voice
-        self.bus.emit(
-            "mic.state",
-            {
-                "duplex": v.duplex.value if v else None,
-                "attention": v.attention.mode.value if v else None,
-            },
-        )
+        return {
+            "duplex": v.duplex.value if v else None,
+            "attention": v.attention.mode.value if v else None,
+        }
+
+    def _emit_mic_state(self) -> None:
+        self.bus.emit("mic.state", self._mic_payload())
 
     # ---- control commands (CLI/WS) -----------------------------------------------
 
@@ -283,15 +284,17 @@ class Daemon:
             # Two orthogonal knobs (SPEC §4.4/§4.5); legacy "mode" = duplex.
             duplex = payload.get("duplex") or payload.get("mode")
             attention = payload.get("attention")
+            if duplex is None and attention is None:
+                raise ValueError("mic.set needs duplex and/or attention")
+            if self.voice is None:
+                # There is no runtime to change; pretending otherwise is the
+                # exact lie the live test caught on config.set.
+                raise ValueError("no voice loop running")
             if duplex is not None:
                 self._set_duplex(str(duplex))
             if attention is not None:
-                if self.voice is None:
-                    raise ValueError("no voice loop running")
                 self.voice.set_attention(AttentionMode(str(attention)))
                 self._emit_mic_state()
-            if duplex is None and attention is None:
-                raise ValueError("mic.set needs duplex and/or attention")
             return {"duplex": duplex, "attention": attention}
         if cmd == "say_as_user":
             text = str(payload.get("text", "")).strip()
@@ -363,6 +366,8 @@ class Daemon:
         if key in self._HOT_APPLY:
             try:
                 if key == "audio.duplex":
+                    if self.voice is None:
+                        raise ValueError("no voice loop running")
                     self._set_duplex(str(value))
                 elif key == "audio.attention":
                     if self.voice is None:
