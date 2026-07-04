@@ -451,7 +451,28 @@ def cmd_doctor(client: Client) -> int:
     else:
         row("warn", "tmux", "not installed — no managed sessions, no inject")
 
-    # 5. optional python extras
+    # 5. listener script (voice_init output) — a stale MCP server keeps
+    # writing the pre-rework streaming variant, which never exits and so
+    # never wakes the agent (live-test find).
+    script = CACHE_DIR / "listen.sh"
+    if script.exists():
+        try:
+            stale = "--stream" in script.read_text()
+        except OSError:
+            stale = False
+        if stale:
+            row(
+                "warn",
+                "listen.sh",
+                "stale streaming script — restart the agent's MCP server"
+                " (old voice_init), then call voice_init again",
+            )
+        else:
+            row("ok", "listen.sh", "one-shot listener script")
+    else:
+        row("--", "listen.sh", "not written yet (voice_init creates it)")
+
+    # 6. optional python extras
     for mod, extra, why in (
         ("faster_whisper", "stt", "speech-to-text"),
         ("sounddevice", "(core)", "mic/speaker"),

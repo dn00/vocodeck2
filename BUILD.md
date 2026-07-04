@@ -292,6 +292,14 @@ User-reported failures, all reproduced in the event log and fixed:
 Live-validated (hermetic daemon + real MCP stdio): double listener →
 superseded once; speak → one-shot print + exit 0; UI detach → "ended by
 the user"; immediate re-run after detach → no zombie session.
+
+UPGRADE RITUAL (learned live, third test): restarting the daemon is not
+enough — the MCP server process (spawned per Claude session) keeps OLD
+voco_mcp code and its voice_init keeps writing the OLD listen.sh. After
+upgrading voco: restart the daemon AND the agent sessions (respawns
+voco-mcp), then voice_init again. `voco doctor` now flags a stale
+streaming listen.sh. A superseded stale listener self-terminates the
+next time the corrected script runs (poller identity doing its job).
 - [x] **voco new: tmux session doesn't persist:** spawn now pins the pane
       (remain-on-exit), waits 0.8s, checks pane_dead, and raises with the
       exit status + pane tail; corpse cleaned up. Live-validated: bad
