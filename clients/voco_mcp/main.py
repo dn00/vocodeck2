@@ -47,13 +47,15 @@ Listening — pick ONE mode:
 
 
 def init_reply(client: Client) -> str:
-    """voice_init: write the exact listener script, return how to run it.
+    """voice_init: write the listener script, return complete integration
+    instructions.
 
-    ONE-SHOT by design: the script exits when the user speaks, because
-    harnesses wake their agent when a background task EXITS — a forever
-    stream just buffers transcripts invisibly (live-test bug). The agent
-    re-runs the same command after acting; between runs, input queues
-    server-side, so nothing is lost.
+    Generates TWO scripts:
+    - listen.sh (one-shot): exits after one transcript. For agents that
+      only support background-task-with-completion (run → get output →
+      re-run).
+    - listen-stream.sh (streaming): prints one line per transcript, never
+      exits. For agents with a Monitor/event-stream primitive (Claude Code).
 
     A script file beats an inline command: the agent's shell may be fish
     (no VAR=x prefix syntax), lacks `voco` on PATH (the CLI lives in this
@@ -66,31 +68,58 @@ def init_reply(client: Client) -> str:
         sess = client.session()
     except Exception:
         return SOFT_FAIL
-    lines = [
-        "#!/usr/bin/env bash",
-        "# voco listener — written by voice_init; run me as a background",
-        "# task. I exit when the user speaks; my output is their",
-        "# instruction. Run me again afterwards to keep listening.",
-        f"export VOCO_URL={shlex.quote(client.base_url)}",
-    ]
+
+    env_lines = [f"export VOCO_URL={shlex.quote(client.base_url)}"]
     if client.token:
-        # Loopback-only capability token; 0700 file, never in argv/ps.
-        lines.append(f"export VOCO_TOKEN={shlex.quote(client.token)}")
-    lines.append(f"exec {shlex.quote(sys.executable)} -m voco_cli.main listen")
+        env_lines.append(f"export VOCO_TOKEN={shlex.quote(client.token)}")
+    env_block = "\n".join(env_lines)
+    py = shlex.quote(sys.executable)
+
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    script = CACHE_DIR / "listen.sh"
-    script.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    script.chmod(0o700)
+
+    # One-shot script
+    oneshot = CACHE_DIR / "listen.sh"
+    oneshot.write_text(
+        "#!/usr/bin/env bash\n"
+        "# voco listener (one-shot) — exits after one transcript.\n"
+        f"{env_block}\n"
+        f"exec {py} -m voco_cli.main listen\n",
+        encoding="utf-8",
+    )
+    oneshot.chmod(0o700)
+
+    # Streaming script
+    stream = CACHE_DIR / "listen-stream.sh"
+    stream.write_text(
+        "#!/usr/bin/env bash\n"
+        "# voco listener (streaming) — one stdout line per transcript,\n"
+        "# never exits. Use with Monitor or equivalent event stream.\n"
+        f"{env_block}\n"
+        f"exec {py} -m voco_cli.main listen --stream\n",
+        encoding="utf-8",
+    )
+    stream.chmod(0o700)
+
     return (
-        f"You are {sess['call_name']} on the voice deck.\n"
-        "Start (or restart) the listen loop by running this as a"
-        " BACKGROUND task:\n\n"
-        f"  bash {shlex.quote(str(script))}\n\n"
-        "It exits when the user speaks; its output is their instruction."
-        " Act on it, then run the same command again in the background to"
-        " keep listening. If it reports the session was ended, superseded,"
-        " or the daemon unreachable, STOP re-running it. Never call"
-        " voice_listen while a listener task runs."
+        f"You are {sess['call_name']} on the voice deck.\n\n"
+        "HOW TO LISTEN — pick the best mode for your harness:\n\n"
+        "## Streaming (preferred — Claude Code Monitor, or any event stream)\n"
+        "Run this ONCE as a persistent monitor:\n\n"
+        f"  bash {shlex.quote(str(stream))}\n\n"
+        "Each stdout line is one transcript — the user's spoken instruction.\n"
+        "Act on each line as it arrives. The script never exits; stop it\n"
+        "when the session ends.\n\n"
+        "## One-shot (fallback — background task with completion notification)\n"
+        "Run this as a background task:\n\n"
+        f"  bash {shlex.quote(str(oneshot))}\n\n"
+        "It exits when the user speaks; its output is their instruction.\n"
+        "Act on it, then re-run the same command to keep listening.\n\n"
+        "## Rules\n"
+        "- Do NOT call voice_listen while a listener script runs.\n"
+        "- If the output says the session was ended, superseded, or the\n"
+        "  daemon is unreachable, STOP re-running.\n"
+        "- Speak with voice_say. Show content with voice_screen.\n"
+        "- The user is listening, not reading the terminal."
     )
 
 
@@ -137,14 +166,12 @@ def build_server():
                 name="voice_init",
                 description=(
                     "Set up hands-free listening: registers you on the "
-                    "voice deck, writes a small bash script, and returns "
-                    "the exact `bash <path>` command to run as a "
-                    "background task. The task exits when the user "
-                    "speaks; its output is their instruction — act on "
-                    "it, then re-run the same command. Idempotent: safe "
-                    "to call again; a new listener supersedes the old. "
-                    "Prefer this over voice_listen whenever you can run "
-                    "background shell tasks."
+                    "voice deck, writes listener scripts (streaming + "
+                    "one-shot), and returns complete integration "
+                    "instructions for your harness. Call ONCE at session "
+                    "start; idempotent and safe to re-call. Prefer this "
+                    "over voice_listen whenever you can run background "
+                    "shell tasks."
                 ),
                 inputSchema={"type": "object", "properties": {}},
             ),

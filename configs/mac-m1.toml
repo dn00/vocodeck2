@@ -27,21 +27,11 @@ model = "mlx-community/Kokoro-82M-bf16"
 voice = "af_heart"
 sample_rate = 24000
 
-# [first_mate]                   # local Gemma tier (SPEC §7)
-# Serve with: llama-server -hf ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M \
-#   --port 8080 -c 4096 --reasoning-budget 0 -ngl 99
-# (--reasoning-budget 0 is REQUIRED: Gemma 4 thinking tokens otherwise eat
-#  the whole completion — calibrated 2026-07-03, scripts/mate_calibrate.py)
-# base_url = "http://127.0.0.1:8080/v1"
-# model = "gemma-4-e4b-it"
-# timeout_ms = 800               # M1 measured p50 ~2000ms (gen-bound): either
-#                                # raise this (slower dispatch) or use a smaller
-#                                # model; 3090 expected well under 800
-# stream = true                 # speak the mate's first sentence while the
-#                                # rest of its JSON is still generating —
-#                                # measured M1 2026-07-04: first speech delta
-#                                # 0.75-1.6s vs 1.8s+ plain (mate_stream_smoke).
-#                                # Default off until validated by ear.
+[first_mate]
+base_url = "http://127.0.0.1:8080/v1"
+model = "gemma-4-e4b-it"
+timeout_ms = 3000                # M1 measured p50 ~2000ms; raised for live test
+stream = true
 
 # [bridge]
 # token = ""                     # bearer token; default-on for remote attach

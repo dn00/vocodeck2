@@ -151,27 +151,36 @@ class InitClient:
         return {"session_id": "abc", "call_name": "Petra"}
 
 
-def test_voice_init_writes_script_and_returns_bash_command(tmp_path, monkeypatch):
+def test_voice_init_writes_both_scripts_and_full_instructions(tmp_path, monkeypatch):
     import sys
 
     import voco_mcp.main as mcp_main
 
     monkeypatch.setattr(mcp_main, "CACHE_DIR", tmp_path)
     out = mcp_main.init_reply(InitClient())
-    script = tmp_path / "listen.sh"
+    oneshot = tmp_path / "listen.sh"
+    stream = tmp_path / "listen-stream.sh"
     assert "You are Petra" in out
-    assert f"bash {script}" in out  # the exact, backgroundable command
-    body = script.read_text()
+    assert f"bash {oneshot}" in out
+    assert f"bash {stream}" in out
+    # One-shot: exit-per-transcript wakes exit-notification harnesses.
+    body = oneshot.read_text()
     assert body.startswith("#!/usr/bin/env bash")
     assert "export VOCO_URL=http://127.0.0.1:7799" in body
     # Pins THIS interpreter: the agent's shell has no `voco` on PATH.
-    # ONE-SHOT (no --stream): exit-per-transcript is what wakes the agent.
     assert f"exec {sys.executable} -m voco_cli.main listen\n" in body
     assert "--stream" not in body
     assert "VOCO_TOKEN" not in body
-    assert (script.stat().st_mode & 0o777) == 0o700
-    # The reply must teach the re-arm loop.
-    assert "run the same command again" in out
+    assert (oneshot.stat().st_mode & 0o777) == 0o700
+    # Streaming: for harnesses that can monitor live background output.
+    sbody = stream.read_text()
+    assert f"exec {sys.executable} -m voco_cli.main listen --stream\n" in sbody
+    assert (stream.stat().st_mode & 0o777) == 0o700
+    # Self-contained integration instructions (live-test ask): the reply
+    # alone must teach the loop and the stop conditions.
+    assert "re-run the same command" in out
+    assert "Do NOT call voice_listen" in out
+    assert "STOP re-running" in out
 
 
 def test_voice_init_keeps_token_in_the_script_not_the_reply(tmp_path, monkeypatch):

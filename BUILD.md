@@ -313,14 +313,115 @@ next time the corrected script runs (poller identity doing its job).
       component: TMUX_PANE > CLAUDE_CODE_SESSION_ID > None (both verified
       inherited by Bash children AND MCP servers, so CLI+MCP from one
       agent still merge). Registry keys + CLI cache filename include it.
+- [x] **voice_init should be self-contained:** DONE (user's live-session
+      rewrite, reconciled + test-pinned): two scripts (listen-stream.sh
+      for Monitor-capable harnesses, listen.sh one-shot fallback) +
+      complete integration rules in the reply.
 - [ ] **PTT doesn't work from browser:** F9 keypress in the debug UI doesn't
       trigger PTT — browser can't capture global hotkeys. Needs a native
       desktop client (Rust?) for global hotkey support, system tray, and
       always-on mic access regardless of focused window. (v-next)
+- [ ] **Stream TTS per sentence:** instead of sending the full response
+      text to TTS at once, break it into sentences and stream each one
+      so the user hears the first sentence while the rest is synthesizing.
+      Reduces perceived response latency.
+- [ ] **Faster speech dispatch — two approaches (pick one):**
+      (a) Speech-tag parsing: agent wraps speech in XML `<speech>` tags in
+      terminal output; a watcher parses tags and dispatches to TTS per
+      sentence as text streams — no tool call round-trip, speech starts
+      as soon as a sentence closes.
+      (b) MVP/current: voice_say MCP tool call per utterance — simpler but
+      slower (full tool-call round-trip per speech act).
+      Option (a) is significantly faster for streaming output.
+- [ ] **Streaming listener stalls until frontend activity:** the listen
+      --stream monitor stops delivering events until something is typed in
+      the debug UI. Likely a stale long-poll or missed rearm; the frontend
+      event may be unblocking a stuck connection.
+- [ ] **VAD splits speech too aggressively:** natural pauses mid-sentence
+      cause the VAD to finalize and dispatch fragments ("one is", "testing",
+      "some optimizations" as three separate messages). Silence threshold
+      or hold window may need tuning for conversational speech.
+- [ ] **First mate speech gated in always-on mode:** the mate routes
+      correctly and generates speech, but the playback queue's rule-0
+      gate blocks it. The gate closes during CAPTURING/HOLDING turn
+      states; in always-on listening, the mic is continuously capturing
+      so the gate stays permanently shut. Mate/agent speech never plays.
+      Fix: exempt FIRST_MATE/AGENT sources from the capture gate, or
+      only gate during active user speech (HOLDING), not passive capture.
+- [ ] **Mate leaks system prompt as speech:** Gemma told the user "I can
+      only speak about the loop or summarize agent comments" — that's
+      its own instruction text surfaced verbatim as a spoken response.
+      Prompt needs guardrails against self-description.
+- [ ] **Mate and agent speech uncoordinated:** both the mate and the
+      agent speak independently with no sequencing — creates a confusing
+      race where two voices talk at different times about different
+      things. Needs playback coordination or mutual exclusion.
+- [ ] **Mate narrates instead of acknowledging:** the grounding block
+      includes recent agent say lines, and the mate summarizes them
+      ("Orion said X") instead of just routing ("sending that over").
+      Prompt tuning needed — the say history is useful for "what did X
+      say?" queries but causes narrative echo on normal forwards.
+- [ ] **Mate out of sync with conversation pace:** on M1, the mate
+      responds before the agent for the current turn, but the ~2s
+      delay means the user has already heard the agent's previous
+      response and moved on. The mate ends up sounding like it's
+      summarizing what already happened — a narrator one beat behind.
+      Needs faster hardware, a smaller model, or auto-suppress mate
+      speech when latency exceeds the conversation cadence.
+- [ ] **Mate and agent share the same voice:** the first mate and agent
+      speech both use the same TTS voice (af_heart), so the user can't
+      tell who's speaking. The mate needs a distinct voice — kokoro has
+      multiple options. Add a [first_mate] voice config separate from
+      [tts] voice.
+- [ ] **Hot reload for daemon components:** enabling/disabling things like
+      the first mate should not require a full daemon restart. Config
+      changes to provider sections should hot-reload where possible.
+      (Triage: scope to [first_mate].* — it's a stateless HTTP adapter,
+      rebuildable on config.set. Generic hot-reload = rabbit hole.)
 - [ ] **Kokoro voice quality:** kokoro-onnx on M1 is functional but voice
       quality is noticeably worse than faster-qwen3-tts / the speech-to-
       speech reference project. Explore better M1-local TTS or remote GPU
       TTS option. (v-next)
+
+## Triage decisions (2026-07-03 late, discussed with user)
+
+The 12 items above collapse into four builds + two deferrals:
+
+1. MATE OFF THE CRITICAL PATH (covers: gated/uncoordinated/narrator/
+   out-of-sync). Root condition = mate latency vs conversation cadence,
+   NOT the rule-0 gate (exempting mate from gating was considered and
+   vetoed — deck must not talk over the user). Design: router waits for
+   the mate only up to timeout (~dispatch hold); on expiry it returns
+   the fast-path decision (phrase table + name heuristics) WITHOUT
+   cancelling the mate. The late mate then: executes actions (idempotent,
+   fine late), speaks deck answers, corrects misroutes (re-dispatch +
+   spoken correction). Mate speech gets a TTL (stale acks die silently)
+   and turn attribution (rule-3 kills it once the agent speaks). Agents
+   are told statically: the deck owns acks — speak substance only. On
+   fast hardware (3090) the mate beats the hold and everything collapses
+   to today's synchronous behavior. Division of labor: phrase table =
+   instant deterministic ops; mate = fast intelligence (deck Q&A,
+   fuzzy targeting, NL actions); agent = the work + result speech.
+2. TURN-LAYER PATIENCE (covers: VAD fragmenting). Verified against
+   hf/speech-to-speech source: their fix is NOT a longer min_silence
+   (they ship 64ms, same as us) but unanswered_reopen_ms=7000 — an
+   uncommitted turn keeps absorbing resumed speech until something
+   ANSWERS it. Our commit point is dispatch (~1-3s after silence) =
+   too eager. Port: widen pre-dispatch reopen patience; our addition:
+   completeness-modulated hold (Whisper punctuation — complete-looking
+   transcript commits fast, cut-off-looking extends the window), and a
+   UI patience preset (config.set hot-apply).
+3. SENTENCE-CHUNKED TTS (covers: stream-TTS-per-sentence) — generalize
+   the mate's sentence cutter to agent says; no tags needed for this
+   half. Distinct [first_mate] voice rides along.
+4. MATE PROMPT PASS (covers: prompt leak, narrate-vs-ack) — contract
+   prompt guardrails, verified via mate_calibrate.py.
+
+Deferred: T-PROXY streaming text (premium path; `voco run claude`
+wrapper sets ANTHROPIC_BASE_URL; pipe-pane tag parsing rejected for TUI
+agents — rendered output too dirty); STREAM-STALL (observation came
+from the stale pre-rework build — needs a repro on current HEAD before
+it's a ticket).
 
 ## M0 exit — REMAINING (needs user present / live audio)
 
