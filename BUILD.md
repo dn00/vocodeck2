@@ -259,6 +259,12 @@ window — findings below); repo private on GitHub, push per slice.
 - [x] **voice_listen blocks the agent turn:** `voco listen --stream` — the
       agent backgrounds it once, transcripts arrive as flushed stdout
       lines; MCP instructions teach both modes. Verified live end-to-end.
+      Plus voice_init (the original sketch): writes the exact listener
+      script (0700; pins the venv interpreter + URL + token — agent
+      shells lack `voco` on PATH and fish rejects VAR=x prefixes) and
+      returns `bash <path>` to background. Verified over a real MCP
+      stdio handshake: init → background script (clean env) → `voco
+      input` → '[typed] ...' stream line.
 - [x] **voco new: tmux session doesn't persist:** spawn now pins the pane
       (remain-on-exit), waits 0.8s, checks pane_dead, and raises with the
       exit status + pane tail; corpse cleaned up. Live-validated: bad

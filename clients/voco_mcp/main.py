@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shlex
+import sys
 import time
 
-from voco_cli.main import Client, format_transcript
+from voco_cli.main import CACHE_DIR, SOFT_FAIL, Client, format_transcript
 
 LISTEN_BUDGET_S = float(os.environ.get("VOCO_MCP_LISTEN_BUDGET_S", "240"))
 
@@ -31,15 +33,52 @@ substantial on the screen with voice_screen, then say a one-line summary.
 Speak brief progress updates during long work.
 
 Listening — pick ONE mode:
-- If you can run background shell tasks: run `voco listen --stream` as a
-  background task ONCE at the start. Each stdout line it emits is the
-  user's next spoken instruction; you stay free to work and to react to
-  typed input meanwhile. Do not also call voice_listen.
+- If you can run background shell tasks: call voice_init ONCE at the
+  start; it writes a listener script and returns the exact `bash <path>`
+  command to run as a background task. Each stdout line that task emits
+  is the user's next spoken instruction; you stay free to work and react
+  to typed input meanwhile. Do not also call voice_listen.
 - Otherwise: when your turn's work is complete, END by calling
   voice_listen and acting on what it returns; if it returns 'nothing
   yet', call voice_listen again. Treat returned transcripts as the
   user's next instruction.
 """
+
+
+def init_reply(client: Client) -> str:
+    """voice_init: write the exact listener script, return how to run it.
+
+    A script file beats an inline command: the agent's shell may be fish
+    (no VAR=x prefix syntax), lacks `voco` on PATH (the CLI lives in this
+    server's venv), and the bearer token stays inside a 0700 file instead
+    of process args. Identity is NOT baked in — the running script
+    inherits the agent's TMUX_PANE / harness session id, so it registers
+    as the SAME session as this server (instance identity)."""
+    try:
+        sess = client.session()
+    except Exception:
+        return SOFT_FAIL
+    lines = [
+        "#!/usr/bin/env bash",
+        "# voco listener — written by voice_init; run me as a background",
+        "# task. Each stdout line is the user's next spoken instruction.",
+        f"export VOCO_URL={shlex.quote(client.base_url)}",
+    ]
+    if client.token:
+        # Loopback-only capability token; 0700 file, never in argv/ps.
+        lines.append(f"export VOCO_TOKEN={shlex.quote(client.token)}")
+    lines.append(f"exec {shlex.quote(sys.executable)} -m voco_cli.main listen --stream")
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    script = CACHE_DIR / "listen.sh"
+    script.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    script.chmod(0o700)
+    return (
+        f"You are {sess['call_name']} on the voice deck.\n"
+        "Run this ONCE as a background task (never block on it):\n\n"
+        f"  bash {shlex.quote(str(script))}\n\n"
+        "Each stdout line it emits is the user's next spoken instruction — "
+        "act on each line. While it runs, do not call voice_listen."
+    )
 
 
 def build_server():
@@ -82,14 +121,27 @@ def build_server():
                 },
             ),
             Tool(
+                name="voice_init",
+                description=(
+                    "Set up hands-free listening: registers you on the "
+                    "voice deck, writes a small bash script, and returns "
+                    "the exact `bash <path>` command to run ONCE as a "
+                    "background task. Each stdout line that task emits is "
+                    "the user's next spoken instruction. Prefer this over "
+                    "voice_listen whenever you can run background shell "
+                    "tasks."
+                ),
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            Tool(
                 name="voice_listen",
                 description=(
                     "Park and wait for the user's next spoken instruction. "
                     "Call this when your turn's work is complete. If it "
                     "returns 'nothing yet', call it again to keep listening. "
                     "NOTE: this blocks your turn — if you can run background "
-                    "shell tasks, background `voco listen --stream` instead "
-                    "and skip this tool."
+                    "shell tasks, call voice_init once instead and background "
+                    "the command it returns."
                 ),
                 inputSchema={"type": "object", "properties": {}},
             ),
@@ -111,6 +163,9 @@ def build_server():
                 arguments.get("title"),
                 arguments.get("mode", "show"),
             )
+            return [TextContent(type="text", text=result)]
+        if name == "voice_init":
+            result = await loop.run_in_executor(None, init_reply, client)
             return [TextContent(type="text", text=result)]
         if name == "voice_listen":
             result = await loop.run_in_executor(None, _listen_budgeted, client)

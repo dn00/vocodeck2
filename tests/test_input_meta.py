@@ -104,3 +104,54 @@ def test_listen_stream_exits_softly_when_daemon_gone(capsys):
     rc = listen_stream(SequencedClient([{"status": "unavailable"}]))
     assert rc == 0
     assert "continue without voice" in capsys.readouterr().out
+
+
+class InitClient:
+    """Duck-typed Client for init_reply: canned session, fixed url/token."""
+
+    def __init__(self, token: str | None = None, fail: bool = False) -> None:
+        self.base_url = "http://127.0.0.1:7799"
+        self.token = token
+        self._fail = fail
+
+    def session(self) -> dict:
+        if self._fail:
+            raise OSError("daemon down")
+        return {"session_id": "abc", "call_name": "Petra"}
+
+
+def test_voice_init_writes_script_and_returns_bash_command(tmp_path, monkeypatch):
+    import sys
+
+    import voco_mcp.main as mcp_main
+
+    monkeypatch.setattr(mcp_main, "CACHE_DIR", tmp_path)
+    out = mcp_main.init_reply(InitClient())
+    script = tmp_path / "listen.sh"
+    assert "You are Petra" in out
+    assert f"bash {script}" in out  # the exact, backgroundable command
+    body = script.read_text()
+    assert body.startswith("#!/usr/bin/env bash")
+    assert "export VOCO_URL=http://127.0.0.1:7799" in body
+    # Pins THIS interpreter: the agent's shell has no `voco` on PATH.
+    assert f"exec {sys.executable} -m voco_cli.main listen --stream" in body
+    assert "VOCO_TOKEN" not in body
+    assert (script.stat().st_mode & 0o777) == 0o700
+
+
+def test_voice_init_keeps_token_in_the_script_not_the_reply(tmp_path, monkeypatch):
+    import voco_mcp.main as mcp_main
+
+    monkeypatch.setattr(mcp_main, "CACHE_DIR", tmp_path)
+    out = mcp_main.init_reply(InitClient(token="sekrit"))
+    assert "sekrit" not in out  # never in the transcript
+    assert "export VOCO_TOKEN=sekrit" in (tmp_path / "listen.sh").read_text()
+
+
+def test_voice_init_fails_soft_when_daemon_unreachable(tmp_path, monkeypatch):
+    import voco_mcp.main as mcp_main
+    from voco_cli.main import SOFT_FAIL
+
+    monkeypatch.setattr(mcp_main, "CACHE_DIR", tmp_path)
+    assert mcp_main.init_reply(InitClient(fail=True)) == SOFT_FAIL
+    assert not (tmp_path / "listen.sh").exists()  # nothing written on failure
