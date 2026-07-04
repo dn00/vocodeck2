@@ -228,6 +228,58 @@ window — findings below); repo private on GitHub, push per slice.
   wake same-breath VAD reset; multi-utterance mate memory; packaging
   (uvx/launchd/systemd) + PtyHost seam for native Windows (ranked list
   from the next-steps agent lives in the session log, 2026-07-04).
+- One-command onboarding: `uv sync` should include all needed extras by
+  default (or a single `--extra all`); `voco setup` should generate
+  `.mcp.json` automatically; MCP may belong in base deps. Current setup
+  has too many manual steps (extra-juggling, hand-authored .mcp.json).
+
+## Live-test bugs (2026-07-03, M1 Mac, user present) — FIXED 2026-07-03 (see journal)
+
+- [x] **Echo feedback (full_duplex + speakers):** mac-m1 profile now defaults
+      half_duplex; set_duplex applies suppression MID-playback (the rescue
+      move used to wait for the next playback edge); wake scorer is deaf
+      during playback; pre-roll ring is dropped when suppression lifts so
+      the bot's speaker tail can't open the next utterance. AEC still
+      default-off pending live tuning (unchanged).
+- [x] **config.set hot-apply lies:** NOT reproducible on HEAD with a live
+      voice loop (regression-tested). The lie WAS real for voice=None
+      (headless/degraded boot): applied:true with no runtime change —
+      now honest (restart_required; mic.set 400s cleanly).
+- [x] **UI dropdowns don't sync:** snapshot now carries {mic:{duplex,
+      attention}} (BridgeServer snapshot_extra); dropdowns mirror daemon
+      state (disabled when headless), revert on failed mic.set; interrupt
+      button flashes on success.
+- [x] **Typed vs spoken input not differentiated:** origin: voice|typed on
+      QueuedInput (persisted), route.decision, input.queued, and listen
+      payloads; CLI/MCP render `[typed]` marks.
+- [x] **Queued-while-working backlog:** per-item age_s computed at delivery;
+      format_transcript (shared CLI+MCP) marks stale (>60s) lines with
+      age; last line stays the current instruction. Nothing dropped
+      silently.
+- [x] **voice_listen blocks the agent turn:** `voco listen --stream` — the
+      agent backgrounds it once, transcripts arrive as flushed stdout
+      lines; MCP instructions teach both modes. Verified live end-to-end.
+- [x] **voco new: tmux session doesn't persist:** spawn now pins the pane
+      (remain-on-exit), waits 0.8s, checks pane_dead, and raises with the
+      exit status + pane tail; corpse cleaned up. Live-validated: bad
+      binary → "exited (status 127) right after spawn".
+- [x] **Always-on attention clips first words:** two real defects — pre-roll
+      (320ms) was SMALLER than the VAD entry run (384ms), and any single
+      sub-threshold frame zeroed the entry accumulator. Pre-roll now
+      derives from min_speech_ms + 320ms margin; entry run only resets
+      after a real (>= min_silence) gap.
+- [x] **Multiple sessions collapse into one:** identity gains an `instance`
+      component: TMUX_PANE > CLAUDE_CODE_SESSION_ID > None (both verified
+      inherited by Bash children AND MCP servers, so CLI+MCP from one
+      agent still merge). Registry keys + CLI cache filename include it.
+- [ ] **PTT doesn't work from browser:** F9 keypress in the debug UI doesn't
+      trigger PTT — browser can't capture global hotkeys. Needs a native
+      desktop client (Rust?) for global hotkey support, system tray, and
+      always-on mic access regardless of focused window. (v-next)
+- [ ] **Kokoro voice quality:** kokoro-onnx on M1 is functional but voice
+      quality is noticeably worse than faster-qwen3-tts / the speech-to-
+      speech reference project. Explore better M1-local TTS or remote GPU
+      TTS option. (v-next)
 
 ## M0 exit — REMAINING (needs user present / live audio)
 
@@ -250,6 +302,27 @@ bridge round-trip works via curl/CLI with a fake-audio harness.
 - registry: same identity re-register returns the same session record and
   token (idempotent); new listen ends the working turn (outstanding_turn
   cleared on on_listen_start).
+
+## Live-test bugfix session (2026-07-03 evening, user present then afk)
+
+Working rule reaffirmed by the user this session: NEVER use subagents —
+everything in the main session. CodeGraph index initialized (used for
+exploration). All nine buildable live-test bugs fixed, one commit per
+slice, 130 tests green + ruff + mypy + PROTOCOL drift after each:
+
+- Repro-first on the hot-apply bug paid off: HEAD was actually correct
+  with a live voice loop; the reproducible lie was voice=None reporting
+  applied:true. Likely live story: a degraded (headless) boot after one
+  of the echo-chaos restarts + UI that could only learn mic state from
+  transient events. Both halves fixed (honest headless + mic in
+  snapshot) so the whole class is gone either way.
+- Smoke-test gotcha worth remembering: a scratch `voco-d --no-audio`
+  without a [state] dir override restores + rewrites the USER'S
+  ~/.local/state/voco/registry.json (ghost active session ate my test
+  dispatches; sanitized the file after). Hermetic smokes need their own
+  state dir AND VOCO_CACHE.
+- gitignore now excludes per-machine files: *.local.toml, .mcp.json,
+  .codegraph/.
 
 ## Journal
 
