@@ -71,6 +71,12 @@ class CaptureBuffer:
             return b""
         return np.concatenate(self._utterance).astype(np.int16).tobytes()
 
+    def drop_pre_roll(self) -> None:
+        """Half-duplex playback just ended: the ring holds speaker-echo
+        tail, not user speech — starting the next utterance with it would
+        feed the bot's own words to STT."""
+        self._pre_roll.clear()
+
     def clear(self) -> None:
         self._utterance = []
         self._recording = False

@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from fakes import FakeMic, FakePlayer, FakeStt, FakeTts, ScriptedVad
+from voco.core.arbitration import DuplexMode
 from voco.core.events import EventBus
 from voco.core.phrases import PhraseCommand
 from voco.core.router import Routed
@@ -211,6 +212,105 @@ async def test_wake_mode_arms_on_scorer_and_then_dispatches(tmp_path):
         assert voice.attention.allows_vad()
         await feed(voice, 4, speech_frame)
         assert voice.machine.state is TurnState.CAPTURING
+    finally:
+        voice.stop()
+
+
+@pytest.mark.asyncio
+async def test_half_duplex_switch_mid_playback_suppresses_immediately(tmp_path):
+    """Echo rescue (live-test): flipping to half_duplex WHILE the bot is
+    speaking must deafen the gate now, not at the next playback edge."""
+    voice, _host, _events = make_loop(tmp_path)
+    await voice.start(asyncio.get_running_loop())
+    try:
+        voice._on_playing_changed(True)  # bot speaking, full duplex: gate open
+        assert not voice.vad_gate.suppressed
+        voice.set_duplex(DuplexMode.HALF)
+        assert voice.vad_gate.suppressed
+        voice.set_duplex(DuplexMode.FULL)  # back: barge-in wants the gate open
+        assert not voice.vad_gate.suppressed
+    finally:
+        voice.stop()
+
+
+@pytest.mark.asyncio
+async def test_half_duplex_playback_end_drops_echo_pre_roll(tmp_path):
+    """The pre-roll ring buffers our own speaker tail while suppressed;
+    the next utterance must open with user audio only."""
+    bus = EventBus()
+    host = Host()
+    stt = FakeStt("hi")
+    cfg = {
+        **CFG,
+        "audio": {**CFG["audio"], "phrase_bank_dir": str(tmp_path / "bank")},
+    }
+    deps = VoiceLoopDeps(
+        load_vad_model=lambda path: ScriptedVad(),
+        stt_builder=lambda provider, **kw: stt,
+        tts_factory=FakeTts,
+        mic_factory=FakeMic,
+        player_factory=FakePlayer,
+        hotkey_factory=None,
+    )
+    voice = VoiceLoop(cfg, bus, host=host, deps=deps)
+    voice.set_duplex(DuplexMode.HALF)
+    await voice.start(asyncio.get_running_loop())
+    try:
+        voice._on_playing_changed(True)
+        for i in range(5):  # speaker echo: loud frames, marked 2000+
+            voice._process_frame(np.full(FRAME_SAMPLES, 2000 + i, dtype=np.int16))
+        assert voice.machine.state is TurnState.IDLE  # suppressed
+        voice._on_playing_changed(False)  # playback ends → ring dropped
+        for i in range(4):  # user speaks, marked 1000+
+            voice._process_frame(np.full(FRAME_SAMPLES, 1000 + i, dtype=np.int16))
+        await asyncio.sleep(0)
+        assert voice.machine.state is TurnState.CAPTURING
+        await feed(voice, 3, silence_frame)
+        for _ in range(50):
+            if stt.received:
+                break
+            await asyncio.sleep(0.02)
+        assert stt.received
+        pcm = np.frombuffer(stt.received[0], dtype=np.int16)
+        marks = set(pcm[::FRAME_SAMPLES].tolist())
+        assert not {2000 + i for i in range(5)} & marks, "bot echo reached STT"
+        assert 1000 in marks  # the user's first frame survived
+    finally:
+        voice.stop()
+
+
+@pytest.mark.asyncio
+async def test_wake_scorer_deaf_during_half_duplex_playback(tmp_path):
+    bus = EventBus()
+    host = Host()
+    cfg = {
+        **CFG,
+        "audio": {
+            **CFG["audio"],
+            "phrase_bank_dir": str(tmp_path / "bank"),
+            "duplex": "half_duplex",
+            "attention": "wake",
+            "wake_model": "fake.onnx",
+        },
+    }
+    deps = VoiceLoopDeps(
+        load_vad_model=lambda path: ScriptedVad(),
+        stt_builder=lambda provider, **kw: FakeStt("x"),
+        tts_factory=FakeTts,
+        mic_factory=FakeMic,
+        player_factory=FakePlayer,
+        hotkey_factory=None,
+        wake_loader=lambda path: lambda frame: 0.9,  # always "voco"
+    )
+    voice = VoiceLoop(cfg, bus, host=host, deps=deps)
+    await voice.start(asyncio.get_running_loop())
+    try:
+        voice._on_playing_changed(True)  # TTS says something voco-like
+        await feed(voice, 3, silence_frame)
+        assert not voice.attention.allows_vad()  # did not self-wake
+        voice._on_playing_changed(False)
+        await feed(voice, 1, silence_frame)
+        assert voice.attention.allows_vad()  # user can wake it again
     finally:
         voice.stop()
 

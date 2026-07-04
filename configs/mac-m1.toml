@@ -2,7 +2,7 @@
 # Copy to ~/.config/voco/config.toml or pass --config.
 
 [audio]
-duplex = "full_duplex"          # headset assumed; "half_duplex" for speakers
+duplex = "half_duplex"          # mutes mic during TTS playback
 ptt_key = "f9"
 silero_model = "models/silero_vad.onnx"
 # input_device / output_device: sounddevice name or index (default: system)

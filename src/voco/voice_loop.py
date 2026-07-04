@@ -254,6 +254,7 @@ class VoiceLoop:
         self._deadline_task: asyncio.Task[None] | None = None
         self._deadline_wakeup = asyncio.Event()
         self._speculation: dict[tuple[int, int], asyncio.Task[None]] = {}
+        self._playing = False  # mirrored from the player (loop thread)
 
     # ---- lifecycle ---------------------------------------------------------
 
@@ -297,6 +298,10 @@ class VoiceLoop:
     def set_duplex(self, mode: DuplexMode) -> None:
         self.duplex = mode
         self.queue.set_duplex(mode)
+        # Mid-playback switches take effect NOW: flipping to half_duplex
+        # while the bot is speaking is exactly the echo-rescue move
+        # (live-test bug) — waiting for the next playback edge is too late.
+        self.vad_gate.suppress(mode is DuplexMode.HALF and self._playing)
 
     def set_attention(self, mode: AttentionMode) -> None:
         if mode is not AttentionMode.MUTED:
@@ -365,6 +370,9 @@ class VoiceLoop:
             self._wake_scorer is not None
             and self.attention.mode is AttentionMode.WAKE
             and not self.attention.allows_vad()
+            # Deaf-while-speaking covers the wake ear too: TTS audio must
+            # not wake the deck it came from.
+            and not self.vad_gate.suppressed
             and self._wake_scorer(frame) >= self._wake_threshold
         ):
             self.attention.on_wake_word()
@@ -373,8 +381,13 @@ class VoiceLoop:
 
     def _on_playing_changed(self, playing: bool) -> None:
         # Half-duplex: deaf while we speak (+ grace via VAD run reset).
+        self._playing = playing
         if self.duplex is DuplexMode.HALF:
             self.vad_gate.suppress(playing)
+            if not playing:
+                # The ring buffered our own speaker tail while suppressed;
+                # the next utterance must not open with bot audio.
+                self.capture.drop_pre_roll()
 
     def _on_vad_speech_start(self) -> None:
         if not self.attention.allows_vad():

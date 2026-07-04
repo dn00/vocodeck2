@@ -55,6 +55,10 @@ class VadGate:
     def in_speech(self) -> bool:
         return self._in_speech
 
+    @property
+    def suppressed(self) -> bool:
+        return self._suppressed
+
     def suppress(self, suppressed: bool) -> None:
         """Half-duplex: mute the gate during TTS playback + grace (§4.4)."""
         self._suppressed = suppressed
