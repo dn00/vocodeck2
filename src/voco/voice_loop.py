@@ -229,6 +229,7 @@ class VoiceLoop:
             TurnConfig(
                 dispatch_hold_ms=int(audio_cfg.get("dispatch_hold_ms", 800)),
                 reopen_window_ms=int(audio_cfg.get("reopen_window_ms", 1200)),
+                incomplete_hold_ms=int(audio_cfg.get("incomplete_hold_ms", 2000)),
             ),
             now=time.monotonic,
         )
@@ -315,6 +316,11 @@ class VoiceLoop:
         # while the bot is speaking is exactly the echo-rescue move
         # (live-test bug) — waiting for the next playback edge is too late.
         self.vad_gate.suppress(mode is DuplexMode.HALF and self._playing)
+
+    def set_patience(
+        self, hold_ms: int | None = None, incomplete_ms: int | None = None
+    ) -> None:
+        self.machine.set_patience(hold_ms=hold_ms, incomplete_ms=incomplete_ms)
 
     def set_attention(self, mode: AttentionMode) -> None:
         if mode is not AttentionMode.MUTED:

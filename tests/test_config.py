@@ -52,6 +52,25 @@ def test_reopen_shorter_than_hold_warns():
     assert any("reopen_window_ms" in w for w in warnings)
 
 
+def test_incomplete_hold_zero_is_valid_negative_is_not():
+    errors, _ = config_mod.validate({"audio": {"incomplete_hold_ms": 0}})
+    assert errors == []
+    errors, _ = config_mod.validate({"audio": {"incomplete_hold_ms": -5}})
+    assert any("incomplete_hold_ms" in e for e in errors)
+
+
+def test_incomplete_hold_at_or_below_hold_warns_inert():
+    # Both run from VAD close: patience <= hold never extends anything.
+    _, warnings = config_mod.validate(
+        {"audio": {"dispatch_hold_ms": 800, "incomplete_hold_ms": 800}}
+    )
+    assert any("incomplete_hold_ms" in w for w in warnings)
+    _, warnings = config_mod.validate(
+        {"audio": {"dispatch_hold_ms": 800, "incomplete_hold_ms": 2000}}
+    )
+    assert not any("incomplete_hold_ms" in w for w in warnings)
+
+
 def test_merge_overrides_win_per_section():
     merged = config_mod.merge(
         {"audio": {"aec": False, "duplex": "full_duplex"}, "tts": {"voice": "a"}},

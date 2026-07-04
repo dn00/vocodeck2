@@ -45,6 +45,7 @@ CFG = {
         # Fast turn timings so the test completes in ~100ms of real time.
         "dispatch_hold_ms": 40,
         "reopen_window_ms": 80,
+        "incomplete_hold_ms": 100,
         "min_speech_ms": 96,  # 3 frames
         "min_silence_ms": 64,  # 2 frames
         "phrase_bank_dir": None,  # replaced per-test with tmp_path
@@ -62,7 +63,9 @@ def silence_frame() -> np.ndarray:
     return np.full(FRAME_SAMPLES, 0, dtype=np.int16)
 
 
-def make_loop(tmp_path, canned="run the tests", attention="always"):
+# Canned transcript is punctuated like real Whisper output for a finished
+# utterance — unpunctuated text now triggers incomplete_hold_ms patience.
+def make_loop(tmp_path, canned="run the tests.", attention="always"):
     bus = EventBus()
     events: list = []
     bus.subscribe(lambda env: events.append((env.type, env.payload)))
@@ -111,9 +114,9 @@ async def test_full_pipeline_speech_to_dispatch(tmp_path):
             await asyncio.sleep(0.02)
         assert host.dispatched, "pipeline never dispatched"
         text, decision = host.dispatched[0]
-        assert text == "run the tests" and decision.kind == "forward"
+        assert text == "run the tests." and decision.kind == "forward"
         assert voice.machine.state is TurnState.IDLE  # dispatch closed turn
-        assert ("stt.final", {"text": "run the tests"}) in events
+        assert ("stt.final", {"text": "run the tests."}) in events
     finally:
         voice.stop()
 

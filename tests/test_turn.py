@@ -15,6 +15,7 @@ from voco.core.turn import (
     TurnEvents,
     TurnMachine,
     TurnState,
+    looks_complete,
 )
 
 
@@ -86,13 +87,13 @@ def test_happy_path_forward_dispatch_at_hold_expiry():
     assert rec.names().count("chirp") == 1
 
     key = m.current_key
-    m.stt_final(key, 0, "run the tests")
-    assert rec.of("route_req") == [("route_req", key, 0, "run the tests")]
+    m.stt_final(key, 0, "run the tests.")
+    assert rec.of("route_req") == [("route_req", key, 0, "run the tests.")]
     m.route_decided(key, 0, RouteDecision(kind="forward"))
     # Route decided before hold expiry: no dispatch yet.
     assert rec.of("dispatch") == []
     clock.advance(m, 0.9)  # past 800ms hold
-    assert rec.of("dispatch") == [("dispatch", key, "run the tests", "forward")]
+    assert rec.of("dispatch") == [("dispatch", key, "run the tests.", "forward")]
     assert m.state is TurnState.IDLE
 
 
@@ -104,9 +105,9 @@ def test_dispatch_waits_for_slow_route_beyond_hold():
     clock.advance(m, 1.0)  # hold expired, in ROUTING, no decision yet
     assert m.state is TurnState.ROUTING
     assert rec.of("dispatch") == []
-    m.stt_final(key, 0, "hello")
+    m.stt_final(key, 0, "hello.")
     m.route_decided(key, 0, RouteDecision(kind="ack_forward", speech="on it"))
-    assert rec.of("dispatch") == [("dispatch", key, "hello", "ack_forward")]
+    assert rec.of("dispatch") == [("dispatch", key, "hello.", "ack_forward")]
 
 
 def test_pre_dispatch_speech_merges_and_stale_results_ignored():
@@ -122,11 +123,11 @@ def test_pre_dispatch_speech_merges_and_stale_results_ignored():
     m.stt_final(key, 0, "stale partial thought")
     assert rec.of("route_req") == []
     m.speech_ended()
-    m.stt_final(key, 1, "the whole merged thought")
+    m.stt_final(key, 1, "the whole merged thought.")
     m.route_decided(key, 1, RouteDecision(kind="forward"))
     clock.advance(m, 0.9)
     assert rec.of("dispatch") == [
-        ("dispatch", key, "the whole merged thought", "forward")
+        ("dispatch", key, "the whole merged thought.", "forward")
     ]
 
 
@@ -135,7 +136,7 @@ def test_dispatch_closes_turn_post_dispatch_speech_is_new_turn():
     m.speech_started()
     m.speech_ended()
     key = m.current_key
-    m.stt_final(key, 0, "first")
+    m.stt_final(key, 0, "first.")
     m.route_decided(key, 0, RouteDecision(kind="forward"))
     clock.advance(m, 0.9)
     assert m.state is TurnState.IDLE
@@ -170,7 +171,7 @@ def test_local_reply_stays_reopenable_then_closes():
     m.speech_started()
     m.speech_ended()
     key = m.current_key
-    m.stt_final(key, 0, "what sessions are connected")
+    m.stt_final(key, 0, "what sessions are connected?")
     m.route_decided(key, 0, RouteDecision(kind="answer", speech="just Helena"))
     clock.advance(m, 0.9)
     assert rec.of("local_reply") == [("local_reply", key, "answer")]
@@ -180,7 +181,7 @@ def test_local_reply_stays_reopenable_then_closes():
     assert rec.of("cancel") == [("cancel", key, 0)]
     assert m.state is TurnState.CAPTURING
     m.speech_ended()
-    m.stt_final(key, 1, "what sessions are connected and their state")
+    m.stt_final(key, 1, "what sessions are connected and their state?")
     m.route_decided(key, 1, RouteDecision(kind="answer", speech="Helena, idle"))
     clock.advance(m, 0.9)
     assert m.state is TurnState.REOPENABLE
@@ -213,3 +214,132 @@ def test_ptt_press_during_holding_merges():
     m.stt_final(key, 1, "merged via ptt")
     m.route_decided(key, 1, RouteDecision(kind="forward"))
     assert rec.of("dispatch") == [("dispatch", key, "merged via ptt", "forward")]
+
+
+# ---- semantic endpointing (incomplete_hold_ms patience) ---------------------
+
+
+def test_looks_complete_semantics():
+    # Cut-off shapes (live-test: "one is" / "testing" dispatched separately).
+    assert not looks_complete("one is")  # unpunctuated
+    assert not looks_complete("one is...")  # Whisper trailing-speech marker
+    assert not looks_complete("one is…")
+    assert not looks_complete("and.")  # dangling connective, punctuated
+    assert not looks_complete("tell the agent to,")  # trailing comma
+    # Finished thoughts commit at the base hold.
+    assert looks_complete("run the tests.")
+    assert looks_complete("what sessions are connected?")
+    assert looks_complete("stop!")
+    assert looks_complete("")  # nothing to wait for
+    assert looks_complete("   ")
+
+
+def test_incomplete_transcript_pulls_routing_back_to_holding_and_merges():
+    m, rec, clock = make()
+    m.speech_started()
+    clock.advance(m, 2.0)
+    m.speech_ended()  # VAD close t=2.0; base hold deadline 2.8
+    key = m.current_key
+    clock.advance(m, 1.0)  # t=3.0: hold expired, STT still out
+    assert m.state is TurnState.ROUTING
+    m.stt_final(key, 0, "one is")  # cut-off: pull back, extend to 2.0+2.0
+    assert m.state is TurnState.HOLDING
+    assert m.next_deadline() == 4.0
+    # Routing still proceeds speculatively on the fragment...
+    assert rec.of("route_req") == [("route_req", key, 0, "one is")]
+    m.route_decided(key, 0, RouteDecision(kind="forward"))
+    assert rec.of("dispatch") == []  # patience holds the door
+    # ...and resumed speech MERGES instead of dispatching the fragment.
+    m.speech_started()
+    assert m.state is TurnState.CAPTURING
+    assert rec.of("cancel") == [("cancel", key, 0)]
+    m.speech_ended()
+    m.stt_final(key, 1, "one is done and two is still running.")
+    m.route_decided(key, 1, RouteDecision(kind="forward"))
+    clock.advance(m, 0.9)
+    assert rec.of("dispatch") == [
+        ("dispatch", key, "one is done and two is still running.", "forward")
+    ]
+
+
+def test_patience_expiry_dispatches_the_fragment():
+    m, rec, clock = make()
+    m.speech_started()
+    clock.advance(m, 2.0)
+    m.speech_ended()
+    key = m.current_key
+    m.stt_final(key, 0, "one is")  # arrives during hold: extend 2.8 -> 4.0
+    assert m.state is TurnState.HOLDING
+    assert m.next_deadline() == 4.0
+    m.route_decided(key, 0, RouteDecision(kind="forward"))
+    clock.advance(m, 1.5)  # t=3.5 < 4.0: still patient
+    assert rec.of("dispatch") == []
+    clock.advance(m, 0.6)  # t=4.1: patience exhausted -> commit
+    assert rec.of("dispatch") == [("dispatch", key, "one is", "forward")]
+
+
+def test_complete_transcript_does_not_extend_the_hold():
+    m, rec, clock = make()
+    m.speech_started()
+    clock.advance(m, 2.0)
+    m.speech_ended()
+    key = m.current_key
+    clock.advance(m, 1.0)
+    assert m.state is TurnState.ROUTING
+    m.stt_final(key, 0, "run the tests.")
+    assert m.state is TurnState.ROUTING  # no pullback
+    m.route_decided(key, 0, RouteDecision(kind="forward"))
+    assert rec.of("dispatch") == [("dispatch", key, "run the tests.", "forward")]
+
+
+def test_ptt_release_is_never_second_guessed_by_patience():
+    m, rec, clock = make()
+    m.ptt_pressed()
+    clock.advance(m, 1.0)
+    m.ptt_released()
+    key = m.current_key
+    assert m.state is TurnState.ROUTING
+    m.stt_final(key, 0, "one is")  # cut-off-looking, but the user said done
+    assert m.state is TurnState.ROUTING
+    m.route_decided(key, 0, RouteDecision(kind="forward"))
+    assert rec.of("dispatch") == [("dispatch", key, "one is", "forward")]
+
+
+def test_incomplete_hold_zero_disables_patience():
+    m, rec, clock = make(TurnConfig(incomplete_hold_ms=0))
+    m.speech_started()
+    clock.advance(m, 2.0)
+    m.speech_ended()
+    key = m.current_key
+    clock.advance(m, 1.0)
+    m.stt_final(key, 0, "one is")
+    assert m.state is TurnState.ROUTING
+    m.route_decided(key, 0, RouteDecision(kind="forward"))
+    assert rec.of("dispatch") == [("dispatch", key, "one is", "forward")]
+
+
+def test_patience_window_already_past_dispatches_normally():
+    m, rec, clock = make()
+    m.speech_started()
+    clock.advance(m, 2.0)
+    m.speech_ended()
+    key = m.current_key
+    clock.advance(m, 2.5)  # t=4.5 > vad close + incomplete_hold (4.0)
+    assert m.state is TurnState.ROUTING
+    m.stt_final(key, 0, "one is")
+    assert m.state is TurnState.ROUTING  # too late to be patient
+    m.route_decided(key, 0, RouteDecision(kind="forward"))
+    assert rec.of("dispatch") == [("dispatch", key, "one is", "forward")]
+
+
+def test_set_patience_applies_to_the_next_hold():
+    m, rec, clock = make()
+    m.set_patience(hold_ms=200, incomplete_ms=0)
+    m.speech_started()
+    clock.advance(m, 1.0)
+    m.speech_ended()
+    key = m.current_key
+    m.stt_final(key, 0, "one is")  # patience off: no extension
+    m.route_decided(key, 0, RouteDecision(kind="forward"))
+    clock.advance(m, 0.3)  # past the new 200ms hold
+    assert rec.of("dispatch") == [("dispatch", key, "one is", "forward")]

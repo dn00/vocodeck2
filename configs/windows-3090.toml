@@ -14,6 +14,8 @@ ptt_key = "f9"
 silero_model = "models/silero_vad.onnx"
 dispatch_hold_ms = 800
 reopen_window_ms = 1200
+incomplete_hold_ms = 2000        # cut-off-looking transcript keeps the turn
+                                 # open this long from VAD close; 0 disables
 min_speech_ms = 384
 min_speech_continuation_ms = 192
 min_silence_ms = 64

@@ -467,6 +467,8 @@ class Daemon:
     _HOT_APPLY: ClassVar[set[str]] = {
         "audio.duplex",
         "audio.attention",
+        "audio.dispatch_hold_ms",
+        "audio.incomplete_hold_ms",
         "first_mate.timeout_ms",
     }
 
@@ -488,6 +490,14 @@ class Daemon:
                         raise ValueError("no voice loop running")
                     self.voice.set_attention(AttentionMode(str(value)))
                     self._emit_mic_state()
+                elif key == "audio.dispatch_hold_ms":
+                    if self.voice is None:
+                        raise ValueError("no voice loop running")
+                    self.voice.set_patience(hold_ms=int(value))
+                elif key == "audio.incomplete_hold_ms":
+                    if self.voice is None:
+                        raise ValueError("no voice loop running")
+                    self.voice.set_patience(incomplete_ms=int(value))
                 elif key == "first_mate.timeout_ms":
                     self.router.set_timeout(float(value) / 1000.0)
                 applied = True

@@ -41,6 +41,7 @@ SCHEMA: dict[str, dict[str, tuple[type, ...]]] = {
         "min_silence_ms": (int,),
         "dispatch_hold_ms": (int,),
         "reopen_window_ms": (int,),
+        "incomplete_hold_ms": (int,),  # 0 disables — deliberately not _POSITIVE_MS
         "wake_window_s": (int, float),
         "wake_model": (str,),
         "ptt_key": (str,),
@@ -86,6 +87,8 @@ _POSITIVE_MS = {
     ("first_mate", "late_window_ms"),
 }
 
+_NONNEG_MS = {("audio", "incomplete_hold_ms")}  # 0 = feature disabled
+
 
 def validate(cfg: dict[str, Any]) -> tuple[list[str], list[str]]:
     """Returns (errors, warnings). Errors should refuse boot; warnings are
@@ -128,6 +131,14 @@ def validate(cfg: dict[str, Any]) -> tuple[list[str], list[str]]:
             ):
                 errors.append(f"{section}.{key} must be > 0, got {value!r}")
             if (
+                (section, key) in _NONNEG_MS
+                and isinstance(value, (int, float))
+                and value < 0
+            ):
+                errors.append(
+                    f"{section}.{key} must be >= 0 (0 disables), got {value!r}"
+                )
+            if (
                 (section, key) in _UNIT_RANGE
                 and isinstance(value, (int, float))
                 and not 0.0 <= value <= 1.0
@@ -141,6 +152,17 @@ def validate(cfg: dict[str, Any]) -> tuple[list[str], list[str]]:
             warnings.append(
                 f"audio.reopen_window_ms ({reopen}) < dispatch_hold_ms ({hold}):"
                 " reopens will feel shorter than the hold (SPEC §5.2)"
+            )
+        incomplete = audio.get("incomplete_hold_ms", 2000)
+        if (
+            isinstance(hold, int)
+            and isinstance(incomplete, int)
+            and 0 < incomplete <= hold
+        ):
+            warnings.append(
+                f"audio.incomplete_hold_ms ({incomplete}) <= dispatch_hold_ms"
+                f" ({hold}): both run from VAD close, so cut-off patience"
+                " never extends anything (set 0 to disable it explicitly)"
             )
     return errors, warnings
 

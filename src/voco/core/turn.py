@@ -52,6 +52,35 @@ class RouteDecision:
 class TurnConfig:
     dispatch_hold_ms: int = 800
     reopen_window_ms: int = 1200
+    # Patience for cut-off-looking transcripts (semantic endpointing on
+    # top of the reference's turn-layer reopen): a transcript that ends
+    # mid-thought extends the hold to this (from VAD close) so resumed
+    # speech merges instead of dispatching a fragment. 0 disables.
+    incomplete_hold_ms: int = 2000
+
+
+# Whisper punctuates complete utterances; a terminal '.' after a dangling
+# connective ("and.", "so.") still reads as a cut-off breath.
+_INCOMPLETE_TAIL = frozenset(
+    ("and", "or", "but", "so", "then", "because", "to", "the", "a", "an",
+     "with", "for", "of", "in", "on", "at", "is", "are", "was", "were",
+     "if", "that", "which", "my", "your", "like", "um", "uh")
+)  # fmt: skip
+
+
+def looks_complete(text: str) -> bool:
+    """Does this transcript look like a finished thought? Errs toward
+    incomplete (extra patience) — fragments hurt more than a late
+    dispatch (live-test: 'one is' / 'testing' dispatched separately)."""
+    t = text.strip()
+    if not t:
+        return True  # nothing to wait for
+    if t.endswith(("...", "…")):
+        return False  # Whisper's trailing-speech marker
+    if t[-1] not in ".!?":
+        return False  # unpunctuated or trailing comma: cut off
+    words = t.rstrip(".!?").split()
+    return not (words and words[-1].lower() in _INCOMPLETE_TAIL)
 
 
 @dataclass
@@ -82,6 +111,7 @@ class _Turn:
     decision: RouteDecision | None = None
     hold_satisfied: bool = False
     ptt_held: bool = False
+    explicit_end: bool = False  # PTT release: never second-guess with patience
     dispatched: bool = False
 
 
@@ -118,6 +148,18 @@ class TurnMachine:
         if self._state is TurnState.REOPENABLE:
             return self._turn.reopen_deadline
         return None
+
+    # ---- tuning (config.set hot-apply) ----------------------------------
+
+    def set_patience(
+        self, hold_ms: int | None = None, incomplete_ms: int | None = None
+    ) -> None:
+        """Applies from the NEXT hold; an in-flight turn keeps the
+        deadlines it was stamped with."""
+        if hold_ms is not None:
+            self._cfg.dispatch_hold_ms = hold_ms
+        if incomplete_ms is not None:
+            self._cfg.incomplete_hold_ms = incomplete_ms
 
     # ---- speech inputs (from VAD wrapper / PTT) ------------------------
 
@@ -168,6 +210,7 @@ class TurnMachine:
             self._turn.vad_closed_at = now
             self._turn.reopen_deadline = now + self._cfg.reopen_window_ms / 1000.0
             self._turn.hold_satisfied = True
+            self._turn.explicit_end = True
             self._events.capture_stopped(self._turn.key, self._turn.revision)
             self._events.chirp_requested(self._turn.key)
             self._to(TurnState.ROUTING)
@@ -183,6 +226,7 @@ class TurnMachine:
             # Empty final: nothing to route; abandon the turn (SPEC §4.2).
             self._close_turn()
             return
+        self._extend_patience_if_cut_off(text)
         self._turn.text = text
         self._events.route_requested(key, revision, text)
 
@@ -192,6 +236,33 @@ class TurnMachine:
         assert self._turn is not None
         self._turn.decision = decision
         self._maybe_dispatch()
+
+    def _extend_patience_if_cut_off(self, text: str) -> None:
+        """Semantic endpointing (triage 2026-07-03): a transcript that
+        ends mid-thought widens the pre-dispatch window so the user's
+        resumed speech MERGES (existing machinery) instead of the next
+        fragment dispatching separately. STT often outlives the base
+        hold, so an already-ROUTING turn is pulled back to HOLDING —
+        legal because nothing has dispatched yet (one-way door intact)."""
+        assert self._turn is not None
+        if self._cfg.incomplete_hold_ms <= 0 or looks_complete(text):
+            return
+        if self._turn.explicit_end:
+            return  # PTT release said "done" — believe it
+        if self._state not in (TurnState.HOLDING, TurnState.ROUTING):
+            return
+        base = self._turn.vad_closed_at
+        if base is None:
+            return
+        extended = base + self._cfg.incomplete_hold_ms / 1000.0
+        if self._now() >= extended:
+            return  # the patience window already passed; dispatch normally
+        if (self._turn.hold_deadline or 0.0) < extended:
+            self._turn.hold_deadline = extended
+        self._turn.reopen_deadline = max(self._turn.reopen_deadline or 0.0, extended)
+        if self._turn.hold_satisfied:
+            self._turn.hold_satisfied = False
+            self._to(TurnState.HOLDING)
 
     # ---- deadlines ------------------------------------------------------
 

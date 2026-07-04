@@ -93,6 +93,26 @@ async def test_mic_set_duplex_headless_raises(tmp_path):
         raise AssertionError("mic.set with no voice loop must raise")
 
 
+async def test_config_set_patience_hot_applies(tmp_path):
+    d, _ = make_daemon(tmp_path)
+    r1 = await d._control("config.set", {"key": "audio.dispatch_hold_ms", "value": 600})
+    r2 = await d._control(
+        "config.set", {"key": "audio.incomplete_hold_ms", "value": 1200}
+    )
+    assert r1["applied"] is True and r2["applied"] is True
+    assert d.voice is not None
+    cfg = d.voice.machine._cfg
+    assert cfg.dispatch_hold_ms == 600
+    assert cfg.incomplete_hold_ms == 1200
+
+
+async def test_config_set_patience_headless_reports_restart_required(tmp_path):
+    d, _ = make_daemon(tmp_path, with_voice=False)
+    r = await d._control("config.set", {"key": "audio.incomplete_hold_ms", "value": 0})
+    assert r["applied"] is False
+    assert r["restart_required"] is True
+
+
 async def test_mic_set_duplex_hot_applies(tmp_path):
     d, events = make_daemon(tmp_path)
     await d._control("mic.set", {"duplex": "half_duplex"})

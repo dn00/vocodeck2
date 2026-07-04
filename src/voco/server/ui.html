@@ -43,7 +43,7 @@
   button { cursor: pointer; }
   button:hover { border-color: var(--accent-dim); color: var(--accent); }
   button.danger:hover { border-color: var(--red); color: var(--red); }
-  button.flash { border-color: var(--green); color: var(--green); }
+  button.flash, select.flash { border-color: var(--green); color: var(--green); }
   select:disabled { opacity: 0.4; cursor: not-allowed; }
   #tokenbar {
     display: none; gap: 8px; align-items: center; padding: 6px 12px;
@@ -141,6 +141,12 @@
     <option value="wake">wake</option>
     <option value="ptt_only">ptt_only</option>
     <option value="muted">muted</option>
+  </select>
+  <select id="selPatience" title="turn patience: dispatch hold / cut-off extension">
+    <option value="" hidden>patience…</option>
+    <option value="snappy">snappy</option>
+    <option value="normal">normal</option>
+    <option value="relaxed">relaxed</option>
   </select>
   <button id="btnInterrupt" title="barge-in + Escape to active session">■ interrupt</button>
 </header>
@@ -503,6 +509,25 @@ $("selDuplex").addEventListener("change", ev => {
 $("selAttention").addEventListener("change", ev => {
   if (ev.target.value) send("mic.set", { attention: ev.target.value })
     .catch(e => { fail(e); applyMic(S.mic); });
+});
+// Patience presets write config (persisted); unlike the mic selects there is
+// no daemon state to mirror — the shown value is just the last pick here.
+const PATIENCE_PRESETS = {
+  snappy:  { "audio.dispatch_hold_ms": 600,  "audio.incomplete_hold_ms": 1200 },
+  normal:  { "audio.dispatch_hold_ms": 800,  "audio.incomplete_hold_ms": 2000 },
+  relaxed: { "audio.dispatch_hold_ms": 1200, "audio.incomplete_hold_ms": 3500 },
+};
+$("selPatience").addEventListener("change", ev => {
+  const preset = PATIENCE_PRESETS[ev.target.value];
+  if (!preset) return;
+  Promise.all(Object.entries(preset).map(([key, value]) =>
+    send("config.set", { key, value })))
+    .then(rs => {
+      flash($("selPatience"));
+      if (rs.some(r => r.restart_required))
+        toast("patience saved; daemon is headless — applies on restart");
+    })
+    .catch(e => { fail(e); ev.target.value = ""; });
 });
 
 function sendSay() {

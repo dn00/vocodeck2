@@ -481,3 +481,18 @@ slice, 130 tests green + ruff + mypy + PROTOCOL drift after each:
   audio with the user. User note honored: `voco listen` parks internally
   (one bash call, no rearm churn); channels + MCP extensions are just
   additional bridge clients (voco-mcp lands M2).
+- 2026-07-04: turn-layer patience (triage #2, semantic endpointing).
+  `looks_complete()` (Whisper punctuation + dangling-connective tail) and
+  `incomplete_hold_ms` (default 2000, 0 disables) in the turn machine: a
+  cut-off-looking stt_final extends the pre-dispatch window from VAD
+  close, pulling an already-ROUTING turn back to HOLDING (legal — nothing
+  dispatched; one-way door intact) so resumed speech MERGES via existing
+  machinery. PTT release (`explicit_end`) is never second-guessed.
+  Hot-apply: `audio.dispatch_hold_ms` + `audio.incomplete_hold_ms` →
+  `set_patience` (honest headless refusal); UI patience presets
+  snappy 600/1200, normal 800/2000, relaxed 1200/3500 (two config.set
+  writes + toast/flash). Config: schema key (deliberately NOT
+  _POSITIVE_MS; negative is an error), inert-value warning when
+  0 < incomplete <= hold. SPEC §4.1 row + min_silence-stays-64 note.
+  Test fixtures punctuated like real Whisper finals ("run the tests.") —
+  unpunctuated canned text now (correctly) triggers patience. 161 tests.

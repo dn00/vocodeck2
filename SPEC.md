@@ -138,10 +138,15 @@ Three surfaces on one localhost port:
   | `min_speech_continuation_ms` | 192 | lower sustain bar while a turn is reopenable |
   | `reopen_window_ms` | 1200 | resumed speech merges into the same utterance — **only until dispatch** (§5.2) |
   | `dispatch_hold_ms` | 800 | minimum wait before irreversible dispatch (§5.2) |
+  | `incomplete_hold_ms` | 2000 | semantic endpointing: a cut-off-looking transcript (unpunctuated, trailing "…", dangling connective) extends the pre-dispatch hold to this, measured from VAD close, so resumed speech merges; PTT release is never second-guessed; 0 disables |
 
 - Config validation warns when `reopen_window_ms > dispatch_hold_ms` with a
   note: past the hold, reopen applies only to non-dispatched (local-reply)
   turns.
+- `min_silence_ms` stays 64 by design: the fragmenting fix is turn-layer
+  patience, not slower VAD (verified against hf/speech-to-speech, which also
+  ships 64ms and solves fragmenting with `unanswered_reopen_ms=7000` — an
+  uncommitted turn keeps absorbing speech; our commit point is dispatch).
 - All timing values live in config; none are hardwired (injected clock).
 
 ### 4.2 STT

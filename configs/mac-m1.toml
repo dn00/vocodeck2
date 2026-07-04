@@ -8,6 +8,9 @@ silero_model = "models/silero_vad.onnx"
 # input_device / output_device: sounddevice name or index (default: system)
 dispatch_hold_ms = 800
 reopen_window_ms = 1200
+incomplete_hold_ms = 2000        # cut-off-looking transcript ("one is…") keeps
+                                 # the turn open this long from VAD close so
+                                 # resumed speech merges; 0 disables
 min_speech_ms = 384
 min_speech_continuation_ms = 192
 min_silence_ms = 64
