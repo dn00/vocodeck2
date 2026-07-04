@@ -73,10 +73,15 @@ class VadGate:
                 self._started()
         else:
             self._silence_run_ms += FRAME_MS
-            self._speech_run_ms = 0
-            if self._in_speech and self._silence_run_ms >= self._cfg.min_silence_ms:
-                self._in_speech = False
-                self._ended()
+            if self._silence_run_ms >= self._cfg.min_silence_ms:
+                # Only a real gap resets the entry run: a single dipped
+                # frame must not restart the min_speech_ms accumulation —
+                # that pushed speech_started far past the pre-roll ring
+                # and clipped the first words (live-test bug).
+                self._speech_run_ms = 0
+                if self._in_speech:
+                    self._in_speech = False
+                    self._ended()
 
     def _entry_ms(self) -> int:
         if self._reopenable():

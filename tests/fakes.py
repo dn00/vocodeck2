@@ -31,8 +31,10 @@ class FakeTts:
 class FakeStt:
     def __init__(self, canned: str) -> None:
         self.canned = canned
+        self.received: list[bytes] = []
 
     def transcribe(self, pcm: bytes) -> str:
+        self.received.append(pcm)
         return self.canned if pcm else ""
 
 

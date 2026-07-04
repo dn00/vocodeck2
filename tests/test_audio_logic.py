@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from voco.core.capture import CaptureBuffer
+from voco.core.capture import CaptureBuffer, pre_roll_frames_for
 from voco.core.vad import FRAME_MS, FRAME_SAMPLES, VadConfig, VadGate
 
 
@@ -75,8 +75,31 @@ def test_suppress_blocks_events_half_duplex():
     assert s.events == ["start"]
 
 
+def test_entry_run_tolerates_sub_gap_dips():
+    """A single dipped frame must not restart the 384ms accumulation —
+    that pushed speech_started far past the pre-roll (clipping bug)."""
+    s = Script()
+    s.run([0.9] * frames_for(320))  # under the entry bar
+    s.run([0.1])  # 32ms dip < min_silence_ms(64): run survives
+    s.run([0.9] * frames_for(64))  # 320+64 = 384: fires
+    assert s.events == ["start"]
+    # A real gap (>= min_silence) still resets the run.
+    s2 = Script()
+    s2.run([0.9] * frames_for(320))
+    s2.run([0.1, 0.1])  # 64ms: reset
+    s2.run([0.9] * frames_for(320))
+    assert s2.events == []
+
+
+def test_pre_roll_covers_the_entry_run():
+    """Pre-roll must hold at least min_speech_ms + margin: everything the
+    VAD saw before speech_started fires is utterance audio."""
+    assert pre_roll_frames_for(384) * FRAME_MS >= 384 + 320
+    assert pre_roll_frames_for(96) * FRAME_MS >= 96 + 320
+
+
 def test_capture_buffer_preroll_and_merge():
-    buf = CaptureBuffer()
+    buf = CaptureBuffer(pre_roll_frames=10)
     for i in range(15):
         buf.feed(frame(i))
     buf.start_utterance()  # seeds with last 10 pre-roll frames

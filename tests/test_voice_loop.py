@@ -118,6 +118,52 @@ async def test_full_pipeline_speech_to_dispatch(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_no_onset_clipping_with_production_entry_threshold(tmp_path):
+    """Live-test bug: the first 1-2 words were lost. With the production
+    384ms entry bar (12 frames > the old 10-frame pre-roll), every speech
+    frame — including the very first — must reach STT via pre-roll."""
+    bus = EventBus()
+    host = Host()
+    stt = FakeStt("hi")
+    cfg = {
+        **CFG,
+        "audio": {
+            **CFG["audio"],
+            "min_speech_ms": 384,
+            "phrase_bank_dir": str(tmp_path / "bank"),
+        },
+    }
+    deps = VoiceLoopDeps(
+        load_vad_model=lambda path: ScriptedVad(),
+        stt_builder=lambda provider, **kw: stt,
+        tts_factory=FakeTts,
+        mic_factory=FakeMic,
+        player_factory=FakePlayer,
+        hotkey_factory=None,
+    )
+    voice = VoiceLoop(cfg, bus, host=host, deps=deps)
+    await voice.start(asyncio.get_running_loop())
+    try:
+        # Distinct first samples mark each frame (>=500 scores as speech).
+        for i in range(14):
+            voice._process_frame(np.full(FRAME_SAMPLES, 1000 + i, dtype=np.int16))
+        await asyncio.sleep(0)
+        assert voice.machine.state is TurnState.CAPTURING
+        await feed(voice, 3, silence_frame)  # close the capture
+        for _ in range(50):
+            if stt.received:
+                break
+            await asyncio.sleep(0.02)
+        assert stt.received, "utterance never reached STT"
+        pcm = np.frombuffer(stt.received[0], dtype=np.int16)
+        marks = set(pcm[::FRAME_SAMPLES].tolist())
+        missing = {1000 + i for i in range(14)} - marks
+        assert not missing, f"clipped frames at utterance start: {sorted(missing)}"
+    finally:
+        voice.stop()
+
+
+@pytest.mark.asyncio
 async def test_muted_attention_blocks_the_pipeline(tmp_path):
     voice, host, _events = make_loop(tmp_path, attention="muted")
     await voice.start(asyncio.get_running_loop())

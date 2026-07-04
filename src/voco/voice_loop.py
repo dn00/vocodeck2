@@ -31,7 +31,7 @@ from voco.adapters.stt import build_stt
 from voco.adapters.tts import OpenAICompatibleTts, PhraseBank
 from voco.core.arbitration import DuplexMode, PlaybackItem, PlaybackQueue, Source
 from voco.core.attention import AttentionGate, AttentionMode
-from voco.core.capture import CaptureBuffer
+from voco.core.capture import CaptureBuffer, pre_roll_frames_for
 from voco.core.echo import FRAME, EchoCanceller, resample_to_16k
 from voco.core.events import EventBus
 from voco.core.phrases import PhraseCommand
@@ -220,11 +220,12 @@ class VoiceLoop:
             now=time.monotonic,
         )
 
-        self.capture = CaptureBuffer()
+        min_speech_ms = int(audio_cfg.get("min_speech_ms", 384))
+        self.capture = CaptureBuffer(pre_roll_frames=pre_roll_frames_for(min_speech_ms))
         self.vad_gate = VadGate(
             VadConfig(
                 threshold=float(audio_cfg.get("vad_threshold", 0.5)),
-                min_speech_ms=int(audio_cfg.get("min_speech_ms", 384)),
+                min_speech_ms=min_speech_ms,
                 min_speech_continuation_ms=int(
                     audio_cfg.get("min_speech_continuation_ms", 192)
                 ),

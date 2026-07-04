@@ -107,7 +107,7 @@ class TmuxManager:
             # Session already gone: it died before we could even pin it.
             raise RuntimeError(f"{harness_cmd!r} died at spawn: {e}") from e
         if status.startswith("1"):
-            code = (status.split() + ["?"])[1] or "?"
+            code = [*status.split(), "?"][1]
             try:
                 lines = self.capture_pane(tmux_name, host=host).strip().splitlines()
                 tail = " | ".join(ln for ln in lines[-3:] if ln.strip())
