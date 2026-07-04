@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import re
+import secrets
 import socket
 import subprocess
 import sys
@@ -30,6 +31,28 @@ CACHE_DIR = Path(os.environ.get("VOCO_CACHE", Path.home() / ".cache" / "voco"))
 SOFT_FAIL = "voice daemon unreachable — continue without voice"
 RETRY_WINDOW_S = 600  # sustained-failure ceiling for listen (SPEC §8.4)
 STALE_AFTER_S = 60  # backlog older than this gets an age mark
+
+# Terminal statuses an agent reads verbatim — each says clearly whether
+# to restart the listener (a detach must never read as a crash).
+MSG_DETACHED = (
+    "voice session ended by the user — stop listening; do not restart the listener."
+)
+MSG_SHUTDOWN = "voice daemon shutting down — stop listening."
+MSG_SUPERSEDED = (
+    "another listener took over this session — stop this one; do not restart it."
+)
+
+
+def terminal_message(result: dict) -> str | None:
+    """Map a non-transcript listen result to its agent-facing line."""
+    status = result.get("status")
+    if status == "detach":
+        return MSG_DETACHED if result.get("reason") == "detached" else MSG_SHUTDOWN
+    if status == "superseded":
+        return MSG_SUPERSEDED
+    if status == "unavailable":
+        return SOFT_FAIL
+    return None
 
 
 def _fmt_age(age_s: int) -> str:
@@ -139,6 +162,10 @@ class Client:
     def __init__(self, base_url: str = DEFAULT_URL, token: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token or os.environ.get("VOCO_TOKEN")
+        # Poller identity: lets the daemon tell "the same listener
+        # re-arming its slice" from "a NEW listener taking over" — the
+        # old one is superseded once instead of ping-ponging forever.
+        self._poller = f"{os.getpid():x}-{secrets.token_hex(4)}"
 
     def _request(
         self, method: str, path: str, body: dict | None = None, timeout: float = 55.0
@@ -235,7 +262,8 @@ class Client:
             return self._with_session(
                 lambda sid: self._request(
                     "GET",
-                    f"/v1/bridge/listen?session_id={urllib.parse.quote(sid)}",
+                    f"/v1/bridge/listen?session_id={urllib.parse.quote(sid)}"
+                    f"&poller={urllib.parse.quote(self._poller)}",
                     timeout=65,
                 )
             )
@@ -249,10 +277,8 @@ class Client:
         failing_since: float | None = None
         while True:
             result = self.listen_once()
-            if result.get("status") == "transcript":
+            if result.get("status") in ("transcript", "detach", "superseded"):
                 return result
-            if result.get("status") == "detach":
-                return {"status": "detach"}
             # rearm: distinguish daemon-alive rearm from synthesized ones
             # by probing registration cheaply every loop is overkill; the
             # sustained-failure window only advances on socket errors.
@@ -266,20 +292,16 @@ class Client:
 
 def listen_stream(client) -> int:
     """`voco listen --stream`: print every transcript as it arrives, never
-    returning while the daemon lives. Made for backgrounded agent shells
-    (live-test bug: a parked voice_listen blocks the agent's whole turn) —
-    the agent backgrounds this once and keeps working; each stdout line is
-    the user's next instruction."""
+    returning while the daemon lives. Only for harnesses that surface
+    live background stdout — harnesses that wake on task EXIT (Claude
+    Code) should use plain one-shot `voco listen` in a background task
+    and re-run it per transcript (what voice_init hands out)."""
     while True:
         result = client.listen()
-        status = result.get("status")
-        if status == "transcript":
+        if result.get("status") == "transcript":
             print(format_transcript(result), flush=True)
-        elif status == "detach":
-            print("voice daemon shutting down — stream closed.", flush=True)
-            return 0
-        else:  # unavailable: the retry window is already exhausted
-            print(SOFT_FAIL, flush=True)
+        else:
+            print(terminal_message(result) or SOFT_FAIL, flush=True)
             return 0
 
 
@@ -531,7 +553,8 @@ def main() -> None:
         if result.get("status") == "transcript":
             print(format_transcript(result))
         else:
-            print(SOFT_FAIL)
+            # Say WHY it ended: a user detach must not read as a crash.
+            print(terminal_message(result) or SOFT_FAIL)
             sys.exit(0)  # fail-soft: never a hard error in an agent turn
     elif args.cmd == "screen":
         print(

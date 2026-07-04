@@ -70,6 +70,37 @@ def test_two_agents_in_one_cwd_get_distinct_sessions():
     assert again.session_id != a.session_id  # fresh after detach
 
 
+def test_session_state_events_dedupe_on_repark():
+    """A healthy listener re-parks every slice; identical session.state
+    events must not spam the bus (live-test: dozens per second)."""
+    events: list = []
+    r = Registry(emit=lambda t, p: events.append((t, p)))
+    s = r.register(ident(), ["say", "listen"])
+    for _ in range(3):  # three slice cycles
+        r.on_listen_start(s.session_id)
+        r.on_listen_end(s.session_id)
+    states = [p["state"] for t, p in events if t == "session.state"]
+    assert states == ["parked"]
+    # A real change still emits: live dispatch -> working -> parked again.
+    r.on_listen_start(s.session_id)
+    r.try_deliver = lambda sid, payload: True
+    r.dispatch("go", r.mint_turn_id())
+    r.on_listen_start(s.session_id)
+    states = [p["state"] for t, p in events if t == "session.state"]
+    assert states == ["parked", "working", "parked"]
+
+
+def test_detach_delivers_reason_and_tombstones():
+    r = Registry()
+    s = r.register(ident(), ["say", "listen"])
+    delivered: list = []
+    r.try_deliver = lambda sid, payload: (delivered.append(payload), True)[1]
+    r.detach(s.session_id)
+    assert delivered[-1] == {"status": "detach", "reason": "detached"}
+    assert r.was_detached(s.session_id)
+    assert not r.was_detached("someone-else")
+
+
 def test_only_session_auto_activates_and_detach_leaves_none_active():
     r = Registry()
     a = r.register(ident(), ["say", "listen"])

@@ -57,8 +57,11 @@ async def test_register_say_and_dispatch_roundtrip(client):
     assert (await resp.json())["ok"] is True
 
 
-async def _listen_json(client, sid: str) -> dict:
-    resp = await client.get(f"/v1/bridge/listen?session_id={sid}")
+async def _listen_json(client, sid: str, poller: str = "") -> dict:
+    url = f"/v1/bridge/listen?session_id={sid}"
+    if poller:
+        url += f"&poller={poller}"
+    resp = await client.get(url)
     return await resp.json()
 
 
@@ -66,6 +69,40 @@ async def test_listen_rearm_on_slice_expiry(client):
     info = await register(client)
     payload = await _listen_json(client, info["session_id"])
     assert payload == {"status": "rearm"}
+
+
+async def test_new_poller_supersedes_old_listener(client):
+    """Live-test spam bug: two listeners for one session ping-ponged
+    rearm evictions forever. A DIFFERENT poller now ends the old one."""
+    info = await register(client)
+    sid = info["session_id"]
+    old = asyncio.create_task(_listen_json(client, sid, poller="aaa"))
+    await asyncio.sleep(0.05)
+    new = asyncio.create_task(_listen_json(client, sid, poller="bbb"))
+    assert (await old) == {"status": "superseded"}  # told to stop, once
+    await asyncio.sleep(0.05)
+    client.registry.dispatch("hi", client.registry.mint_turn_id())
+    assert (await new)["text"] == "hi"  # the new listener owns the queue
+
+
+async def test_same_poller_still_rearms_its_own_slices(client):
+    info = await register(client)
+    sid = info["session_id"]
+    first = asyncio.create_task(_listen_json(client, sid, poller="aaa"))
+    await asyncio.sleep(0.05)
+    second = asyncio.create_task(_listen_json(client, sid, poller="aaa"))
+    assert (await first) == {"status": "rearm"}  # own slice loop continues
+    second.cancel()
+
+
+async def test_listen_after_detach_reports_detach_not_410(client):
+    """Resurrection bug: a listener that missed the live detach delivery
+    got a 410 and re-registered the session the user just ended."""
+    info = await register(client)
+    sid = info["session_id"]
+    client.registry.detach(sid)
+    payload = await _listen_json(client, sid)
+    assert payload == {"status": "detach", "reason": "detached"}
 
 
 async def test_newest_poll_wins(client):
@@ -100,7 +137,8 @@ async def test_detach_unparks_listener_with_detach_status(client):
     await asyncio.sleep(0.05)  # let the poll park
     client.registry.detach(sid)
     payload = await listen
-    assert payload == {"status": "detach"}  # clean exit, not a slice timeout
+    # Clean exit, not a slice timeout; reason says the USER ended it.
+    assert payload == {"status": "detach", "reason": "detached"}
 
 
 async def test_unknown_session_is_410(client):

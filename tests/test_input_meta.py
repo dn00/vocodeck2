@@ -88,14 +88,45 @@ def test_listen_stream_prints_each_transcript_until_detach(capsys):
             [
                 {"status": "transcript", "text": "one", "queued": []},
                 {"status": "transcript", "text": "two", "queued": []},
-                {"status": "detach"},
+                {"status": "detach", "reason": "shutdown"},
             ]
         )
     )
     assert rc == 0
     out = capsys.readouterr().out.splitlines()
     assert out[:2] == ["one", "two"]
-    assert "stream closed" in out[-1]
+    assert "shutting down" in out[-1]
+
+
+def test_listen_stream_stops_when_superseded(capsys):
+    from voco_cli.main import listen_stream
+
+    rc = listen_stream(SequencedClient([{"status": "superseded"}]))
+    assert rc == 0
+    assert "another listener took over" in capsys.readouterr().out
+
+
+def test_terminal_messages_distinguish_endings():
+    """A user detach must never read as a crash (live-test bug)."""
+    from voco_cli.main import (
+        MSG_DETACHED,
+        MSG_SHUTDOWN,
+        MSG_SUPERSEDED,
+        SOFT_FAIL,
+        terminal_message,
+    )
+
+    assert terminal_message({"status": "detach", "reason": "detached"}) == (
+        MSG_DETACHED
+    )
+    assert terminal_message({"status": "detach", "reason": "shutdown"}) == (
+        MSG_SHUTDOWN
+    )
+    assert terminal_message({"status": "detach"}) == MSG_SHUTDOWN  # legacy
+    assert terminal_message({"status": "superseded"}) == MSG_SUPERSEDED
+    assert terminal_message({"status": "unavailable"}) == SOFT_FAIL
+    assert terminal_message({"status": "transcript"}) is None
+    assert "do not restart" in MSG_DETACHED  # agents read these verbatim
 
 
 def test_listen_stream_exits_softly_when_daemon_gone(capsys):
@@ -134,9 +165,13 @@ def test_voice_init_writes_script_and_returns_bash_command(tmp_path, monkeypatch
     assert body.startswith("#!/usr/bin/env bash")
     assert "export VOCO_URL=http://127.0.0.1:7799" in body
     # Pins THIS interpreter: the agent's shell has no `voco` on PATH.
-    assert f"exec {sys.executable} -m voco_cli.main listen --stream" in body
+    # ONE-SHOT (no --stream): exit-per-transcript is what wakes the agent.
+    assert f"exec {sys.executable} -m voco_cli.main listen\n" in body
+    assert "--stream" not in body
     assert "VOCO_TOKEN" not in body
     assert (script.stat().st_mode & 0o777) == 0o700
+    # The reply must teach the re-arm loop.
+    assert "run the same command again" in out
 
 
 def test_voice_init_keeps_token_in_the_script_not_the_reply(tmp_path, monkeypatch):

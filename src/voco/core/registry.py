@@ -78,6 +78,9 @@ class Session:
     last_seen: float = 0.0
     # Watcher observation (ephemeral, not persisted): waiting|working|shell.
     pane_hint: str | None = None
+    # Last session.state actually emitted (ephemeral): dedupe — a listen
+    # slice re-parking every 50s must not spam identical events.
+    last_state_emitted: str | None = None
 
     @property
     def state(self) -> SessionState:
@@ -127,6 +130,10 @@ class Registry:
         self._by_identity: dict[tuple, str] = {}
         self._active_id: str | None = None
         self._turn_counter = 0
+        # Tombstones for THIS daemon run: a listener that missed the live
+        # detach delivery must hear "detach", never a 410 that would make
+        # it resurrect the session the user just ended (live-test bug).
+        self._detached: set[str] = set()
         # The bridge implements live delivery to a parked long-poll.
         self.try_deliver: Callable[[str, dict], bool] = lambda sid, payload: False
 
@@ -209,13 +216,18 @@ class Registry:
         s = self._sessions.pop(session_id, None)
         if s is None:
             return
-        # A parked listener exits cleanly instead of timing out into a 410.
-        self.try_deliver(session_id, {"status": "detach"})
+        self._detached.add(session_id)
+        # A parked listener exits cleanly instead of timing out into a 410;
+        # reason lets clients tell "user ended me" from "daemon going down".
+        self.try_deliver(session_id, {"status": "detach", "reason": "detached"})
         self._by_identity.pop(_identity_key(s.identity), None)
         self._emit("session.detached", {"session_id": session_id})
         if self._active_id == session_id:
             # No auto-election (SPEC §5.4 rule 6).
             self._active_id = None
+
+    def was_detached(self, session_id: str) -> bool:
+        return session_id in self._detached
 
     # ---- dispatch (SPEC §8.1/§8.2) ------------------------------------------
 
@@ -252,7 +264,7 @@ class Registry:
             s.queued.clear()
             s.parked = False
             s.outstanding_turn_id = turn_id
-            self._emit("session.state", {"session_id": s.session_id, "state": s.state})
+            self._emit_session_state(s)
             return "live"
         s.queued.append(
             QueuedInput(ts=self._now(), turn_id=turn_id, text=text, origin=origin)
@@ -267,6 +279,13 @@ class Registry:
             },
         )
         return "queued_idle" if was_idle else "queued"
+
+    def _emit_session_state(self, s: Session) -> None:
+        """Emit session.state only on actual change: a healthy listener
+        re-parks every slice and must not spam identical events."""
+        if s.state != s.last_state_emitted:
+            s.last_state_emitted = s.state
+            self._emit("session.state", {"session_id": s.session_id, "state": s.state})
 
     # ---- bridge hooks --------------------------------------------------------
 
@@ -291,7 +310,7 @@ class Registry:
             s.outstanding_turn_id = first.turn_id
             return payload
         s.parked = True
-        self._emit("session.state", {"session_id": session_id, "state": s.state})
+        self._emit_session_state(s)
         return None
 
     def on_listen_end(self, session_id: str) -> None:

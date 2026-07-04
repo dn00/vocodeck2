@@ -55,7 +55,10 @@ class BridgeServer:
         # Daemon-owned live state (mic duplex/attention) merged into every
         # snapshot so UIs render current truth without waiting for events.
         self._snapshot_extra = snapshot_extra
-        self._waiters: dict[str, asyncio.Future[dict]] = {}
+        # session_id -> (parked future, poller id). The poller id lets a
+        # NEW listener supersede an old one exactly once instead of the
+        # two ping-ponging rearm evictions forever (live-test spam bug).
+        self._waiters: dict[str, tuple[asyncio.Future[dict], str]] = {}
         registry.try_deliver = self._try_deliver
 
     # ---- delivery port for the registry -----------------------------------
@@ -67,9 +70,9 @@ class BridgeServer:
         return snap
 
     def _try_deliver(self, session_id: str, payload: dict) -> bool:
-        fut = self._waiters.pop(session_id, None)
-        if fut is not None and not fut.done():
-            fut.set_result(payload)
+        entry = self._waiters.pop(session_id, None)
+        if entry is not None and not entry[0].done():
+            entry[0].set_result(payload)
             return True
         return False
 
@@ -177,16 +180,25 @@ class BridgeServer:
     async def _listen(self, request: web.Request) -> web.Response:
         self._check_auth(request)
         session_id = request.query.get("session_id", "")
+        # A detached session answers "detach", never 410: a listener that
+        # missed the live delivery must stop, not re-register a session
+        # the user just ended (live-test resurrection bug).
+        if session_id and self._registry.was_detached(session_id):
+            return web.json_response({"status": "detach", "reason": "detached"})
         s = self._session_or_410(request, session_id)
-        # Newest-poll-wins: evict any parked poll with a rearm.
+        poller = request.query.get("poller", "")
+        # Newest-poll-wins. The SAME poller re-arming gets a rearm (its
+        # slice loop continues); a DIFFERENT poller supersedes the old
+        # one, which must stop instead of fighting back.
         old = self._waiters.pop(s.session_id, None)
-        if old is not None and not old.done():
-            old.set_result({"status": "rearm"})
+        if old is not None and not old[0].done():
+            status = "rearm" if poller == old[1] else "superseded"
+            old[0].set_result({"status": status})
         immediate = self._registry.on_listen_start(s.session_id)
         if immediate is not None:
             return web.json_response(immediate)
         fut: asyncio.Future[dict] = asyncio.get_running_loop().create_future()
-        self._waiters[s.session_id] = fut
+        self._waiters[s.session_id] = (fut, poller)
         try:
             payload = await asyncio.wait_for(fut, timeout=self._slice)
         except TimeoutError:
@@ -195,15 +207,16 @@ class BridgeServer:
             # Only the current owner may unpark: an evicted poll's cleanup
             # must not clobber the newer poll's parked state, and a
             # delivered poll was already unparked by dispatch.
-            if self._waiters.get(s.session_id) is fut:
+            entry = self._waiters.get(s.session_id)
+            if entry is not None and entry[0] is fut:
                 del self._waiters[s.session_id]
                 self._registry.on_listen_end(s.session_id)
         return web.json_response(payload)
 
     async def shutdown(self) -> None:
-        for fut in self._waiters.values():
+        for fut, _poller in self._waiters.values():
             if not fut.done():
-                fut.set_result({"status": "detach"})
+                fut.set_result({"status": "detach", "reason": "shutdown"})
         self._waiters.clear()
 
     # ---- control ---------------------------------------------------------------

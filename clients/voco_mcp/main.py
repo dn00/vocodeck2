@@ -34,10 +34,11 @@ Speak brief progress updates during long work.
 
 Listening — pick ONE mode:
 - If you can run background shell tasks: call voice_init ONCE at the
-  start; it writes a listener script and returns the exact `bash <path>`
-  command to run as a background task. Each stdout line that task emits
-  is the user's next spoken instruction; you stay free to work and react
-  to typed input meanwhile. Do not also call voice_listen.
+  start; it returns the exact `bash <path>` command to run as a
+  background task. The task exits when the user speaks and its output is
+  their instruction — act on it, then run the same command again in the
+  background. You stay free to work and react to typed input meanwhile.
+  Do not also call voice_listen.
 - Otherwise: when your turn's work is complete, END by calling
   voice_listen and acting on what it returns; if it returns 'nothing
   yet', call voice_listen again. Treat returned transcripts as the
@@ -48,12 +49,19 @@ Listening — pick ONE mode:
 def init_reply(client: Client) -> str:
     """voice_init: write the exact listener script, return how to run it.
 
+    ONE-SHOT by design: the script exits when the user speaks, because
+    harnesses wake their agent when a background task EXITS — a forever
+    stream just buffers transcripts invisibly (live-test bug). The agent
+    re-runs the same command after acting; between runs, input queues
+    server-side, so nothing is lost.
+
     A script file beats an inline command: the agent's shell may be fish
     (no VAR=x prefix syntax), lacks `voco` on PATH (the CLI lives in this
     server's venv), and the bearer token stays inside a 0700 file instead
     of process args. Identity is NOT baked in — the running script
     inherits the agent's TMUX_PANE / harness session id, so it registers
-    as the SAME session as this server (instance identity)."""
+    as the SAME session as this server. Safe to run again at any time:
+    a new run supersedes the previous listener."""
     try:
         sess = client.session()
     except Exception:
@@ -61,23 +69,28 @@ def init_reply(client: Client) -> str:
     lines = [
         "#!/usr/bin/env bash",
         "# voco listener — written by voice_init; run me as a background",
-        "# task. Each stdout line is the user's next spoken instruction.",
+        "# task. I exit when the user speaks; my output is their",
+        "# instruction. Run me again afterwards to keep listening.",
         f"export VOCO_URL={shlex.quote(client.base_url)}",
     ]
     if client.token:
         # Loopback-only capability token; 0700 file, never in argv/ps.
         lines.append(f"export VOCO_TOKEN={shlex.quote(client.token)}")
-    lines.append(f"exec {shlex.quote(sys.executable)} -m voco_cli.main listen --stream")
+    lines.append(f"exec {shlex.quote(sys.executable)} -m voco_cli.main listen")
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     script = CACHE_DIR / "listen.sh"
     script.write_text("\n".join(lines) + "\n", encoding="utf-8")
     script.chmod(0o700)
     return (
         f"You are {sess['call_name']} on the voice deck.\n"
-        "Run this ONCE as a background task (never block on it):\n\n"
+        "Start (or restart) the listen loop by running this as a"
+        " BACKGROUND task:\n\n"
         f"  bash {shlex.quote(str(script))}\n\n"
-        "Each stdout line it emits is the user's next spoken instruction — "
-        "act on each line. While it runs, do not call voice_listen."
+        "It exits when the user speaks; its output is their instruction."
+        " Act on it, then run the same command again in the background to"
+        " keep listening. If it reports the session was ended, superseded,"
+        " or the daemon unreachable, STOP re-running it. Never call"
+        " voice_listen while a listener task runs."
     )
 
 
@@ -125,11 +138,13 @@ def build_server():
                 description=(
                     "Set up hands-free listening: registers you on the "
                     "voice deck, writes a small bash script, and returns "
-                    "the exact `bash <path>` command to run ONCE as a "
-                    "background task. Each stdout line that task emits is "
-                    "the user's next spoken instruction. Prefer this over "
-                    "voice_listen whenever you can run background shell "
-                    "tasks."
+                    "the exact `bash <path>` command to run as a "
+                    "background task. The task exits when the user "
+                    "speaks; its output is their instruction — act on "
+                    "it, then re-run the same command. Idempotent: safe "
+                    "to call again; a new listener supersedes the old. "
+                    "Prefer this over voice_listen whenever you can run "
+                    "background shell tasks."
                 ),
                 inputSchema={"type": "object", "properties": {}},
             ),
@@ -177,14 +192,16 @@ def build_server():
 
 def _listen_budgeted(client: Client) -> str:
     """Loop rearm slices inside one tool call, bounded by the budget."""
+    from voco_cli.main import terminal_message
+
     deadline = time.monotonic() + LISTEN_BUDGET_S
     while time.monotonic() < deadline:
         result = client.listen_once()
         status = result.get("status")
         if status == "transcript":
             return format_transcript(result)
-        if status == "detach":
-            return "voice daemon shutting down — stop listening."
+        if status in ("detach", "superseded"):
+            return terminal_message(result) or SOFT_FAIL
         # rearm (real or synthesized): keep parking within budget
     return "nothing yet — call voice_listen again to keep listening."
 

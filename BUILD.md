@@ -256,15 +256,42 @@ window — findings below); repo private on GitHub, push per slice.
       format_transcript (shared CLI+MCP) marks stale (>60s) lines with
       age; last line stays the current instruction. Nothing dropped
       silently.
-- [x] **voice_listen blocks the agent turn:** `voco listen --stream` — the
-      agent backgrounds it once, transcripts arrive as flushed stdout
-      lines; MCP instructions teach both modes. Verified live end-to-end.
-      Plus voice_init (the original sketch): writes the exact listener
-      script (0700; pins the venv interpreter + URL + token — agent
-      shells lack `voco` on PATH and fish rejects VAR=x prefixes) and
-      returns `bash <path>` to background. Verified over a real MCP
-      stdio handshake: init → background script (clean env) → `voco
-      input` → '[typed] ...' stream line.
+- [x] **voice_listen blocks the agent turn:** voice_init writes the exact
+      listener script (0700; pins the venv interpreter + URL + token —
+      agent shells lack `voco` on PATH and fish rejects VAR=x prefixes)
+      and returns `bash <path>` to background. REWORKED after live test
+      (2026-07-03 late): the script is ONE-SHOT — harnesses wake agents
+      when a background task EXITS, so a forever `--stream` just buffered
+      transcripts invisibly. Script exits per transcript; the agent acts
+      and re-runs it (input queues server-side between runs). `--stream`
+      remains for harnesses with live background stdout.
+
+## Listen rework (2026-07-03 late, after second live test)
+
+User-reported failures, all reproduced in the event log and fixed:
+
+- session.state parked SPAM (dozens/sec): two listeners for one session
+  ping-ponged newest-poll-wins rearm evictions at network speed. Fix:
+  poller identity — each Client sends a poller id; the SAME poller
+  re-arming gets `rearm`, a DIFFERENT poller supersedes the old one,
+  which receives `superseded` exactly once and stops. Makes voice_init
+  idempotent too (re-run replaces the listener). Belt-and-braces:
+  session.state now emits only on actual state CHANGE.
+- Transcripts arrived but "nothing fired": Claude Code wakes agents on
+  background-task EXIT, not on mid-run stdout → init script is one-shot
+  (above).
+- UI detach read as a crash + zombie resurrection: `voco listen` printed
+  the daemon-unreachable soft-fail for detach, and a poller that missed
+  the live detach delivery got a 410 and re-registered the dead session.
+  Fix: detach payloads carry reason (detached|shutdown) with distinct
+  agent-facing messages ("ended by the user — do not restart"); the
+  registry keeps per-run detach tombstones so listen on a detached
+  session answers `detach`, never 410. `voco say` still auto-registers
+  (410 → re-register — that's the wanted idempotent-say behavior).
+
+Live-validated (hermetic daemon + real MCP stdio): double listener →
+superseded once; speak → one-shot print + exit 0; UI detach → "ended by
+the user"; immediate re-run after detach → no zombie session.
 - [x] **voco new: tmux session doesn't persist:** spawn now pins the pane
       (remain-on-exit), waits 0.8s, checks pane_dead, and raises with the
       exit status + pane tail; corpse cleaned up. Live-validated: bad
