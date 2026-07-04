@@ -90,9 +90,17 @@ class MateSpeechChannel:
         self._voice = voice
         self._pending = ""
         self._sentences: asyncio.Queue[str | None] = asyncio.Queue()
-        self._item_enqueued = False
+        self._item: PlaybackItem | None = None
+        self._turn_id: str | None = None
         self._closed = False
         self.consumed = False
+
+    def set_turn_id(self, turn_id: str) -> None:
+        """Dispatch happened: attribute the (possibly already playing)
+        stream to its turn so arbitration rules 2/3 can police it."""
+        self._turn_id = turn_id
+        if self._item is not None:
+            self._item.turn_id = turn_id
 
     def push(self, delta: str) -> None:
         if self._closed:
@@ -118,7 +126,7 @@ class MateSpeechChannel:
 
     def _close(self) -> None:
         self._closed = True
-        if self._item_enqueued:
+        if self._item is not None:
             self._sentences.put_nowait(None)
 
     def _emit(self, sentence: str) -> None:
@@ -126,11 +134,11 @@ class MateSpeechChannel:
         if not sentence:
             return
         self.consumed = True
-        if not self._item_enqueued:
-            self._item_enqueued = True
-            self._voice.queue.enqueue(
-                PlaybackItem(Source.FIRST_MATE, self._synth(), turn_id=None)
+        if self._item is None:
+            self._item = PlaybackItem(
+                Source.FIRST_MATE, self._synth(), turn_id=self._turn_id
             )
+            self._voice.queue.enqueue(self._item)
         self._sentences.put_nowait(sentence)
 
     async def _synth(self):

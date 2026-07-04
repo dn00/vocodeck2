@@ -30,6 +30,7 @@ EVENT_TYPES = {
     "speech.started",
     "speech.interrupted",
     "speech.finished",
+    "speech.expired",
     "agent.say",
     "screen.updated",
     "input.queued",
@@ -46,6 +47,7 @@ TURN_SCOPED = {
     "speech.started",
     "speech.interrupted",
     "speech.finished",
+    "speech.expired",
     "agent.say",
     "input.queued",
 }

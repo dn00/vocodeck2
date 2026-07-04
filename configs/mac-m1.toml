@@ -30,7 +30,11 @@ sample_rate = 24000
 [first_mate]
 base_url = "http://127.0.0.1:8080/v1"
 model = "gemma-4-e4b-it"
-timeout_ms = 3000                # M1 measured p50 ~2000ms; raised for live test
+timeout_ms = 800                 # dispatch waits this long AT MOST; past it the
+                                 # fast path routes and the mate keeps working
+                                 # in the background (late window)
+late_window_ms = 8000            # background budget for late speech/actions/
+                                 # reroutes; playback TTL drops anything staler
 stream = true
 
 # [bridge]

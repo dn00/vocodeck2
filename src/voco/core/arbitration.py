@@ -14,10 +14,14 @@ INVARIANTS:
   that turn has played.
 - Rule 4: fillers (acks) are droppable — discarded when real speech exists.
 - Rule 5: background chimes never preempt anything.
+- Rule 6 (TTL): first-mate speech that could not START within
+  MATE_SPEECH_TTL_S expires silently — a late mate must never narrate a
+  moment that already passed (triage 2026-07-03).
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -40,8 +44,9 @@ class DuplexMode(StrEnum):
 class PlaybackItem:
     source: Source
     content: object  # opaque to arbitration; the player knows how to play it
-    turn_id: str | None = None
+    turn_id: str | None = None  # mutable: mate items are stamped at dispatch
     duration_ms: int | None = None  # known for cached items only
+    enqueued_at: float = 0.0  # stamped by the queue (TTL policing)
 
 
 class Player(Protocol):
@@ -53,15 +58,22 @@ _PRIORITY = {Source.AGENT: 0, Source.FIRST_MATE: 1, Source.ACK: 2, Source.CHIME:
 
 ACK_GATE_EXEMPT_MS = 400
 
+# Mate speech is conversational garnish: if it could not START within this
+# window (gate shut, queue busy, late arrival), playing it would narrate a
+# moment that already passed (live-test: "a narrator one beat behind").
+MATE_SPEECH_TTL_S = 6.0
+
 
 class PlaybackQueue:
     def __init__(
         self,
         player: Player,
         emit: Callable[[str, dict], object] | None = None,
+        now: Callable[[], float] = time.monotonic,
     ) -> None:
         self._player = player
         self._emit = emit or (lambda t, p: None)
+        self._now = now
         self._queue: list[PlaybackItem] = []
         self._playing: PlaybackItem | None = None
         self._gated = False  # rule 0: turn machine in CAPTURING/HOLDING
@@ -102,6 +114,7 @@ class PlaybackQueue:
         # Rule 4: fillers are pointless when real speech exists.
         if item.source is Source.ACK and self._has_real_speech():
             return
+        item.enqueued_at = self._now()
         if item.source in (Source.FIRST_MATE, Source.AGENT):
             self._queue = [q for q in self._queue if q.source is not Source.ACK]
         # Rule 2: current-turn agent say preempts playing local speech.
@@ -166,9 +179,24 @@ class PlaybackQueue:
                 },
             )
 
+    def _expire_stale_mate_speech(self) -> None:
+        now = self._now()
+        stale = [
+            q
+            for q in self._queue
+            if q.source is Source.FIRST_MATE and now - q.enqueued_at > MATE_SPEECH_TTL_S
+        ]
+        for item in stale:
+            self._queue.remove(item)
+            self._emit(
+                "speech.expired",
+                {"source": item.source.value, "turn_id": item.turn_id},
+            )
+
     def _pump(self) -> None:
         if self._playing is not None:
             return
+        self._expire_stale_mate_speech()
         for i, item in enumerate(self._queue):
             if self._may_start(item):
                 self._queue.pop(i)

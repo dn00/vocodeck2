@@ -86,19 +86,26 @@ class Daemon:
         if mate_cfg:
             from voco.adapters.first_mate import OpenAIChatFirstMate
 
-            # Socket budget rides ABOVE the router timeout so the router,
-            # not the transport, decides when a call is too late.
+            # Socket budget covers the LATE window, not just the router
+            # timeout: a mate that misses the dispatch deadline keeps
+            # running in the background and still acts/speaks/corrects.
+            budget_ms = max(
+                float(mate_cfg.get("timeout_ms", 800)),
+                float(mate_cfg.get("late_window_ms", 8000)),
+            )
             mate = OpenAIChatFirstMate(
                 base_url=mate_cfg["base_url"],
                 model=mate_cfg.get("model", ""),
                 api_key=mate_cfg.get("api_key"),
                 json_mode=bool(mate_cfg.get("json_mode", True)),
-                total_timeout_s=float(mate_cfg.get("timeout_ms", 800)) / 1000.0 + 1.5,
+                total_timeout_s=budget_ms / 1000.0 + 1.5,
             )
         self.router = Router(
             first_mate=mate,
             timeout_s=float((mate_cfg or {}).get("timeout_ms", 800)) / 1000.0,
         )
+        # Latest routing awaiting its dispatch turn_id (late-mate stamping).
+        self._pending_late: dict[str, Any] | None = None
         self.bridge = BridgeServer(
             self.registry,
             self.bus,
@@ -129,7 +136,13 @@ class Daemon:
     # ---- VoiceHost port (decisions stay here; audio reacts in VoiceLoop) ----
 
     async def route(self, text: str) -> Routed:
-        """Decide + execute any first-mate action (loop-domain, immediate)."""
+        """Decide + execute any first-mate action (loop-domain, immediate).
+
+        The mate is bounded by timeout_ms for the DISPATCH decision only:
+        past that, the fast path (phrase table + name heuristics) routes
+        immediately and the mate finishes in the background
+        (_on_late_mate) — it must never slow the action (triage
+        2026-07-03)."""
         grounding = build_grounding(
             self.registry,
             self.voice.duplex.value if self.voice else "headless",
@@ -142,9 +155,25 @@ class Daemon:
         ):
             channel = self.voice.open_mate_speech_channel()
             sink = channel.push
+        ctx: dict[str, Any] = {
+            "text": text,
+            "channel": channel,
+            "turn_id": None,
+            "dispatched_to": None,
+        }
         routed = await self.router.decide(
-            text, self.registry.call_names(), grounding, speech_sink=sink
+            text,
+            self.registry.call_names(),
+            grounding,
+            speech_sink=sink,
+            on_late=lambda d: self._on_late_mate(d, ctx),
         )
+        if routed.late_pending:
+            # Mate still running: leave its speech channel open (it may be
+            # mid-sentence); dispatch() stamps the turn; the late handler
+            # finishes or cancels.
+            self._pending_late = ctx
+            return routed
         if channel is not None:
             d = routed.decision
             # Only mate kinds that SPEAK get their stream kept; a timeout
@@ -166,6 +195,80 @@ class Daemon:
                 set_muted=self._set_muted,
             )
         return routed
+
+    def _on_late_mate(self, decision: RouteDecision | None, ctx: dict) -> None:
+        """Mate finished after dispatch went with the fast path. Late is
+        still useful: actions execute (idempotent deck ops), answers and
+        acks speak (TTL + rule-3 police staleness), and a targeted
+        decision that disagrees with where the words landed re-dispatches
+        with a spoken correction."""
+        if self._pending_late is ctx:
+            self._pending_late = None
+        channel = ctx.get("channel")
+        if decision is None:  # mate failed/garbled: nothing to add
+            if channel is not None:
+                channel.cancel()
+            return
+        if decision.action is not None:
+            try:
+                execute_action(
+                    decision.action,
+                    self.registry,
+                    set_mic=self._set_duplex,
+                    set_muted=self._set_muted,
+                )
+            except Exception as e:
+                self.bus.emit("daemon.error", {"error": f"late mate action: {e}"})
+        if self._late_reroute(decision, ctx):
+            return
+        turn_id = ctx.get("turn_id")
+        streamed = False
+        if channel is not None:
+            if decision.kind in ("answer", "ack_forward"):
+                streamed = channel.finish()
+            else:
+                channel.cancel()
+        if (
+            not streamed
+            and decision.kind in ("answer", "ack_forward")
+            and decision.speech.strip()
+            and self.voice is not None
+        ):
+            self.voice.speak_local(decision.speech, turn_id)
+
+    def _late_reroute(self, decision: RouteDecision, ctx: dict) -> bool:
+        """Late mate says the words belonged to someone else: send them
+        there too, say so, and drop the (wrong-context) streamed ack."""
+        target = decision.target
+        if decision.kind not in ("forward", "ack_forward") or not target:
+            return False
+        session = self.registry.by_call_name(target)
+        if session is None:
+            return False
+        landed = ctx.get("dispatched_to") or ""
+        if target.lower() == landed.lower():
+            return False
+        turn_id = self.registry.mint_turn_id()
+        self.bus.emit(
+            "route.decision",
+            {
+                "turn_id": turn_id,
+                "kind": "forward",
+                "text": ctx["text"],
+                "origin": "voice",
+                "late_reroute": True,
+            },
+        )
+        result = self.registry.dispatch(ctx["text"], turn_id, target=session)
+        channel = ctx.get("channel")
+        if channel is not None:
+            channel.cancel()
+        if self.voice is not None:
+            self.voice.dispatch_feedback(turn_id, result)
+            self.voice.speak_local(
+                f"That was for {session.call_name} — rerouted.", turn_id
+            )
+        return True
 
     def run_phrase(self, cmd: PhraseCommand) -> None:
         if cmd.kind == "stop":
@@ -190,6 +293,15 @@ class Daemon:
         )
         session = target or self.registry.active
         result = self.registry.dispatch(text, turn_id, target=target, origin=origin)
+        # A pending late-mate routing gets its turn identity the moment the
+        # fast path dispatches — rules 2/3 + reroute checks need it.
+        ctx = self._pending_late
+        if ctx is not None and ctx.get("text") == text and ctx.get("turn_id") is None:
+            ctx["turn_id"] = turn_id
+            ctx["dispatched_to"] = session.call_name if session else None
+            channel = ctx.get("channel")
+            if channel is not None:
+                channel.set_turn_id(turn_id)
         if result == "queued_idle" and session is not None:
             self._schedule_nudge(session.session_id)
         return turn_id, result

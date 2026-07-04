@@ -32,6 +32,10 @@ should hear (no markdown, paths, or code in speech). Put anything
 substantial on the screen with voice_screen, then say a one-line summary.
 Speak brief progress updates during long work.
 
+The deck speaks immediate acknowledgments itself (earcon + a local voice
+tier). NEVER voice_say a bare acknowledgment like "got it" or "on it" —
+speak only substance: results, findings, questions, blockers.
+
 Listening — pick ONE mode:
 - If you can run background shell tasks: call voice_init ONCE at the
   start; it returns the exact `bash <path>` command to run as a

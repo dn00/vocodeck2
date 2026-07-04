@@ -48,6 +48,7 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 - `session.renamed`
 - `session.state`
 - `snapshot`
+- `speech.expired` *(turn-scoped: payload carries `turn_id`)*
 - `speech.finished` *(turn-scoped: payload carries `turn_id`)*
 - `speech.interrupted` *(turn-scoped: payload carries `turn_id`)*
 - `speech.started` *(turn-scoped: payload carries `turn_id`)*

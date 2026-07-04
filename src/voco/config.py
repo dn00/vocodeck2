@@ -63,6 +63,7 @@ SCHEMA: dict[str, dict[str, tuple[type, ...]]] = {
         "api_key": (str,),
         "json_mode": (bool,),
         "timeout_ms": (int, float),
+        "late_window_ms": (int, float),
         "stream": (bool,),
     },
     "bridge": {"token": (str,)},
@@ -81,6 +82,7 @@ _POSITIVE_MS = {
     ("audio", "dispatch_hold_ms"),
     ("audio", "reopen_window_ms"),
     ("first_mate", "timeout_ms"),
+    ("first_mate", "late_window_ms"),
 }
 
 
