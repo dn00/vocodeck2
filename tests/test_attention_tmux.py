@@ -65,7 +65,7 @@ class FakeRunner:
 
 def test_spawn_wires_env_cwd_and_prefix():
     runner = FakeRunner()
-    mgr = TmuxManager(runner, voco_url="http://127.0.0.1:7777")
+    mgr = TmuxManager(runner, voco_url="http://127.0.0.1:7777", sleep=lambda s: None)
     name = mgr.spawn("claude", name="My Repo!", cwd="/repo/a")
     assert name == "voco-my-repo"
     argv = runner.calls[0]
@@ -74,13 +74,57 @@ def test_spawn_wires_env_cwd_and_prefix():
     assert "-c" in argv and "/repo/a" in argv
     assert "VOCO_URL=http://127.0.0.1:7777" in argv
     assert argv[-1] == "claude"
+    # Startup verification: pin the pane, check it, then unpin.
+    flat = [" ".join(c) for c in runner.calls]
+    assert any("remain-on-exit on" in c for c in flat)
+    assert any("list-panes" in c for c in flat)
+    assert any("-u remain-on-exit" in c for c in flat)
 
 
 def test_remote_spawn_goes_through_ssh():
     runner = FakeRunner()
-    mgr = TmuxManager(runner)
+    mgr = TmuxManager(runner, sleep=lambda s: None)
     mgr.spawn("codex", name="ws", host="workspace")
     assert runner.calls[0][:4] == ["ssh", "-T", "workspace", "tmux"]
+    # Verification calls ride the same ssh transport.
+    assert all(c[:3] == ["ssh", "-T", "workspace"] for c in runner.calls)
+
+
+class ScriptedRunner:
+    """Answers by matching a subcommand keyword; records all calls."""
+
+    def __init__(self, script: dict[str, RunResult]) -> None:
+        self.script = script
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: list[str]) -> RunResult:
+        self.calls.append(argv)
+        for key, result in self.script.items():
+            if key in " ".join(argv):
+                return result
+        return RunResult(0, "", "")
+
+
+def test_spawn_reports_command_that_dies_at_startup():
+    """Live-test bug: `voco new` said ok while the session was already
+    gone. A dead pane must fail loudly WITH the command's last output."""
+    runner = ScriptedRunner(
+        {
+            "list-panes": RunResult(0, "1 127\n", ""),
+            "capture-pane": RunResult(0, "zsh: command not found: claudee\n", ""),
+        }
+    )
+    mgr = TmuxManager(runner, sleep=lambda s: None)
+    with pytest.raises(RuntimeError, match=r"status 127.*command not found"):
+        mgr.spawn("claudee", name="x")
+    assert any("kill-session" in " ".join(c) for c in runner.calls)  # no corpse
+
+
+def test_spawn_reports_session_that_vanishes_instantly():
+    runner = ScriptedRunner({"set-option": RunResult(1, "", "no such session")})
+    mgr = TmuxManager(runner, sleep=lambda s: None)
+    with pytest.raises(RuntimeError, match="died at spawn"):
+        mgr.spawn("claude", name="x")
 
 
 def test_kill_refuses_non_voco_sessions():
