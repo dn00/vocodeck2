@@ -123,6 +123,7 @@ class BridgeServer:
                 "worktree",
                 "harness",
                 "pid",
+                "instance",
                 # Transport facts that unlock capabilities (derive-don't-ask):
                 # a tmux pane/session enables inject; host_alias routes it.
                 "tmux_pane",

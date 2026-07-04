@@ -200,6 +200,18 @@ async def test_ui_served_without_auth_ws_token_via_query():
         await c.close()
 
 
+async def test_register_instance_separates_same_cwd_agents(client):
+    """HTTP register must carry the instance discriminator end-to-end."""
+    a = await (
+        await client.post("/v1/bridge/register", json={**IDENT, "instance": "%5"})
+    ).json()
+    b = await (
+        await client.post("/v1/bridge/register", json={**IDENT, "instance": "%9"})
+    ).json()
+    assert a["session_id"] != b["session_id"]
+    assert a["call_name"] != b["call_name"]
+
+
 async def test_snapshot_extra_merges_daemon_state():
     """UI truth source: mic state rides every snapshot (WS + state.get)."""
     bus = EventBus()

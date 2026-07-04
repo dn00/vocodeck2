@@ -51,6 +51,25 @@ def test_register_is_idempotent_by_identity_and_names_are_distinct():
     assert b.call_name != a1.call_name
 
 
+def test_two_agents_in_one_cwd_get_distinct_sessions():
+    """Live-test bug: same host+cwd+harness collapsed two Claude Code
+    instances into one session. The instance component separates them."""
+    r = Registry()
+    a = r.register({**ident(), "instance": "%5"}, ["say", "listen"])
+    b = r.register({**ident(), "instance": "%9"}, ["say", "listen"])
+    assert a.session_id != b.session_id
+    assert a.call_name != b.call_name
+    # Re-registering either instance stays idempotent.
+    assert r.register({**ident(), "instance": "%5"}, ["say"]).session_id == (
+        a.session_id
+    )
+    # Instance survives detach bookkeeping: detaching one leaves the other.
+    r.detach(a.session_id)
+    assert r.get(b.session_id) is not None
+    again = r.register({**ident(), "instance": "%5"}, ["say"])
+    assert again.session_id != a.session_id  # fresh after detach
+
+
 def test_only_session_auto_activates_and_detach_leaves_none_active():
     r = Registry()
     a = r.register(ident(), ["say", "listen"])

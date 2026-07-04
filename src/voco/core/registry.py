@@ -101,6 +101,19 @@ class Session:
 DispatchResult = Literal["live", "queued", "queued_idle", "no_session"]
 
 
+def _identity_key(identity: dict[str, Any]) -> tuple:
+    """Who is 'the same agent' across re-registrations. The instance
+    component (tmux pane / harness session id, client-derived) keeps two
+    agents in one cwd from collapsing into one session (live-test bug);
+    clients that send none keep the legacy coarse key."""
+    return (
+        identity.get("host"),
+        identity.get("cwd"),
+        identity.get("harness"),
+        identity.get("instance"),
+    )
+
+
 class Registry:
     def __init__(
         self,
@@ -119,11 +132,7 @@ class Registry:
     # ---- registration ----------------------------------------------------
 
     def register(self, identity: dict[str, Any], capabilities: list[str]) -> Session:
-        key = (
-            identity.get("host"),
-            identity.get("cwd"),
-            identity.get("harness"),
-        )
+        key = _identity_key(identity)
         existing_id = self._by_identity.get(key)
         if existing_id is not None and existing_id in self._sessions:
             s = self._sessions[existing_id]
@@ -201,10 +210,7 @@ class Registry:
             return
         # A parked listener exits cleanly instead of timing out into a 410.
         self.try_deliver(session_id, {"status": "detach"})
-        self._by_identity.pop(
-            (s.identity.get("host"), s.identity.get("cwd"), s.identity.get("harness")),
-            None,
-        )
+        self._by_identity.pop(_identity_key(s.identity), None)
         self._emit("session.detached", {"session_id": session_id})
         if self._active_id == session_id:
             # No auto-election (SPEC §5.4 rule 6).
@@ -386,12 +392,7 @@ class Registry:
             except (KeyError, TypeError, ValueError):
                 continue
             self._sessions[s.session_id] = s
-            key = (
-                s.identity.get("host"),
-                s.identity.get("cwd"),
-                s.identity.get("harness"),
-            )
-            self._by_identity[key] = s.session_id
+            self._by_identity[_identity_key(s.identity)] = s.session_id
             restored += 1
         counter = data.get("turn_counter", 0)
         if isinstance(counter, int) and counter > self._turn_counter:

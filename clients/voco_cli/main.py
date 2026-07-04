@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -40,6 +41,16 @@ def _git(args: list[str], cwd: str) -> str | None:
         return None
 
 
+def _instance() -> str | None:
+    """Stable per-agent-instance discriminator: two agents in one cwd must
+    not collapse into one session (live-test bug). The tmux pane wins — it
+    is inherited by everything the agent spawns and keeps the session
+    stable across conversation restarts in the same pane; Claude Code's
+    session id (also inherited by its MCP servers) covers non-tmux; None
+    falls back to the legacy (host, cwd, harness) key."""
+    return os.environ.get("TMUX_PANE") or os.environ.get("CLAUDE_CODE_SESSION_ID")
+
+
 def derive_identity() -> dict:
     cwd = os.getcwd()
     harness = "unknown"
@@ -57,6 +68,7 @@ def derive_identity() -> dict:
         "worktree": repo_root,
         "harness": harness,
         "pid": os.getpid(),
+        "instance": _instance(),
         # Inside tmux? Enables the inject capability (SPEC v2 → now).
         "tmux_pane": os.environ.get("TMUX_PANE"),
     }
@@ -110,6 +122,9 @@ class Client:
 
     def _cache_path(self, identity: dict) -> Path:
         key = f"{identity['host']}-{Path(identity['cwd']).name}-{identity['harness']}"
+        inst = identity.get("instance")
+        if inst:
+            key += "-" + re.sub(r"[^A-Za-z0-9._-]", "_", str(inst))
         return CACHE_DIR / f"session-{key}.json"
 
     def session(self) -> dict:
