@@ -264,6 +264,25 @@ class Client:
                 failing_since = None
 
 
+def listen_stream(client) -> int:
+    """`voco listen --stream`: print every transcript as it arrives, never
+    returning while the daemon lives. Made for backgrounded agent shells
+    (live-test bug: a parked voice_listen blocks the agent's whole turn) —
+    the agent backgrounds this once and keeps working; each stdout line is
+    the user's next instruction."""
+    while True:
+        result = client.listen()
+        status = result.get("status")
+        if status == "transcript":
+            print(format_transcript(result), flush=True)
+        elif status == "detach":
+            print("voice daemon shutting down — stream closed.", flush=True)
+            return 0
+        else:  # unavailable: the retry window is already exhausted
+            print(SOFT_FAIL, flush=True)
+            return 0
+
+
 def cmd_watch(client: Client) -> int:
     """Tail the daemon's WS event stream (snapshot first, then live)."""
     import asyncio
@@ -447,7 +466,13 @@ def main() -> None:
     sub = parser.add_subparsers(dest="cmd", required=True)
     p_say = sub.add_parser("say")
     p_say.add_argument("text")
-    sub.add_parser("listen")
+    p_listen = sub.add_parser("listen")
+    p_listen.add_argument(
+        "--stream",
+        action="store_true",
+        help="never return: print each transcript as a stdout line"
+        " (run it as a background task; keeps the agent turn free)",
+    )
     p_screen = sub.add_parser("screen")
     p_screen.add_argument("markdown")
     p_screen.add_argument("--title", default=None)
@@ -500,6 +525,8 @@ def main() -> None:
     if args.cmd == "say":
         print(client.say(args.text))
     elif args.cmd == "listen":
+        if args.stream:
+            sys.exit(listen_stream(client))
         result = client.listen()
         if result.get("status") == "transcript":
             print(format_transcript(result))

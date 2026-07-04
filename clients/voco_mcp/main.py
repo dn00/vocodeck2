@@ -28,10 +28,17 @@ You are connected to a voice daemon. The user often listens instead of
 reading. Call voice_say with 1-3 short plain sentences for anything they
 should hear (no markdown, paths, or code in speech). Put anything
 substantial on the screen with voice_screen, then say a one-line summary.
-Speak brief progress updates during long work. When your turn's work is
-complete, END by calling voice_listen and acting on what it returns; if it
-returns 'nothing yet', call voice_listen again. Treat returned transcripts
-as the user's next instruction.
+Speak brief progress updates during long work.
+
+Listening — pick ONE mode:
+- If you can run background shell tasks: run `voco listen --stream` as a
+  background task ONCE at the start. Each stdout line it emits is the
+  user's next spoken instruction; you stay free to work and to react to
+  typed input meanwhile. Do not also call voice_listen.
+- Otherwise: when your turn's work is complete, END by calling
+  voice_listen and acting on what it returns; if it returns 'nothing
+  yet', call voice_listen again. Treat returned transcripts as the
+  user's next instruction.
 """
 
 
@@ -79,7 +86,10 @@ def build_server():
                 description=(
                     "Park and wait for the user's next spoken instruction. "
                     "Call this when your turn's work is complete. If it "
-                    "returns 'nothing yet', call it again to keep listening."
+                    "returns 'nothing yet', call it again to keep listening. "
+                    "NOTE: this blocks your turn — if you can run background "
+                    "shell tasks, background `voco listen --stream` instead "
+                    "and skip this tool."
                 ),
                 inputSchema={"type": "object", "properties": {}},
             ),

@@ -68,3 +68,39 @@ def test_format_transcript_tolerates_legacy_payloads():
     result = {"status": "transcript", "text": "hello", "queued": [{"text": "q1"}]}
     out = format_transcript(result)
     assert out == "[queued while working] q1\nhello"
+
+
+class SequencedClient:
+    """listen() pops a scripted result per call (duck-typed for the CLI)."""
+
+    def __init__(self, results: list[dict]) -> None:
+        self._results = iter(results)
+
+    def listen(self) -> dict:
+        return next(self._results)
+
+
+def test_listen_stream_prints_each_transcript_until_detach(capsys):
+    from voco_cli.main import listen_stream
+
+    rc = listen_stream(
+        SequencedClient(
+            [
+                {"status": "transcript", "text": "one", "queued": []},
+                {"status": "transcript", "text": "two", "queued": []},
+                {"status": "detach"},
+            ]
+        )
+    )
+    assert rc == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[:2] == ["one", "two"]
+    assert "stream closed" in out[-1]
+
+
+def test_listen_stream_exits_softly_when_daemon_gone(capsys):
+    from voco_cli.main import listen_stream
+
+    rc = listen_stream(SequencedClient([{"status": "unavailable"}]))
+    assert rc == 0
+    assert "continue without voice" in capsys.readouterr().out
