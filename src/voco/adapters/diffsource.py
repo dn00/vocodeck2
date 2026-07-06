@@ -13,6 +13,7 @@ request. `diff_file` is confined to the workspace root by the caller.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -37,6 +38,15 @@ class DiffResolveError(Exception):
     """Soft, message-carrying failure — the route maps it to a 4xx hint."""
 
 
+def _valid_ref(ref: str) -> bool:
+    """A conservative git ref shape: no leading dash (option injection), no
+    whitespace or the chars git rev-names forbid. Not a full check-ref-format
+    reimplementation — a shape gate before argv (review WARNING 7)."""
+    return (
+        bool(ref) and not ref.startswith("-") and not re.search(r"[\s~^:?*\[\\]", ref)
+    )
+
+
 class DiffResolver:
     def __init__(self, runner: Runner = _default_runner) -> None:
         self._run = runner
@@ -48,23 +58,30 @@ class DiffResolver:
         return r.stdout
 
     def default_branch(self, root: str) -> str:
-        """origin/HEAD's target, else main, else master — best effort."""
+        """The remote-tracking default (e.g. `origin/main`), else a local
+        main/master, else HEAD. Keeps the FULL remote ref so the merge-base
+        is against origin, not a stale local branch (review WARNING 6)."""
         try:
             ref = self._git(["symbolic-ref", "refs/remotes/origin/HEAD"], root).strip()
-            if ref:
-                return ref.rsplit("/", 1)[-1]
+            if ref.startswith("refs/remotes/"):
+                return ref[len("refs/remotes/") :]  # e.g. "origin/main"
         except DiffResolveError:
             pass
-        for cand in ("main", "master"):
-            r = self._run(["git", "rev-parse", "--verify", cand], root)
+        for cand in ("origin/main", "origin/master", "main", "master"):
+            r = self._run(["git", "rev-parse", "--verify", "--quiet", cand], root)
             if r.returncode == 0:
                 return cand
         return "HEAD"
 
     def resolve(self, source: dict, root: str) -> str:
-        """Return unified-diff text for a source spec, cwd = workspace root."""
+        """Return unified-diff text for a source spec, cwd = workspace root.
+        Values that could be read as options are validated (review WARNING 7):
+        argv already blocks shell injection; `--` terminators and shape
+        checks block option injection."""
         if "pr" in source:
             n = str(source["pr"])
+            if not n.isdigit():
+                raise DiffResolveError("pr must be a number")
             r = self._run(["gh", "pr", "diff", n], root)
             if r.returncode != 0:
                 raise DiffResolveError(
@@ -76,10 +93,12 @@ class DiffResolver:
             return self._git(["diff", "--cached"], root)
         if "branch" in source:
             base = source.get("branch") or self.default_branch(root)
-            merge_base = self._git(["merge-base", "HEAD", base], root).strip()
+            if not _valid_ref(base):
+                raise DiffResolveError(f"invalid base ref: {base!r}")
+            merge_base = self._git(["merge-base", "HEAD", "--", base], root).strip()
             if not merge_base:
                 raise DiffResolveError(f"no merge-base with {base!r}")
-            return self._git(["diff", f"{merge_base}..HEAD"], root)
+            return self._git(["diff", f"{merge_base}..HEAD", "--"], root)
         if "diff_file" in source:
             # Confinement is the route's job (same as docs); we only read.
             with open(source["diff_file"], encoding="utf-8", errors="replace") as fh:

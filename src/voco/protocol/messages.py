@@ -87,6 +87,7 @@ COMMAND_TYPES = {
     "finding.update",
     "finding.withdraw",
     "ask.create",
+    "ask.list",
     "review.export",
 }
 

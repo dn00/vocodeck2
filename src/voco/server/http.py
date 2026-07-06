@@ -174,10 +174,13 @@ class BridgeServer:
         nonce = secrets.token_hex(8)
         body = body.replace("{{nonce}}", nonce)
         resp = web.Response(text=body, content_type="text/html")
+        # connect-src 'self' covers same-origin ws:// under CSP3, so we do
+        # NOT open ws:/wss: globally — that would let an XSS exfiltrate over
+        # a WebSocket to any host (review NOTE 11).
         resp.headers["Content-Security-Policy"] = (
             f"default-src 'self'; script-src 'self' 'nonce-{nonce}'; "
             "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
-            "connect-src 'self' ws: wss:"
+            "connect-src 'self'"
         )
         return resp
 
@@ -347,10 +350,16 @@ class BridgeServer:
     async def _events_ws(self, request: web.Request) -> web.WebSocketResponse:
         self._check_origin(request)  # §8.5: refuse foreign-origin upgrades
         self._check_auth(request)
-        # Events are open observability; COMMANDS from a browser-origin
-        # connection additionally need the workbench token (§8.5). A
-        # no-Origin connection (CLI tools) follows the bearer policy only.
-        commands_ok = request.headers.get("Origin") is None or self._wb_ok(request)
+        # WebSockets are exempt from CORS, so a browser-origin connection
+        # must present the workbench token to even READ the event stream —
+        # the snapshot carries session cwds/screens/finding data a hostile
+        # loopback-served page must not siphon (review BLOCKER 1). A
+        # no-Origin connection (CLI tools, curl) follows the bearer policy
+        # only, exactly like the HTTP surfaces.
+        browser = request.headers.get("Origin") is not None
+        if browser and not self._wb_ok(request):
+            raise web.HTTPForbidden(text="workbench token required")
+        commands_ok = not browser or self._wb_ok(request)
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
         loop = asyncio.get_running_loop()

@@ -96,6 +96,11 @@ def _strip_prefix(p: str) -> str | None:
 
 
 def _header_path(line: str) -> str | None:
+    # KNOWN LIMITATION (review WARNING 9, shared with the oracle): git quotes
+    # paths containing spaces/specials as `"a/b c.py"` with C-style escapes;
+    # this does not unquote them, so anchors on such files may mismatch. The
+    # common case (ordinary paths) is exact. Full check-quoted-path handling
+    # is a deferred follow-up.
     rest = line[4:]
     tab = rest.find("\t")  # non-git diffs may append a tab + timestamp
     if tab != -1:

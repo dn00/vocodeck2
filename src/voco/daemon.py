@@ -34,10 +34,10 @@ from voco.core.attention import AttentionMode
 from voco.core.events import EventBus
 from voco.core.first_mate import build_grounding, execute_action
 from voco.core.phrases import PhraseCommand
-from voco.core.registry import Registry
+from voco.core.registry import Registry, Session
 from voco.core.router import Routed, Router
 from voco.core.turn import RouteDecision
-from voco.core.workspace import WorkspaceStore
+from voco.core.workspace import Workspace, WorkspaceStore
 from voco.server.http import BridgeServer, run_server
 from voco.server.workbench import handle_workbench_command
 
@@ -614,7 +614,14 @@ class Daemon:
     # ---- workbench manifests (SPEC-WORKBENCH §8) ----------------------------
 
     _MANIFEST_EVENTS = frozenset(
-        {"workspace.updated", "page.updated", "finding.added", "finding.updated"}
+        {
+            "workspace.updated",
+            "page.updated",
+            "finding.added",
+            "finding.updated",
+            "ask.created",
+            "ask.answered",
+        }
     )
 
     def _restore_manifests(self) -> None:
@@ -668,6 +675,53 @@ class Daemon:
                 self._manifest.save(key, self.workspaces.dump_workspace(ws))
             except Exception as e:
                 self.bus.emit("daemon.error", {"error": f"manifest save: {e}"})
+
+    # ---- the unified wake (SPEC-WORKBENCH §4.2/§4.3) ------------------------
+
+    def _primary_session(self, ws: Workspace) -> Session | None:
+        """Elect the workspace's primary review agent (§4.3): the active
+        session if it lives here, else the sole review-capable session, else
+        the most recently seen review-capable one."""
+        here = [
+            s
+            for s in self.registry.all()
+            if "review" in s.capabilities and self.workspaces.resolve(s.identity) is ws
+        ]
+        if not here:
+            return None
+        active = self.registry.active
+        if active is not None and active in here:
+            return active
+        if len(here) == 1:
+            return here[0]
+        return max(here, key=lambda s: s.last_seen)
+
+    def _review_items_for(self, session_id: str) -> list[dict]:
+        """Pending review items for a session — only when it is the primary
+        agent of its workspace (others read the shared ledger; no dup work)."""
+        s = self.registry.get(session_id)
+        if s is None or "review" not in s.capabilities:
+            return []
+        ws = self.workspaces.resolve(s.identity)
+        if self._primary_session(ws) is not s:
+            return []
+        return ws.pending_review()
+
+    def _wire_review_wake(self) -> None:
+        self.registry.review_items = self._review_items_for
+
+        def on_event(env) -> None:
+            if env.type not in ("finding.added", "ask.created"):
+                return
+            key = env.payload.get("workspace")
+            ws = self.workspaces.get(key) if key else None
+            if ws is None:
+                return
+            primary = self._primary_session(ws)
+            if primary is not None:
+                self.registry.wake_review(primary.session_id)
+
+        self.bus.subscribe(on_event)
 
     def _schedule_state_save(self) -> None:
         """Debounced: one pending save absorbs every change in its window
@@ -750,6 +804,7 @@ class Daemon:
         self._wire_state_saver()
         self._restore_manifests()
         self._wire_manifest_saver()
+        self._wire_review_wake()
         self._start_watcher(loop)
         try:
             runner = await run_server(self.bridge, host=host, port=port)

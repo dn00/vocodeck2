@@ -79,6 +79,29 @@ class Finding:
 
 
 @dataclass
+class Ask:
+    """A question from the in-page chat (SPEC-WORKBENCH §4.3), routed to the
+    workspace's primary agent and answered in markdown."""
+
+    ask_id: str
+    text: str
+    context: dict[str, Any] | None = None
+    answer: str | None = None
+    created_ts: float = 0.0
+    answered_ts: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ask_id": self.ask_id,
+            "text": self.text,
+            "context": self.context,
+            "answer": self.answer,
+            "created_ts": self.created_ts,
+            "answered_ts": self.answered_ts,
+        }
+
+
+@dataclass
 class Page:
     page_id: str
     type: str
@@ -126,6 +149,33 @@ class Workspace:
     common_dir: str | None = None  # rail repo-grouping (worktree siblings)
     pages: dict[str, Page] = field(default_factory=dict)
     findings: dict[str, Finding] = field(default_factory=dict)
+    asks: dict[str, Ask] = field(default_factory=dict)
+
+    def pending_review(self) -> list[dict[str, Any]]:
+        """Items an agent must act on (SPEC-WORKBENCH §4.2): open findings
+        + unanswered asks. Stable ids → idempotent, at-least-once safe."""
+        items: list[dict[str, Any]] = []
+        for f in self.findings.values():
+            if f.status == "open":
+                items.append(
+                    {
+                        "kind": "finding",
+                        "id": f.finding_id,
+                        "workspace": self.key,
+                        **f.to_dict(),
+                    }
+                )
+        for a in self.asks.values():
+            if a.answer is None:
+                items.append(
+                    {
+                        "kind": "ask",
+                        "id": a.ask_id,
+                        "workspace": self.key,
+                        **a.to_dict(),
+                    }
+                )
+        return items
 
     def page_by_ref(self, type_: str, ref: str) -> Page | None:
         for p in self.pages.values():
@@ -499,6 +549,10 @@ class WorkspaceStore:
         )
         if status not in valid:
             raise ValueError(f"status {status!r} not allowed here")
+        # Withdraw is the human's final word: an agent with a stale id cannot
+        # resurrect a withdrawn finding (review WARNING 5).
+        if agent and f.status == "withdrawn":
+            raise ValueError("finding withdrawn; agents cannot change it")
         f.status = status  # type: ignore[assignment]
         if note is not None:
             f.note = note
@@ -524,6 +578,40 @@ class WorkspaceStore:
             out = [f for f in out if f["status"] == "open"]
         return out
 
+    # ---- asks (SPEC-WORKBENCH §4.3) -----------------------------------------
+
+    def add_ask(
+        self, workspace_key: str, *, text: str, context: dict | None = None
+    ) -> Ask:
+        ws = self._spaces.get(workspace_key)
+        if ws is None:
+            raise ValueError(f"unknown workspace: {workspace_key}")
+        aid = "a-" + secrets.token_hex(4)
+        a = Ask(ask_id=aid, text=text, context=context, created_ts=self._now())
+        ws.asks[aid] = a
+        self._emit("ask.created", {"workspace": ws.key, **a.to_dict()})
+        return a
+
+    def answer_ask(self, workspace_key: str, ask_id: str, markdown: str) -> Ask:
+        ws = self._spaces.get(workspace_key)
+        if ws is None or ask_id not in ws.asks:
+            raise ValueError(f"unknown ask: {ask_id}")
+        a = ws.asks[ask_id]
+        a.answer = markdown
+        a.answered_ts = self._now()
+        self._emit("ask.answered", {"workspace": ws.key, **a.to_dict()})
+        return a
+
+    def answer_finding(
+        self, workspace_key: str, finding_id: str, markdown: str
+    ) -> Finding:
+        """An agent answers a question-kind finding in place (§4.2)."""
+        ws, f = self._find(workspace_key, finding_id)
+        f.answer = markdown
+        f.updated_ts = self._now()
+        self._emit_finding("updated", ws, f)
+        return f
+
     # ---- persistence (SPEC-WORKBENCH §8; the manifest adapter drives fs) -----
 
     MANIFEST_VERSION = 1
@@ -545,6 +633,7 @@ class WorkspaceStore:
             "page_counter": self._page_counter,
             "pages": [{**p.meta(), "data": p.data} for p in ws.pages.values()],
             "findings": [f.to_dict() for f in ws.findings.values()],
+            "asks": [a.to_dict() for a in ws.asks.values()],
         }
 
     def restore_workspace(self, data: dict) -> Workspace | None:
@@ -598,6 +687,16 @@ class WorkspaceStore:
                     updated_ts=float(fraw.get("updated_ts", 0.0)),
                 )
                 ws.findings[f.finding_id] = f
+            for araw in data.get("asks", []):
+                a = Ask(
+                    ask_id=str(araw["ask_id"]),
+                    text=str(araw.get("text", "")),
+                    context=araw.get("context"),
+                    answer=araw.get("answer"),
+                    created_ts=float(araw.get("created_ts", 0.0)),
+                    answered_ts=float(araw.get("answered_ts", 0.0)),
+                )
+                ws.asks[a.ask_id] = a
         except (KeyError, TypeError, ValueError):
             return None
         self._spaces[ws.key] = ws

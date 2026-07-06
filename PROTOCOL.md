@@ -68,6 +68,7 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 ## Commands (clients → daemon)
 
 - `ask.create`
+- `ask.list`
 - `config.get`
 - `config.set`
 - `finding.add`

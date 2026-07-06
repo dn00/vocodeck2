@@ -136,6 +136,11 @@ class Registry:
         self._detached: set[str] = set()
         # The bridge implements live delivery to a parked long-poll.
         self.try_deliver: Callable[[str, dict], bool] = lambda sid, payload: False
+        # Pending review items (SPEC-WORKBENCH §4.2) for a session, computed
+        # by the daemon from the workspace ledger. Injected; default: none.
+        # At-least-once: recomputed every listen, so an agent that crashes
+        # mid-wake sees them again; idempotent by item id.
+        self.review_items: Callable[[str], list[dict]] = lambda sid: []
 
     # ---- registration ----------------------------------------------------
 
@@ -290,12 +295,18 @@ class Registry:
     # ---- bridge hooks --------------------------------------------------------
 
     def on_listen_start(self, session_id: str) -> dict | None:
-        """Bridge parks a poll. Returns an immediate payload if input waits."""
+        """Bridge parks a poll. Returns an immediate payload if input waits.
+
+        Priority (SPEC-WORKBENCH §4.2): a queued transcript always wins —
+        voice is the flagship. Pending review items ride along in `queued`
+        so they can never be starved; with nothing else waiting they wake
+        as `{status: "review"}`. Review items mint no turn_id."""
         s = self._sessions.get(session_id)
         if s is None:
             return None
         s.last_seen = self._now()
         s.outstanding_turn_id = None  # a new listen ends the working turn
+        review = self.review_items(session_id)
         if s.queued:
             first, rest = s.queued[0], s.queued[1:]
             payload = {
@@ -304,14 +315,32 @@ class Registry:
                 "text": first.text,
                 "origin": first.origin,
                 "age_s": max(0, round(self._now() - first.ts)),
-                "queued": self._queued_payload(rest),
+                "queued": self._queued_payload(rest) + review,
             }
             s.queued.clear()
             s.outstanding_turn_id = first.turn_id
             return payload
+        if review:
+            return {"status": "review", "items": review}
         s.parked = True
         self._emit_session_state(s)
         return None
+
+    def wake_review(self, session_id: str) -> bool:
+        """Deliver pending review items to a parked listener now (a new
+        finding/ask arrived). No-op if not parked (the items ride the next
+        listen — at-least-once). Returns True if it woke a parked poll."""
+        s = self._sessions.get(session_id)
+        if s is None or not s.parked:
+            return False
+        items = self.review_items(session_id)
+        if not items:
+            return False
+        if self.try_deliver(session_id, {"status": "review", "items": items}):
+            s.parked = False
+            self._emit_session_state(s)
+            return True
+        return False
 
     def on_listen_end(self, session_id: str) -> None:
         s = self._sessions.get(session_id)

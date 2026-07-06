@@ -17,7 +17,9 @@ remote adapters resolve locally and push content instead).
 from __future__ import annotations
 
 import json
+import os
 import socket
+import stat
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,6 +31,7 @@ if TYPE_CHECKING:
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_DOC_BYTES = 2 * 1024 * 1024
+MAX_DIFF_BYTES = 8 * 1024 * 1024  # a pasted patch cap (review W8)
 
 SHELL = """<!doctype html>
 <html lang="en">
@@ -56,6 +59,7 @@ def add_workbench_routes(app: web.Application, server: BridgeServer) -> None:
     app.router.add_post("/v1/bridge/page", wb.bridge_page)
     app.router.add_get("/v1/bridge/findings", wb.bridge_findings)
     app.router.add_post("/v1/bridge/finding_status", wb.bridge_finding_status)
+    app.router.add_post("/v1/bridge/ask_reply", wb.bridge_ask_reply)
 
 
 def handle_workbench_command(store, cmd: str, payload: dict, *, data_dir):
@@ -95,6 +99,16 @@ def handle_workbench_command(store, cmd: str, payload: dict, *, data_dir):
             str(payload.get("workspace", "")), str(payload.get("finding_id", ""))
         )
         return {"finding": f.to_dict()}
+    if cmd == "ask.create":
+        a = store.add_ask(
+            str(payload.get("workspace", "")),
+            text=str(payload.get("text", "")),
+            context=payload.get("context"),
+        )
+        return {"ask": a.to_dict()}
+    if cmd == "ask.list":
+        ws = store.get(str(payload.get("workspace", "")))
+        return {"asks": [a.to_dict() for a in ws.asks.values()] if ws else []}
     if cmd == "review.export":
         from voco.core.review_export import export_workspace
 
@@ -108,19 +122,36 @@ def handle_workbench_command(store, cmd: str, payload: dict, *, data_dir):
 
 
 def confined_read(root: str, path: str) -> str:
-    """Read `path` only if it resolves inside `root`. Runs on EVERY read —
-    a symlink swapped after push fails the next read's check."""
-    resolved = Path(path).resolve()
+    """Read `path` only if it resolves inside `root`, fd-based so the caps
+    apply to the exact bytes returned (review BLOCKER 2). A relative `path`
+    resolves against the workspace root, never the daemon cwd (review W10).
+    Re-checked on EVERY read — a symlink swapped after push fails next read.
+    """
     root_resolved = Path(root).resolve()
-    if not resolved.is_relative_to(root_resolved):
+    base = Path(path)
+    if not base.is_absolute():
+        base = root_resolved / base
+    resolved = base.resolve()
+    if resolved != root_resolved and root_resolved not in resolved.parents:
         raise web.HTTPNotFound(text="outside workspace root")
-    if not resolved.is_file():
-        raise web.HTTPNotFound(text="no such doc")
-    if resolved.stat().st_size > MAX_DOC_BYTES:
-        raise web.HTTPRequestEntityTooLarge(
-            max_size=MAX_DOC_BYTES, actual_size=resolved.stat().st_size
-        )
-    data = resolved.read_bytes()
+    # Open the RESOLVED path (no further symlink) and read from the fd, so
+    # size/binary checks and the returned bytes are the same object — a
+    # post-check swap cannot substitute different content.
+    try:
+        fd = os.open(resolved, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError as e:
+        raise web.HTTPNotFound(text="no such doc") from e
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise web.HTTPNotFound(text="not a regular file")
+        if st.st_size > MAX_DOC_BYTES:
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=MAX_DOC_BYTES, actual_size=st.st_size
+            )
+        data = os.read(fd, MAX_DOC_BYTES + 1)
+    finally:
+        os.close(fd)
     if b"\0" in data[:8192]:
         raise web.HTTPUnsupportedMediaType(text="binary file")
     return data.decode("utf-8", errors="replace")
@@ -227,23 +258,32 @@ class WorkbenchRoutes:
         content = body.get("content")
         source = body.get("source")
         if content is not None:
-            # A raw patch: never live-tracked (no recorded source).
+            # A raw patch: never live-tracked (no recorded source). Cap it —
+            # a huge paste must not exhaust memory or stall the loop (W8).
+            text = str(content)
+            if len(text) > MAX_DIFF_BYTES:
+                raise web.HTTPRequestEntityTooLarge(
+                    max_size=MAX_DIFF_BYTES, actual_size=len(text)
+                )
             ref = body.get("name") or "diff:pasted"
-            diff_text, recorded, title = str(content), None, body.get("name") or "diff"
+            diff_text, recorded, title = text, None, body.get("name") or "diff"
         elif isinstance(source, dict):
             if s.identity.get("host") != self._host:
                 raise web.HTTPBadRequest(
                     text="remote session: resolve locally and push diff content"
                 )
             if "diff_file" in source:
-                confined_read(ws.root, str(source["diff_file"]))  # confine like docs
-            loop = asyncio.get_running_loop()
-            try:
-                diff_text = await loop.run_in_executor(
-                    None, self._server.diff_resolver.resolve, source, ws.root
-                )
-            except DiffResolveError as e:
-                raise web.HTTPBadRequest(text=str(e)) from e
+                # Read confined and USE that content — never re-open the path
+                # unconfined in the resolver (review BLOCKER 3).
+                diff_text = confined_read(ws.root, str(source["diff_file"]))
+            else:
+                loop = asyncio.get_running_loop()
+                try:
+                    diff_text = await loop.run_in_executor(
+                        None, self._server.diff_resolver.resolve, source, ws.root
+                    )
+                except DiffResolveError as e:
+                    raise web.HTTPBadRequest(text=str(e)) from e
             ref, recorded, title = source_ref(source), source, source_ref(source)
         else:
             raise web.HTTPBadRequest(text="diff needs `source` or `content`")
@@ -298,3 +338,31 @@ class WorkbenchRoutes:
         except ValueError as e:
             raise web.HTTPBadRequest(text=str(e)) from e
         return web.json_response({"ok": True, "finding": f.to_dict()})
+
+    async def bridge_ask_reply(self, request: web.Request) -> web.Response:
+        """An agent answers an ask (chat question) or a question-kind finding
+        in markdown. `ask_id` targets an ask; `finding_id` a finding."""
+        server = self._server
+        server._check_browser_mutation(request)
+        server._check_auth(request)
+        store = server.workspaces
+        if store is None:
+            raise web.HTTPNotFound(text="workbench disabled")
+        body = await request.json()
+        s = server._session_or_410(request, body.get("session_id"))
+        ws = store.resolve(s.identity)
+        markdown = str(body.get("markdown", ""))
+        try:
+            if body.get("ask_id"):
+                if str(body["ask_id"]) not in ws.asks:
+                    raise web.HTTPNotFound(text="ask not in this session's workspace")
+                a = store.answer_ask(ws.key, str(body["ask_id"]), markdown)
+                return web.json_response({"ok": True, "ask": a.to_dict()})
+            if body.get("finding_id"):
+                if str(body["finding_id"]) not in ws.findings:
+                    raise web.HTTPNotFound(text="finding not in this workspace")
+                f = store.answer_finding(ws.key, str(body["finding_id"]), markdown)
+                return web.json_response({"ok": True, "finding": f.to_dict()})
+        except ValueError as e:
+            raise web.HTTPBadRequest(text=str(e)) from e
+        raise web.HTTPBadRequest(text="ask_reply needs ask_id or finding_id")

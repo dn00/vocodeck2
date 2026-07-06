@@ -105,17 +105,24 @@ async def test_no_origin_curl_passes_as_before(client):
     assert resp.status == 200
 
 
-async def test_ws_commands_gated_by_wb_token(client):
-    # Browser-origin WS without wb: events flow, commands refused.
-    async with client.ws_connect(
-        "/v1/events", headers={"Origin": "http://127.0.0.1:7777"}
-    ) as ws:
+async def test_browser_ws_without_wb_rejected_at_upgrade(client):
+    # BLOCKER 1: a browser-origin WS with no wb cannot even READ the event
+    # stream (the snapshot leaks cwds/screens/findings). Upgrade → 403.
+    resp = await client.get("/v1/events", headers={"Origin": "http://127.0.0.1:9999"})
+    assert resp.status == 403
+
+
+async def test_no_origin_ws_reads_events_and_runs_commands(client):
+    # CLI tools (no Origin) keep full access under the bearer policy.
+    async with client.ws_connect("/v1/events") as ws:
         snap = await ws.receive_json()
         assert snap["type"] == "snapshot"
         await ws.send_json({"id": "1", "cmd": "state.get", "payload": {}})
         reply = await ws.receive_json()
-        assert reply["ok"] is False and "workbench token" in reply["error"]
-    # Same origin with wb: commands work.
+        assert reply["ok"] is True
+
+
+async def test_browser_ws_with_wb_reads_and_commands(client):
     wb = client.server_obj.wb_token
     async with client.ws_connect(
         f"/v1/events?wb={wb}", headers={"Origin": "http://127.0.0.1:7777"}

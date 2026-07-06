@@ -59,26 +59,53 @@ class WorkspaceManifest:
 
     def acquire(self) -> None:
         """Claim the data dir for this process, or raise WorkspaceLockError
-        naming the live holder. A dead/stale holder is taken over."""
+        naming the live holder. A dead/stale holder is taken over. The claim
+        is atomic (O_CREAT|O_EXCL) so two daemons racing at startup cannot
+        both win (review BLOCKER 4)."""
         self._dir.mkdir(parents=True, exist_ok=True)
-        me = {"pid": os.getpid(), "start": _proc_start(os.getpid())}
-        if self._lock.exists():
+        payload = json.dumps({"pid": os.getpid(), "start": _proc_start(os.getpid())})
+        for _ in range(2):
             try:
-                held = json.loads(self._lock.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                held = {}
-            hpid = held.get("pid")
-            live = (
-                isinstance(hpid, int)
-                and hpid != os.getpid()
-                and _pid_alive(hpid)
-                and held.get("start") == _proc_start(hpid)
-            )
-            if live:
-                raise WorkspaceLockError(
-                    f"another voco daemon (pid {hpid}) owns {self._dir}"
-                )
-        self._lock.write_text(json.dumps(me), encoding="utf-8")
+                fd = os.open(self._lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            except FileExistsError:
+                # A lock exists. If its holder is dead/stale, remove it and
+                # retry the exclusive create; if it is live, refuse.
+                if self._holder_is_live():
+                    held = self._read_lock()
+                    raise WorkspaceLockError(
+                        f"another voco daemon (pid {held.get('pid')}) owns {self._dir}"
+                    ) from None
+                # Take over: unlink the stale lock and loop to re-create it.
+                try:
+                    self._lock.unlink()
+                except FileNotFoundError:
+                    pass  # someone else took it over first; retry sees theirs
+                continue
+            else:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(payload)
+                return
+        # Two rounds both lost the create race to a live holder.
+        held = self._read_lock()
+        raise WorkspaceLockError(
+            f"another voco daemon (pid {held.get('pid')}) owns {self._dir}"
+        )
+
+    def _read_lock(self) -> dict:
+        try:
+            return json.loads(self._lock.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _holder_is_live(self) -> bool:
+        held = self._read_lock()
+        hpid = held.get("pid")
+        return (
+            isinstance(hpid, int)
+            and hpid != os.getpid()
+            and _pid_alive(hpid)
+            and held.get("start") == _proc_start(hpid)
+        )
 
     def release(self) -> None:
         try:

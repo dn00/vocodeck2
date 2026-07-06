@@ -62,6 +62,9 @@ def test_agent_status_restricted_human_can_withdraw():
     # human withdraw works
     store.withdraw_finding(ws.key, f.finding_id)
     assert f.status == "withdrawn"
+    # and an agent cannot resurrect a withdrawn finding (review WARNING 5)
+    with pytest.raises(ValueError):
+        store.set_finding_status(ws.key, f.finding_id, "addressed", agent=True)
 
 
 def test_finding_goes_stale_when_page_rev_bumps():
