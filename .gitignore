@@ -13,3 +13,4 @@ phrase-bank/
 *.local.toml
 .mcp.json
 .codegraph/
+.serena/
