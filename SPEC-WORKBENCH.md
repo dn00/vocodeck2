@@ -151,9 +151,19 @@ Pinned pages are unclosable in the UI; pushed `doc` pages are closable
   - `doc`: `path` (realpath-confined, §8) or `name+content` (virtual).
   - `diff`: `source: {pr: N} | {branch: base?} | {staged: true} |
     {diff_file: path}`, or raw `content` (a patch; never live-tracked).
-  - **Identity is refreshed at every page push** (one `git rev-parse`
-    pass, same as the listen re-arm refresh) — pushes never route on
-    stale registered facts.
+  - **Identity is re-asserted on every workspace verb** (page push,
+    findings, finding_status, ask_reply, say, screen, listen): the
+    adapter sends its current derived identity (`identity` in POST
+    bodies; a JSON `identity` query param on GETs) and the daemon
+    re-keys the session to it before resolving — no verb ever routes
+    on stale register-time facts. (2026-07-06 dogfood: a stale root
+    500'd git sources and "no such doc"'d files that existed.)
+  - **Errors carry context**: every bridge 4xx names the resolved
+    workspace root and the attempted path/ref/id, and the bridge never
+    returns a bare 500 — a middleware wraps unexpected exceptions in a
+    JSON body naming the exception. Session caches on the adapter side
+    key on the FULL cwd, never its basename (two checkouts sharing a
+    basename must never share a session).
 - **Where resolution runs — the local/remote split** (fixes the remote
   filesystem reality; SPEC §9.1 remote sessions are text-only tunnels
   and the daemon can never read their disks):
@@ -688,3 +698,14 @@ type or panel behind the existing seams.
     checkouts are never written to by default.
 26. **Slice order stands: W0→W5 review-first**; pty/Windows terminal
     stays W4 (WSL2 tmux is the managed-session stopgap until then).
+
+2026-07-06, after the first real dogfood (post-W5):
+
+27. **Staleness kill: identity rides every workspace verb** (§3.2) —
+    the register-time identity snapshot is a cache, not a truth; the
+    adapter's current cwd/worktree wins on every page/findings/listen
+    call. Chosen over "re-register on mismatch client-side" because
+    the client cannot see the server's stale copy (state restore), and
+    over TTL-based expiry because staleness is not time-shaped. Plus:
+    contextual 4xx bodies (root + attempted path), a no-bare-500
+    middleware, and full-cwd session cache keys client-side.

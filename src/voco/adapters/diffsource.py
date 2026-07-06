@@ -13,6 +13,7 @@ request. `diff_file` is confined to the workspace root by the caller.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from collections.abc import Callable
@@ -30,6 +31,11 @@ Runner = Callable[[list[str], str], RunResult]
 
 
 def _default_runner(argv: list[str], cwd: str) -> RunResult:
+    if not os.path.isdir(cwd):
+        # A dead workspace root must say so — subprocess raises the same
+        # FileNotFoundError as a missing binary, which would mislabel this
+        # as "git: not installed" (dogfood 2026-07-06: stale roots).
+        return RunResult(127, "", f"workspace root does not exist: {cwd}")
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=30, cwd=cwd)
     except FileNotFoundError:

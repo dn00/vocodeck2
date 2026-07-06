@@ -13,6 +13,7 @@ never asked; the session token is cached per (host, cwd, harness) in
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -221,6 +222,10 @@ class Client:
         # re-arming its slice" from "a NEW listener taking over" — the
         # old one is superseded once instead of ping-ponging forever.
         self._poller = f"{os.getpid():x}-{secrets.token_hex(4)}"
+        # Current derived identity, refreshed by session(); rides every
+        # workspace verb so the daemon never resolves against a stale
+        # register-time root (dogfood failure, 2026-07-06).
+        self._identity: dict | None = None
 
     def _request(
         self, method: str, path: str, body: dict | None = None, timeout: float = 55.0
@@ -237,7 +242,13 @@ class Client:
     # ---- session (cached token, re-register on 410) --------------------------
 
     def _cache_path(self, identity: dict) -> Path:
-        key = f"{identity['host']}-{Path(identity['cwd']).name}-{identity['harness']}"
+        # FULL cwd in the key (as a short hash): two checkouts sharing a
+        # basename must never share a session — /a/proj and /b/proj
+        # collided here and every verb then resolved against the wrong
+        # workspace root (dogfood failure, 2026-07-06).
+        cwd = str(identity["cwd"])
+        cwd_tag = hashlib.sha1(cwd.encode()).hexdigest()[:8]
+        key = f"{identity['host']}-{Path(cwd).name}-{cwd_tag}-{identity['harness']}"
         inst = identity.get("instance")
         if inst:
             key += "-" + re.sub(r"[^A-Za-z0-9._-]", "_", str(inst))
@@ -245,6 +256,7 @@ class Client:
 
     def session(self) -> dict:
         identity = derive_identity()
+        self._identity = identity
         cache = self._cache_path(identity)
         if cache.exists():
             try:
@@ -255,6 +267,7 @@ class Client:
 
     def register(self, identity: dict | None = None) -> dict:
         identity = identity or derive_identity()
+        self._identity = identity
         info = self._request(
             "POST",
             "/v1/bridge/register",
@@ -278,6 +291,13 @@ class Client:
                 return fn(sess["session_id"])
             raise
 
+    def _identity_param(self) -> str:
+        """`&identity=…` for GET verbs — the same re-asserted identity
+        POST bodies carry."""
+        if not self._identity:
+            return ""
+        return "&identity=" + urllib.parse.quote(json.dumps(self._identity))
+
     # ---- verbs ---------------------------------------------------------------------
 
     def say(self, text: str) -> str:
@@ -286,7 +306,7 @@ class Client:
                 lambda sid: self._request(
                     "POST",
                     "/v1/bridge/say",
-                    {"session_id": sid, "text": text},
+                    {"session_id": sid, "text": text, "identity": self._identity},
                     timeout=5,
                 )
             )
@@ -305,6 +325,7 @@ class Client:
                         "markdown": markdown,
                         "title": title,
                         "mode": mode,
+                        "identity": self._identity,
                     },
                     timeout=5,
                 )
@@ -320,7 +341,8 @@ class Client:
                 lambda sid: self._request(
                     "GET",
                     f"/v1/bridge/listen?session_id={urllib.parse.quote(sid)}"
-                    f"&poller={urllib.parse.quote(self._poller)}",
+                    f"&poller={urllib.parse.quote(self._poller)}"
+                    f"{self._identity_param()}",
                     timeout=65,
                 )
             )
@@ -338,7 +360,8 @@ class Client:
         return self._with_session(
             lambda sid: self._request(
                 "GET",
-                f"/v1/bridge/findings?session_id={urllib.parse.quote(sid)}{q}",
+                f"/v1/bridge/findings?session_id={urllib.parse.quote(sid)}{q}"
+                f"{self._identity_param()}",
                 timeout=10,
             )
         )
@@ -360,7 +383,7 @@ class Client:
             lambda sid: self._request(
                 "POST",
                 "/v1/bridge/finding_status",
-                {**body, "session_id": sid},
+                {**body, "session_id": sid, "identity": self._identity},
                 timeout=10,
             )
         )
@@ -372,7 +395,12 @@ class Client:
             lambda sid: self._request(
                 "POST",
                 "/v1/bridge/ask_reply",
-                {key: item_id, "markdown": markdown, "session_id": sid},
+                {
+                    key: item_id,
+                    "markdown": markdown,
+                    "session_id": sid,
+                    "identity": self._identity,
+                },
                 timeout=10,
             )
         )
@@ -381,7 +409,10 @@ class Client:
         """Push a doc or diff page to this session's workspace (§3.2)."""
         return self._with_session(
             lambda sid: self._request(
-                "POST", "/v1/bridge/page", {**body, "session_id": sid}, timeout=35
+                "POST",
+                "/v1/bridge/page",
+                {**body, "session_id": sid, "identity": self._identity},
+                timeout=35,
             )
         )
 
@@ -502,7 +533,8 @@ def cmd_page(args, client: Client) -> int:
         body = {"type": "diff", "source": source}
     try:
         r = client.page_push(body)
-        print(f"page {r.get('page_id')} rev {r.get('rev')}")
+        where = f" → {r['root']}" if r.get("root") else ""
+        print(f"page {r.get('page_id')} rev {r.get('rev')}{where}")
         return 0
     except Exception as e:
         print(f"error: {_http_error(e)}", file=sys.stderr)

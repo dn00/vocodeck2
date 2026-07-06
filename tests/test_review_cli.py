@@ -159,3 +159,53 @@ def test_page_push_doc_and_diff_shapes():
 
 def test_page_push_without_args_is_a_hint_not_an_error():
     assert "needs a doc" in _page_push(StubClient(), {})
+
+
+# ---- identity re-assertion + cache keying (dogfood failure, 2026-07-06) --------
+
+
+def test_cache_key_distinguishes_same_basename_checkouts():
+    from voco_cli.main import Client
+
+    c = Client()
+    a = c._cache_path({"host": "h", "cwd": "/a/vocodeck2", "harness": "x"})
+    b = c._cache_path({"host": "h", "cwd": "/b/vocodeck2", "harness": "x"})
+    assert a != b  # two checkouts, one basename — never one session
+
+
+def test_session_refreshes_identity_snapshot(monkeypatch, tmp_path):
+    from voco_cli import main as cli
+
+    monkeypatch.setattr(cli, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "derive_identity",
+        lambda: {"host": "h", "cwd": "/now", "harness": "x", "instance": None},
+    )
+    c = cli.Client()
+    monkeypatch.setattr(c, "register", lambda identity=None: {"session_id": "s1"})
+    c.session()
+    assert c._identity is not None and c._identity["cwd"] == "/now"
+
+
+def test_workspace_verbs_carry_current_identity(monkeypatch):
+    from voco_cli.main import Client
+
+    c = Client()
+    c._identity = {"host": "h", "cwd": "/now", "harness": "x"}
+    sent: list[tuple] = []
+
+    def fake_request(method, path, body=None, timeout=55.0):
+        sent.append((path, body))
+        return {}
+
+    monkeypatch.setattr(c, "_request", fake_request)
+    monkeypatch.setattr(c, "session", lambda: {"session_id": "s1"})
+    c.page_push({"type": "doc", "path": "/x"})
+    c.finding_status("f-1", "addressed")
+    c.reply("a-1", "done")
+    for _path, body in sent:
+        assert body["identity"]["cwd"] == "/now"
+    c.findings()  # a GET: identity rides the query string instead
+    get_path, get_body = sent[-1]
+    assert get_body is None and "identity=" in get_path

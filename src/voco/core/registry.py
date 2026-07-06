@@ -207,6 +207,42 @@ class Registry:
         )
         return s
 
+    def refresh_identity(
+        self, session_id: str, identity: dict[str, Any]
+    ) -> Session | None:
+        """Re-assert a live session's identity from the adapter's CURRENT
+        facts (dogfood 2026-07-06: a session restored/cached with a dead
+        cwd made every workspace verb resolve against the wrong root).
+        Keeps the session_id — the adapter still holds it — and re-keys
+        the identity map so a later re-register from the new cwd finds
+        the same session."""
+        s = self._sessions.get(session_id)
+        if s is None:
+            return None
+        old_key = _identity_key(s.identity)
+        old_root = s.home_root
+        s.identity.update(identity)
+        new_key = _identity_key(s.identity)
+        if new_key != old_key:
+            if self._by_identity.get(old_key) == session_id:
+                del self._by_identity[old_key]
+            self._by_identity[new_key] = session_id  # newest claim wins
+        s.last_seen = self._now()
+        if s.home_root != old_root:
+            # The rail groups sessions by home root — tell UIs it moved
+            # (same upsert event a fresh attach emits).
+            self._emit(
+                "session.attached",
+                {
+                    "session_id": s.session_id,
+                    "name": s.display_name,
+                    "capabilities": s.capabilities,
+                    "host": s.identity.get("host"),
+                    "root": s.home_root,
+                },
+            )
+        return s
+
     @staticmethod
     def _with_inject(identity: dict[str, Any], capabilities: list[str]) -> list[str]:
         caps = list(capabilities)

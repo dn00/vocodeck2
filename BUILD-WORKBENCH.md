@@ -240,7 +240,17 @@ thought but reverse order of build.**
    just use the terminal." The conversation is not the center; the
    WORK is. Voice presence + agent state + artifacts are the product.
 
-### Protocol failure from the same dogfood (root-caused, not yet fixed)
+### Protocol failure from the same dogfood — **FIXED 2026-07-06 (next session)**
+
+All three fix classes below landed + verified e2e (see journal:
+"protocol reliability"): (a) identity rides every workspace verb and the
+daemon re-keys the session to it; (b) every bridge 4xx names the
+resolved root + attempted path; (c) no-bare-500 middleware; plus the
+client session cache now keys on the FULL cwd (the two-checkouts-one-
+basename collision was reproduced and killed). Original report kept
+below for history.
+
+### Protocol failure from the same dogfood (root-caused; historical)
 
 Agent (MCP, cwd `/home/denk/vocodeck2` — note: a THIRD checkout) tried
 `page_push`:
@@ -338,6 +348,33 @@ Fix class for next session:
 
 ## Journal
 
+- **2026-07-06 (protocol reliability shipped — the dogfood 500s/no-such-doc
+  class is dead)** — Fable-native session, per the mandate's build order
+  (protocol first, UI only after an approved design). Three fixes + one
+  root-cause kill, all with tests: (a) **identity rides every workspace
+  verb** — `identity` in POST bodies / JSON query param on GETs for
+  page/findings/finding_status/ask_reply/say/screen/listen; new
+  `Registry.refresh_identity` re-keys the session (same session_id, new
+  identity map key) and emits `session.attached` (an upsert client-side)
+  when the home root moves; SPEC §3.2 updated + decision 27. (b)
+  **contextual 4xx** — `confined_read` names attempted path + resolved
+  root; sessionspace/remote/diff/finding errors name cwd/root/ids. (c)
+  **no bare 500s** — aiohttp middleware wraps unexpected exceptions in
+  `{ok:false, error:"Type: msg"}`; dead workspace roots get a named
+  runner error instead of masquerading as "git: not installed". Root
+  cause confirmed and killed: the CLI session cache keyed on cwd
+  BASENAME — `/a/proj` and `/b/proj` shared a session; now full-cwd
+  hash. `page_push` replies + CLI/MCP confirmations now name the
+  workspace root the page landed in (agents see WHERE). Verified e2e on
+  an isolated headless daemon: stale-root relative push → 404 naming
+  both path and root; same push with fresh identity → lands in the live
+  root; dead-root branch diff → clean 400 naming the root; two
+  same-basename checkouts → two sessions, two workspaces, via the real
+  CLI. 316 pytest, mypy, ruff+format, tsc, PROTOCOL.md all green.
+  (E2E hygiene note: `--config` with `[state] dir`/`[workbench]
+  data_dir` pointed at scratch — first boot attempt accidentally
+  restored the real `~/.local/state/voco` sessions; killed within
+  seconds, state untouched beyond a re-save of what it restored.)
 - **2026-07-06 (EOD — dogfood verdict: UI fails daily use; re-architecture
   mandated)** — The user drove the workbench for real. Verdict: still a
   debugger, not a product. Full field report + root-caused protocol

@@ -133,6 +133,8 @@ def confined_read(root: str, path: str) -> str:
     apply to the exact bytes returned (review BLOCKER 2). A relative `path`
     resolves against the workspace root, never the daemon cwd (review W10).
     Re-checked on EVERY read — a symlink swapped after push fails next read.
+    Refusals name the attempted path AND the root (dogfood 2026-07-06: a
+    bare "no such doc" sent an agent through six blind retries).
     """
     root_resolved = Path(root).resolve()
     base = Path(path)
@@ -140,18 +142,25 @@ def confined_read(root: str, path: str) -> str:
         base = root_resolved / base
     resolved = base.resolve()
     if resolved != root_resolved and root_resolved not in resolved.parents:
-        raise web.HTTPNotFound(text="outside workspace root")
+        raise web.HTTPNotFound(
+            text=f"{path!r} is outside the workspace root {str(root_resolved)!r}"
+        )
     # Open the RESOLVED path (no further symlink) and read from the fd, so
     # size/binary checks and the returned bytes are the same object — a
     # post-check swap cannot substitute different content.
     try:
         fd = os.open(resolved, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     except OSError as e:
-        raise web.HTTPNotFound(text="no such doc") from e
+        raise web.HTTPNotFound(
+            text=(
+                f"no such doc: {path!r} (looked for {str(resolved)!r}; "
+                f"workspace root {str(root_resolved)!r})"
+            )
+        ) from e
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
-            raise web.HTTPNotFound(text="not a regular file")
+            raise web.HTTPNotFound(text=f"not a regular file: {str(resolved)!r}")
         if st.st_size > MAX_DOC_BYTES:
             raise web.HTTPRequestEntityTooLarge(
                 max_size=MAX_DOC_BYTES, actual_size=st.st_size
@@ -293,19 +302,31 @@ class WorkbenchRoutes:
             raise web.HTTPNotFound(text="workbench disabled")
         body = await request.json()
         s = server._session_or_410(request, body.get("session_id"))
+        s = server.refresh_session_identity(s, body.get("identity"))
         ws = store.resolve(s.identity)
         type_ = body.get("type")
         if type_ not in ("doc", "diff"):
             raise web.HTTPBadRequest(text=f"page type {type_!r} not accepted")
         if ws.kind == "sessionspace":
             raise web.HTTPBadRequest(
-                text="no repo for this session; review pages need a workspace"
+                text=(
+                    f"no git checkout known for this session "
+                    f"(cwd {s.identity.get('cwd')!r}); review pages need a workspace"
+                )
             )
         if type_ == "diff":
             page = await self._push_diff(ws, s, body)
         else:
             page = self._push_doc(ws, s, body)
-        return web.json_response({"ok": True, "page_id": page.page_id, "rev": page.rev})
+        return web.json_response(
+            {
+                "ok": True,
+                "page_id": page.page_id,
+                "rev": page.rev,
+                "workspace": ws.key,
+                "root": ws.root,
+            }
+        )
 
     def _push_doc(self, ws, s, body):
         store = self._server.workspaces
@@ -316,7 +337,10 @@ class WorkbenchRoutes:
                 # local_fs capability cell: the daemon cannot read a
                 # remote disk — the adapter resolves there, pushes content.
                 raise web.HTTPBadRequest(
-                    text="remote session: push content instead of a path"
+                    text=(
+                        f"remote session (host {s.identity.get('host')!r}, "
+                        f"daemon on {self._host!r}): push content instead of a path"
+                    )
                 )
             confined_read(ws.root, str(path))  # confine + readable, up front
             return store.push_doc(ws, name=body.get("name"), path=str(path))
@@ -350,7 +374,11 @@ class WorkbenchRoutes:
         elif isinstance(source, dict):
             if s.identity.get("host") != self._host:
                 raise web.HTTPBadRequest(
-                    text="remote session: resolve locally and push diff content"
+                    text=(
+                        f"remote session (host {s.identity.get('host')!r}, "
+                        f"daemon on {self._host!r}): resolve locally and "
+                        "push diff content"
+                    )
                 )
             if "diff_file" in source:
                 # Read confined and USE that content — never re-open the path
@@ -363,7 +391,11 @@ class WorkbenchRoutes:
                         None, self._server.diff_resolver.resolve, source, ws.root
                     )
                 except DiffResolveError as e:
-                    raise web.HTTPBadRequest(text=str(e)) from e
+                    # Name the root git actually ran in — "git failed" with
+                    # no place was undebuggable in the dogfood.
+                    raise web.HTTPBadRequest(
+                        text=f"{e} (workspace root {ws.root!r})"
+                    ) from e
                 if len(diff_text) > MAX_DIFF_BYTES:
                     # Same cap as pasted content: a monster branch/PR diff
                     # must not stall the daemon or bloat page state.
@@ -394,7 +426,10 @@ class WorkbenchRoutes:
         store = server.workspaces
         if store is None:
             raise web.HTTPNotFound(text="workbench disabled")
+        from voco.server.http import identity_from_query
+
         s = server._session_or_410(request, request.query.get("session_id"))
+        s = server.refresh_session_identity(s, identity_from_query(request))
         ws = store.resolve(s.identity)
         open_only = request.query.get("pending") in ("1", "true")
         return web.json_response(
@@ -415,11 +450,14 @@ class WorkbenchRoutes:
             raise web.HTTPNotFound(text="workbench disabled")
         body = await request.json()
         s = server._session_or_410(request, body.get("session_id"))
+        s = server.refresh_session_identity(s, body.get("identity"))
         ws = store.resolve(s.identity)
         fid = str(body.get("finding_id", ""))
         if fid not in ws.findings:
             # A session may only touch its OWN workspace's ledger (§4.1).
-            raise web.HTTPNotFound(text="finding not in this session's workspace")
+            raise web.HTTPNotFound(
+                text=f"finding {fid!r} not in this session's workspace ({ws.key})"
+            )
         try:
             f = store.set_finding_status(
                 ws.key,
@@ -444,17 +482,28 @@ class WorkbenchRoutes:
             raise web.HTTPNotFound(text="workbench disabled")
         body = await request.json()
         s = server._session_or_410(request, body.get("session_id"))
+        s = server.refresh_session_identity(s, body.get("identity"))
         ws = store.resolve(s.identity)
         markdown = str(body.get("markdown", ""))
         try:
             if body.get("ask_id"):
                 if str(body["ask_id"]) not in ws.asks:
-                    raise web.HTTPNotFound(text="ask not in this session's workspace")
+                    raise web.HTTPNotFound(
+                        text=(
+                            f"ask {body['ask_id']!r} not in this session's "
+                            f"workspace ({ws.key})"
+                        )
+                    )
                 a = store.answer_ask(ws.key, str(body["ask_id"]), markdown)
                 return web.json_response({"ok": True, "ask": a.to_dict()})
             if body.get("finding_id"):
                 if str(body["finding_id"]) not in ws.findings:
-                    raise web.HTTPNotFound(text="finding not in this workspace")
+                    raise web.HTTPNotFound(
+                        text=(
+                            f"finding {body['finding_id']!r} not in this "
+                            f"session's workspace ({ws.key})"
+                        )
+                    )
                 f = store.answer_finding(ws.key, str(body["finding_id"]), markdown)
                 return web.json_response({"ok": True, "finding": f.to_dict()})
         except ValueError as e:

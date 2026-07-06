@@ -341,3 +341,130 @@ async def test_register_alone_creates_the_workspace(client):
     ws = client.store.home_of(ident(client.repo))
     assert ws is not None and ws.kind == "workspace"
     assert ws.key in {w["key"] for w in client.store.snapshot()}
+
+
+# ---- staleness kill + error context (dogfood failure, 2026-07-06) -------------
+# A session whose register-time identity went stale (client cache collision,
+# daemon state restore) made every workspace verb resolve against the wrong
+# root: page_push 500'd on git sources and "no such doc"'d on files that
+# plainly existed. Adapters now re-assert identity per verb; errors name the
+# root + attempted path; nothing on the bridge returns a bare 500.
+
+
+async def test_stale_identity_refreshed_per_bridge_call(client, tmp_path_factory):
+    sid = await register(client)  # registered at client.repo
+    moved = tmp_path_factory.mktemp("moved-checkout")
+    (moved / "NOTES.md").write_text("fresh")
+    fresh = {**ident(client.repo), "cwd": str(moved), "worktree": str(moved)}
+    # The exact dogfood shape: a RELATIVE path that exists in the agent's
+    # real cwd but not under the stale registered root.
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "doc", "path": "NOTES.md", "identity": fresh},
+    )
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["root"] == str(moved)
+    # The session itself moved: later verbs resolve the fresh root too.
+    s = client.server_obj._registry.get(sid)
+    assert s.identity["cwd"] == str(moved)
+    # A re-register from the NEW cwd finds the same session, not a twin.
+    resp = await client.post("/v1/bridge/register", json=fresh)
+    assert (await resp.json())["session_id"] == sid
+
+
+async def test_findings_get_refreshes_identity(client, tmp_path_factory):
+    import json as _json
+    import urllib.parse
+
+    sid = await register(client)
+    moved = tmp_path_factory.mktemp("elsewhere")
+    fresh = {**ident(client.repo), "cwd": str(moved), "worktree": str(moved)}
+    q = urllib.parse.quote(_json.dumps(fresh))
+    resp = await client.get(f"/v1/bridge/findings?session_id={sid}&identity={q}")
+    body = await resp.json()
+    assert body["workspace"].endswith(str(moved))
+
+
+async def test_malformed_identity_is_ignored(client):
+    sid = await register(client)
+    for bad in ("not json", {"host": "h"}, [1, 2], {"cwd": "/x"}):
+        resp = await client.post(
+            "/v1/bridge/page",
+            json={
+                "session_id": sid,
+                "type": "doc",
+                "name": "n",
+                "content": "c",
+                "identity": bad,
+            },
+        )
+        assert resp.status == 200  # verb works; stale-but-valid root kept
+    s = client.server_obj._registry.get(sid)
+    assert s.identity["cwd"] == str(client.repo)
+
+
+async def test_4xx_bodies_name_root_and_attempted_path(client):
+    sid = await register(client)
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "doc", "path": "missing.md"},
+    )
+    assert resp.status == 404
+    text = await resp.text()
+    assert "missing.md" in text and str(client.repo.resolve()) in text
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "doc", "path": "/etc/hostname"},
+    )
+    assert resp.status == 404
+    text = await resp.text()
+    assert "outside" in text and str(client.repo.resolve()) in text
+    # finding not found names the id and the workspace it looked in
+    resp = await client.post(
+        "/v1/bridge/finding_status",
+        json={"session_id": sid, "finding_id": "f-nope", "status": "addressed"},
+    )
+    assert resp.status == 404
+    text = await resp.text()
+    assert "f-nope" in text and str(client.repo) in text
+
+
+async def test_bridge_errors_never_bare_500(client, monkeypatch):
+    sid = await register(client)
+
+    def boom(source, root):
+        raise RuntimeError("kaput")
+
+    monkeypatch.setattr(client.server_obj.diff_resolver, "resolve", boom)
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "diff", "source": {"branch": "main"}},
+    )
+    assert resp.status == 500
+    body = await resp.json()  # a JSON body with the exception named, not blank
+    assert body["ok"] is False and "kaput" in body["error"]
+
+
+def test_dead_workspace_root_names_itself_not_git():
+    from voco.adapters.diffsource import _default_runner
+
+    r = _default_runner(["git", "status"], "/no/such/checkout")
+    assert r.returncode != 0
+    assert "workspace root does not exist" in r.stderr
+    assert "not installed" not in r.stderr
+
+
+def test_registry_refresh_identity_rekeys_and_emits_on_move():
+    events: list[tuple[str, dict]] = []
+    reg = Registry(emit=lambda t, p: events.append((t, p)))
+    base = {"host": "h", "cwd": "/old", "worktree": "/old", "harness": "c"}
+    s = reg.register(base, ["say"])
+    events.clear()
+    reg.refresh_identity(s.session_id, {**base, "cwd": "/new", "worktree": "/new"})
+    assert s.identity["cwd"] == "/new"
+    assert [t for t, _ in events] == ["session.attached"]  # the rail re-groups
+    # same-root refresh (branch flip) stays quiet
+    events.clear()
+    reg.refresh_identity(s.session_id, {**base, "cwd": "/new", "worktree": "/new"})
+    assert events == []

@@ -39,9 +39,61 @@ LISTEN_SLICE_S = 50.0
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]"}
 
+# The identity facts an adapter may assert — at register and, since the
+# 2026-07-06 stale-root dogfood failure, re-asserted on every workspace
+# verb (the register-time snapshot must never outlive the adapter's
+# current truth).
+IDENTITY_FIELDS = (
+    "host",
+    "user",
+    "cwd",
+    "repo",
+    "branch",
+    "worktree",
+    "common_dir",
+    "harness",
+    "pid",
+    "instance",
+    # Transport facts that unlock capabilities (derive-don't-ask):
+    # a tmux pane/session enables inject; host_alias routes it.
+    "tmux_pane",
+    "tmux_session",
+    "host_alias",
+)
+
 
 async def _no_control(cmd: str, payload: dict) -> dict:
     return {}
+
+
+@web.middleware
+async def error_middleware(request: web.Request, handler):
+    """No bare 500s (dogfood 2026-07-06): agents act on error bodies, and
+    a blank 500 sent one flailing through six blind retries. HTTPException
+    subclasses are deliberate replies and pass through; anything else
+    becomes a 500 with the exception named in a JSON body."""
+    try:
+        return await handler(request)
+    except (web.HTTPException, asyncio.CancelledError):
+        raise
+    except Exception as e:
+        if request.headers.get("Upgrade", "").lower() == "websocket":
+            raise  # can't send a fresh response on an upgraded socket
+        return web.json_response(
+            {"ok": False, "error": f"{type(e).__name__}: {e}"}, status=500
+        )
+
+
+def identity_from_query(request: web.Request) -> dict | None:
+    """GET verbs carry re-asserted identity as a JSON query param."""
+    raw = request.query.get("identity")
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 class BridgeServer:
@@ -114,7 +166,7 @@ class BridgeServer:
     def build_app(self) -> web.Application:
         from voco.server.workbench import add_workbench_routes
 
-        app = web.Application()
+        app = web.Application(middlewares=[error_middleware])
         app.router.add_post("/v1/bridge/register", self._register)
         app.router.add_post("/v1/bridge/say", self._say)
         app.router.add_post("/v1/bridge/screen", self._screen)
@@ -205,26 +257,7 @@ class BridgeServer:
         self._check_browser_mutation(request)
         self._check_auth(request)
         body = await request.json()
-        identity = {
-            k: body.get(k)
-            for k in (
-                "host",
-                "user",
-                "cwd",
-                "repo",
-                "branch",
-                "worktree",
-                "common_dir",
-                "harness",
-                "pid",
-                "instance",
-                # Transport facts that unlock capabilities (derive-don't-ask):
-                # a tmux pane/session enables inject; host_alias routes it.
-                "tmux_pane",
-                "tmux_session",
-                "host_alias",
-            )
-        }
+        identity = {k: body.get(k) for k in IDENTITY_FIELDS}
         if not identity.get("host") or not identity.get("cwd"):
             raise web.HTTPBadRequest(text="host and cwd are required")
         caps = body.get("capabilities") or ["say", "listen"]
@@ -252,11 +285,24 @@ class BridgeServer:
             raise web.HTTPGone(text="unknown session; re-register")
         return s
 
+    def refresh_session_identity(self, s, supplied: object):
+        """Staleness kill (dogfood 2026-07-06): adapters re-assert their
+        current identity on workspace verbs; the session's register-time
+        snapshot yields to it, so verbs resolve against the LIVE root.
+        Malformed or absent identity leaves the session untouched."""
+        if not isinstance(supplied, dict):
+            return s
+        ident = {k: supplied.get(k) for k in IDENTITY_FIELDS if k in supplied}
+        if not ident.get("host") or not ident.get("cwd"):
+            return s
+        return self._registry.refresh_identity(s.session_id, ident) or s
+
     async def _say(self, request: web.Request) -> web.Response:
         self._check_browser_mutation(request)
         self._check_auth(request)
         body = await request.json()
         s = self._session_or_410(request, body.get("session_id"))
+        s = self.refresh_session_identity(s, body.get("identity"))
         text = str(body.get("text") or "").strip()
         if not text:
             raise web.HTTPBadRequest(text="text required")
@@ -268,6 +314,7 @@ class BridgeServer:
         self._check_auth(request)
         body = await request.json()
         s = self._session_or_410(request, body.get("session_id"))
+        s = self.refresh_session_identity(s, body.get("identity"))
         mode = body.get("mode", "show")
         if mode not in ("show", "append"):
             raise web.HTTPBadRequest(text="mode must be show|append")
@@ -297,6 +344,10 @@ class BridgeServer:
         if session_id and self._registry.was_detached(session_id):
             return web.json_response({"status": "detach", "reason": "detached"})
         s = self._session_or_410(request, session_id)
+        # Review-item computation routes by workspace — a parked agent
+        # whose registered root went stale would never be woken for its
+        # real workspace, so listen re-asserts identity too.
+        s = self.refresh_session_identity(s, identity_from_query(request))
         poller = request.query.get("poller", "")
         # Newest-poll-wins. The SAME poller re-arming gets a rearm (its
         # slice loop continues); a DIFFERENT poller supersedes the old

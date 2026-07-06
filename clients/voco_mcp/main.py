@@ -389,7 +389,8 @@ def _page_push(client: Client, args: dict) -> str:
         return "page_push needs a doc (path or content+name) or a diff spec"
     try:
         r = client.page_push(body)
-        return f"published: page {r.get('page_id')} rev {r.get('rev')}"
+        where = f" in workspace {r['root']}" if r.get("root") else ""
+        return f"published: page {r.get('page_id')} rev {r.get('rev')}{where}"
     except Exception as e:
         return f"page_push failed: {_http_hint(e)}"
 
