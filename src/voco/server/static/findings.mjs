@@ -27,7 +27,8 @@ const STATUS_LABEL = {
 /**
  * @param {HTMLElement} body
  * @param {any[]} findings
- * @param {{onWithdraw:(id:string)=>void, onReveal:(f:any)=>void}} ctx
+ * @param {{onWithdraw:(id:string)=>void, onReveal:(f:any)=>void,
+ *   pageRev?:(pageId:string)=>?number}} ctx
  */
 export function renderFindings(body, findings, ctx) {
   body.replaceChildren();
@@ -43,10 +44,15 @@ export function renderFindings(body, findings, ctx) {
       ? `${a.file}:${a.startLine}${a.endLine > a.startLine ? "–" + a.endLine : ""}`
       : "—";
     const card = el("div", { class: "finding kind-" + f.kind });
+    // W5: flagged against an older rev of its page → say so.
+    const rev = ctx.pageRev ? ctx.pageRev(f.page_id) : null;
+    const stale = rev != null && f.rev < rev;
     card.append(
       el("div", { class: "finding-head" },
         el("span", { class: "finding-kind", text: f.kind }),
         f.blocking ? el("span", { class: "finding-blocking", text: "blocking" }) : null,
+        stale ? el("span", { class: "finding-stale",
+          text: `stale (r${f.rev} of r${rev})` }) : null,
         el("span", { class: "finding-status s-" + f.status,
           text: STATUS_LABEL[f.status] || f.status })),
       el("div", { class: "finding-loc", text: loc, onclick: () => ctx.onReveal(f) }),

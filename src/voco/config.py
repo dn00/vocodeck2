@@ -71,8 +71,9 @@ SCHEMA: dict[str, dict[str, tuple[type, ...]]] = {
     "bridge": {"token": (str,)},
     "server": {"allowed_origins": (list,)},
     "state": {"dir": (str,)},
-    # Workbench persistence (SPEC-WORKBENCH §8): manifests + exports.
-    "workbench": {"data_dir": (str,)},
+    # Workbench persistence (SPEC-WORKBENCH §8) + live-git tracking (W5;
+    # live_git_s: re-resolve interval in seconds, 0 disables globally).
+    "workbench": {"data_dir": (str,), "live_git_s": (int, float)},
     # Managed-session terminals (SPEC-WORKBENCH §5): tmux | pty.
     "terminal": {"default_backend": (str,)},
     "watcher": {

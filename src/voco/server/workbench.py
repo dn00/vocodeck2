@@ -121,6 +121,13 @@ def handle_workbench_command(store, cmd: str, payload: dict, *, data_dir):
     raise KeyError(cmd)
 
 
+def diff_fingerprint(text: str) -> str:
+    """Content identity for a resolved diff (live-git change detection)."""
+    import hashlib
+
+    return hashlib.sha1(text.encode()).hexdigest()[:12]
+
+
 def confined_read(root: str, path: str) -> str:
     """Read `path` only if it resolves inside `root`, fd-based so the caps
     apply to the exact bytes returned (review BLOCKER 2). A relative `path`
@@ -199,6 +206,9 @@ class WorkbenchRoutes:
             return {
                 "files": page.data.get("files", []),
                 "source": page.data.get("source"),
+                # W5: what moved since the rev this one replaced — the
+                # client's since-rev banner + per-file chips.
+                "interdiff": page.data.get("interdiff"),
             }
         if page.type == "terminal":
             # The page carries HOW to attach (SPEC-WORKBENCH §5): stream →
@@ -355,7 +365,14 @@ class WorkbenchRoutes:
         else:
             raise web.HTTPBadRequest(text="diff needs `source` or `content`")
         files = parse_diff(diff_text)
-        return store.upsert_diff(ws, ref=ref, title=title, files=files, source=recorded)
+        return store.upsert_diff(
+            ws,
+            ref=ref,
+            title=title,
+            files=files,
+            source=recorded,
+            diff_key=diff_fingerprint(diff_text),
+        )
 
     # ---- findings bridge verbs (SPEC-WORKBENCH §4.1) -------------------------
 

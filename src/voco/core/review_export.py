@@ -48,13 +48,22 @@ def _legacy_records(ws) -> list[dict]:
 
 
 def _anchors(ws) -> list[dict]:
+    from voco.core.interdiff import area_touched
+
     rows = []
     for f in ws.findings.values():
         page = ws.pages.get(f.page_id)
         d = f.to_dict()
         d["page_type"] = page.type if page else None
         d["page_ref"] = page.ref if page else None
-        d["stale"] = bool(page and f.rev < page.rev)
+        stale = bool(page and f.rev < page.rev)
+        d["stale"] = stale
+        if stale and page is not None and page.type == "diff":
+            # W5 re-review signal: did the finding's file move in the
+            # latest re-push? True → re-check; False → it still stands.
+            d["area_changed"] = area_touched(
+                page.data.get("interdiff"), (f.anchor or {}).get("file")
+            )
         rows.append(d)
     return rows
 

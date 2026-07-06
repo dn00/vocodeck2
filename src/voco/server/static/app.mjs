@@ -188,6 +188,7 @@ async function renderPage(view, page) {
       const c = await fetchContent(page.page_id, page.rev);
       view.replaceChildren();
       renderDiff(view, c, {
+        rev: page.rev,
         findings: store.findingsFor(store.selectedWorkspace || "")
           .filter((f) => f.page_id === page.page_id),
         onAnnotate: (anchor, text, kind) => addFinding(page, anchor, text, kind),
@@ -261,6 +262,11 @@ function renderDock() {
       catch (e) { console.error(e); }
     },
     onReveal: (f) => revealFinding(f),
+    pageRev: (pageId) => {
+      const ws = store.workspaces.get(wsKey);
+      const p = ws && ws.pages.find((x) => x.page_id === pageId);
+      return p ? p.rev : null;
+    },
   });
 }
 

@@ -134,6 +134,9 @@ class Daemon:
         # Per-workspace primary-review override (§4.3 UI selector):
         # workspace key -> call_name. In-memory routing preference.
         self._primary_override: dict[str, str] = {}
+        # Live-git tracking (W5): per-workspace opt-out; default tracks.
+        self._live_workspaces: dict[str, bool] = {}
+        self._live_git_task: asyncio.Task[None] | None = None
         self._port = 7777
         self._state = StateStore(
             Path(
@@ -644,6 +647,13 @@ class Daemon:
             return self._config_set(payload)
         if cmd == "review.primary":
             return self._set_primary_override(payload)
+        if cmd == "workspace.live":
+            key = str(payload.get("workspace", ""))
+            if self.workspaces.get(key) is None:
+                raise ValueError(f"unknown workspace: {key}")
+            live = bool(payload.get("live", True))
+            self._live_workspaces[key] = live
+            return {"workspace": key, "live": live}
         try:
             return handle_workbench_command(
                 self.workspaces, cmd, payload, data_dir=self._workspace_data_dir()
@@ -991,6 +1001,77 @@ class Daemon:
 
         self._state_save_task = asyncio.get_running_loop().create_task(save_soon())
 
+    # ---- live-git tracker (SPEC-WORKBENCH §11 W5) ----------------------------
+
+    def _start_live_git(self, loop: asyncio.AbstractEventLoop) -> None:
+        interval = float(self.cfg.get("workbench", {}).get("live_git_s", 5.0))
+        if interval <= 0:
+            return  # globally off
+        self._live_git_task = loop.create_task(self._live_git_loop(interval))
+
+    async def _live_git_loop(self, interval: float) -> None:
+        """Diff pages TRACK the checkout instead of freezing at push: on an
+        interval, re-resolve each diff from its RECORDED source and, when
+        the content moved, upsert exactly like a re-push (rev bump,
+        interdiff, stale findings). Conservative by design: transient git
+        states (rebase, lock) and empty resolutions are skipped — a
+        mid-rebase tree must never clobber the review."""
+        import socket as _socket
+
+        host = _socket.gethostname().split(".")[0]
+        while True:
+            await asyncio.sleep(interval)
+            for ws in self.workspaces.all():
+                if not self._live_workspaces.get(ws.key, True):
+                    continue  # workspace.live {live: false}
+                if ws.host != host or ws.kind != "workspace":
+                    continue  # a remote disk is not ours to resolve
+                for page in list(ws.pages.values()):
+                    if page.type != "diff" or page.closed:
+                        continue
+                    if not page.data.get("source"):
+                        continue  # pasted text: nothing to re-resolve
+                    try:
+                        await self._live_refresh(ws, page)
+                    except Exception as e:
+                        self.bus.emit("daemon.error", {"error": f"live-git: {e}"})
+
+    async def _live_refresh(self, ws: Workspace, page) -> None:
+        from voco.core.diff import parse_diff
+        from voco.server.workbench import (
+            confined_read,
+            diff_fingerprint,
+        )
+
+        source = page.data["source"]
+
+        def resolve() -> str | None:
+            try:
+                if "diff_file" in source:
+                    # Same confinement stance as the push route.
+                    return confined_read(ws.root, str(source["diff_file"]))
+                return self.bridge.diff_resolver.resolve(source, ws.root)
+            except Exception:
+                return None  # transient git state — try next tick
+
+        text = await self._run_blocking(resolve)
+        if not text:
+            return
+        key = diff_fingerprint(text)
+        if key == page.data.get("diff_key"):
+            return
+        files = parse_diff(text)
+        if not files:
+            return  # conservative: never clobber the review with empty
+        self.workspaces.upsert_diff(
+            ws,
+            ref=page.ref,
+            title=page.title,
+            files=files,
+            source=source,
+            diff_key=key,
+        )
+
     # ---- pane watcher (proactive eyes on unattended terminals) --------------------
 
     def _start_watcher(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -1058,6 +1139,7 @@ class Daemon:
         self._wire_manifest_saver()
         self._wire_review_wake()
         self._wire_terminal_pages()
+        self._start_live_git(loop)
         self._start_watcher(loop)
         try:
             runner = await run_server(self.bridge, host=host, port=port)
@@ -1091,6 +1173,8 @@ class Daemon:
                 self.voice.stop()
             if self._watcher_task is not None:
                 self._watcher_task.cancel()
+            if self._live_git_task is not None:
+                self._live_git_task.cancel()
             if self._state_save_task is not None:
                 self._state_save_task.cancel()
             if self._manifest_save_task is not None:

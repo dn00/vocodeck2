@@ -80,6 +80,7 @@ COMMAND_TYPES = {
     # Workbench (SPEC-WORKBENCH §9): browser mutations ride commands so
     # the debug UI and tests reach them too.
     "workspace.list",
+    "workspace.live",
     "page.close",
     "page.reopen",
     "finding.list",

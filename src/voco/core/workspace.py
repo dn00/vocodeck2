@@ -474,14 +474,23 @@ class WorkspaceStore:
         title: str,
         files: list[dict],
         source: dict | None,
+        diff_key: str | None = None,
     ) -> Page:
         """A diff page (SPEC-WORKBENCH §3.2). `ref` identifies the diff
-        (its source signature); re-resolving the same ref bumps rev and
-        marks older-rev findings stale. `files` is the parsed diff tree
-        (core.diff.parse_diff output); `source` is the recorded resolver
-        for W5 live-git tracking."""
+        (its source signature); re-resolving the same ref bumps rev,
+        records the INTERDIFF vs the rev it replaced (W5 — what a
+        returning reviewer re-checks), and marks older-rev findings
+        stale. `files` is the parsed diff tree (core.diff.parse_diff
+        output); `source` is the recorded resolver and `diff_key` the
+        content hash, both for live-git tracking."""
+        from voco.core.interdiff import compute_interdiff
+
         page = ws.page_by_ref("diff", ref)
-        data = {"files": files, "source": source}
+        data: dict[str, Any] = {
+            "files": files,
+            "source": source,
+            "diff_key": diff_key,
+        }
         if page is None:
             page = Page(
                 page_id="",
@@ -493,6 +502,9 @@ class WorkspaceStore:
                 data=data,
             )
             return self._mint_page(ws, page)
+        data["interdiff"] = compute_interdiff(
+            page.data.get("files") or [], files, page.rev
+        )
         page.data = data
         page.rev += 1
         page.updated_ts = self._now()

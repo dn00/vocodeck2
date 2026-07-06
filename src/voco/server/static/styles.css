@@ -238,6 +238,17 @@ body {
   border: 1px solid var(--border); border-radius: 5px; padding: 5px 8px;
   font: inherit; }
 .term-input:focus { outline: none; border-color: var(--accent); }
+
+/* ---- re-review (W5): since-rev banner + inter-diff chips -------------------- */
+.rev-banner { position: sticky; top: 0; z-index: 5; background: var(--bg-panel);
+  border: 1px solid var(--border-bright); border-radius: 5px;
+  padding: 6px 10px; margin-bottom: 8px; font-size: 12px; }
+.rev-removed { color: var(--warn); }
+.diff-tag.inter-changed { background: rgba(210,153,34,.2); color: var(--warn); }
+.diff-tag.inter-added { background: rgba(63,185,80,.2); color: var(--ok); }
+.diff-tag.inter-unchanged { background: var(--bg-tab); color: var(--fg-faint); }
+.finding-stale { font-size: 10px; background: rgba(210,153,34,.2);
+  color: var(--warn); padding: 0 6px; border-radius: 8px; }
 .toast-msg { position: fixed; bottom: 34px; left: 50%; transform: translateX(-50%);
   background: var(--bg-panel); border: 1px solid var(--border-bright); color: var(--fg);
   padding: 8px 14px; border-radius: 6px; z-index: 100; max-width: 70vw; }

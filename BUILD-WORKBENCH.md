@@ -197,8 +197,16 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
       22 new tests + live e2e. **Windows/ConPTY deferred** — needs a
       Windows machine to validate (pywinpty floor check still pending,
       Phase 0 item 4); the seam is ready for it.
-- [ ] **W5 — rev/staleness depth**: inter-diff, since-rev banner, stale
-      chips, live-git tracker.
+- [x] **W5 — rev/staleness depth** (complete 2026-07-06): interdiff on
+      re-push (`core/interdiff.py`, ported from the oracle — per-file
+      hunk-hash identity; removed counts as touched), export stamps
+      `area_changed` on stale diff anchors (legacy array stays
+      five-field), since-rev banner + per-file inter-diff chips + stale
+      finding chips in the client, live-git tracker (daemon interval
+      re-resolve from the recorded source; conservative on transient/
+      empty git states; `[workbench] live_git_s`, `workspace.live`
+      command for per-workspace opt-out). Oracle re-review scenario
+      ported as tests; verified live incl. manifest-restored pages.
 
 ## RESUME HERE (updated 2026-07-06, Fable-native session — W2 shipped)
 
@@ -206,15 +214,21 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
   reviews cover build + security, but security issues route to the
   parent-dir files only — never into the repo, never into the session
   reply. In-repo models don't read security content.
-- W0–W4 are DONE and verified (W4 Unix-only; see milestones + journal).
-  Gates at this checkpoint: 283 pytest, mypy (48 files), ruff + format,
-  tsc --checkJs, PROTOCOL.md regen-clean. Codex build review of W2
-  applied (6/6 findings fixed + tested).
-- Next: **W5 — rev/staleness depth** (inter-diff on re-push, since-rev
-  banner, stale chips with area_changed, live-git tracker). Then:
-  Windows/ConPTY validation for W4 (needs a Windows machine; pywinpty
-  floor check pending), README refresh, live browser click-through of
-  the whole workbench (user AM).
+- **ALL PLANNED SLICES (W0–W5) ARE DONE AND VERIFIED** (W4 Unix-only;
+  see milestones + journal). Gates: 291 pytest, mypy (49 files), ruff +
+  format, tsc --checkJs, PROTOCOL.md regen-clean (30 events, 24
+  commands). Codex build review of W2 applied (6/6 fixed + tested).
+- Remaining (post-slice) work, in rough order:
+  1. Live browser click-through of the whole workbench (user AM — no
+     headless browser in this env; every surface verified at HTTP/WS
+     level).
+  2. README refresh (workbench section: `/`, voco review/page/new
+     flags, config keys) + a Codex /xai build review of W3–W5.
+  3. Windows/ConPTY for W4 (needs a Windows machine; pywinpty floor
+     check pending — Phase 0 item 4).
+  4. Ideas parked: per-workspace primary selector UI (command exists:
+     `review.primary`), pty terminals in the pane watcher, CodeMirror
+     file-viewer page.
 - Review policy (user): reviews — Codex or self — are on the BUILD
   itself. No security side-channel orchestration in this track.
 - Env note: `~/.local/bin/node` is a self-looping symlink the user still
@@ -248,6 +262,20 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
 
 ## Journal
 
+- **2026-07-06 (W5 shipped — all planned slices done)** — Re-review
+  depth, oracle-exact: `compute_interdiff` ports interdiff.mjs (hunk
+  hashes, not line heuristics), `upsert_diff` records it on every
+  re-push, export stamps `area_changed` (snake_case — SPEC naming — on
+  our sidecar; the five-field legacy array untouched), diff view gets
+  the since-rev banner + per-file chips, findings dock gets stale
+  chips. Live-git: the daemon re-resolves recorded sources on an
+  interval (default 5s; `live_git_s = 0` off; `workspace.live` per-ws)
+  and upserts exactly like a re-push. The oracle's rereview.test.mjs
+  scenario ports 1:1 (8 tests). Live e2e caught the best possible
+  outcome: a page RESTORED from manifest (rev 3, prior run) was
+  live-tracked to rev 4 with correct interdiff and the finding
+  exported stale+area_changed — persistence and tracking compose.
+  291 tests, all gates green. **W0–W5 complete.**
 - **2026-07-06 (W4 shipped, Unix)** — TerminalBackend native. The pty
   backend is asyncio-first (loop.add_reader, no reader threads); the
   ring buffer — not client queues — is the recovery source (reconnect

@@ -22,13 +22,41 @@ const el = (tag, attrs = {}, ...kids) => {
 
 /**
  * @param {HTMLElement} view
- * @param {{files:any[]}} content
- * @param {{onAnnotate:(a:Anchor, text:string, kind:string)=>void, findings:any[]}} ctx
+ * @param {{files:any[], interdiff?:?{since_rev:number, changed:string[],
+ *   added:string[], removed:string[], unchanged:string[]}}} content
+ * @param {{onAnnotate:(a:Anchor, text:string, kind:string)=>void,
+ *   findings:any[], rev?:number}} ctx
  */
 export function renderDiff(view, content, ctx) {
   view.replaceChildren();
   const wrap = el("div", { class: "diff" });
   let anchorStart = /** @type {?{file:string, side:string, line:number}} */ (null);
+
+  // W5 since-rev banner: what moved since the rev this push replaced.
+  const inter = content.interdiff;
+  if (inter) {
+    const bits = [];
+    for (const k of ["changed", "added", "removed", "unchanged"])
+      if (inter[k].length) bits.push(`${inter[k].length} ${k}`);
+    const banner = el("div", { class: "rev-banner" },
+      el("b", { text: `rev ${ctx.rev ?? "?"}` }),
+      el("span", { text:
+        ` — since rev ${inter.since_rev}: ${bits.join(", ") || "no changes"}` }));
+    if (inter.removed.length)
+      banner.append(el("span", { class: "rev-removed",
+        text: ` (removed: ${inter.removed.join(", ")})` }));
+    wrap.append(banner);
+  }
+  const fileChip = (path) => {
+    if (!inter) return null;
+    if (inter.changed.includes(path))
+      return { cls: "inter-changed", label: `changed since r${inter.since_rev}` };
+    if (inter.added.includes(path))
+      return { cls: "inter-added", label: `added since r${inter.since_rev}` };
+    if (inter.unchanged.includes(path))
+      return { cls: "inter-unchanged", label: "unchanged" };
+    return null;
+  };
 
   // Index findings by file+side+line for margin markers.
   const byLine = new Map();
@@ -39,10 +67,12 @@ export function renderDiff(view, content, ctx) {
   }
 
   for (const file of content.files || []) {
+    const chip = fileChip(file.path);
     wrap.append(el("div", { class: "diff-file" },
       el("span", { class: "diff-path", text: file.path }),
       file.is_new ? el("span", { class: "diff-tag add", text: "new" }) : null,
-      file.is_deleted ? el("span", { class: "diff-tag del", text: "del" }) : null));
+      file.is_deleted ? el("span", { class: "diff-tag del", text: "del" }) : null,
+      chip ? el("span", { class: "diff-tag " + chip.cls, text: chip.label }) : null));
     const table = el("div", { class: "diff-hunks" });
     for (const hunk of file.hunks || []) {
       table.append(el("div", { class: "hunk-head", text: hunk.header }));

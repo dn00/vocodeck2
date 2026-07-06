@@ -90,3 +90,4 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 - `state.get`
 - `switch_session`
 - `workspace.list`
+- `workspace.live`
