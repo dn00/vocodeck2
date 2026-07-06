@@ -6,6 +6,52 @@ resume. Update the journal at every checkpoint (after each commit).
 
 All work on branch **`workbench`** (user decision, 2026-07-06).
 
+## ⚠ MODEL PROVENANCE — a fallback switch happened mid-build
+
+This build was **not** authored by one model. The session began on
+**Fable 5** (Mythos-class, the intended model) and, at
+**2026-07-06 09:49:46 UTC — during the W0 slice** — the harness silently
+**fell back to Opus 4.8** (a lower tier). The switch was automatic
+(capacity/overload), not user-initiated: the transcript record at
+09:50:28 carries `originalModel: claude-fable-5`,
+`fallbackModel: claude-opus-4-8`. Everything from 09:49:46 onward was
+Opus 4.8.
+
+Authorship split (by commit time vs the 09:49:46 switch):
+
+| Author | Work |
+|---|---|
+| **Fable 5** (pre-switch) | Design deliberation, SPEC-WORKBENCH v1.0 (grill + adversarial spec review), commit `ebbd161` (09:35). Started W0: wrote `core/workspace.py`, `core/agent_state.py`, `test_workspace.py`, `protocol/messages.py` additions, the mypy grammar fix. |
+| **Opus 4.8** (fallback, post-switch) | **All security-sensitive code** — §8.5 auth in `server/http.py`, `confined_read`/path confinement + diff resolution in `server/workbench.py`/`adapters/diffsource.py`. The entire browser client (`static/*`), CSP. All of W1 (diff, findings ledger, export, manifest persistence + lock). The Codex review + its fixes. The W2 scaffold. Commits `a38a04d`, `ac91134`, `2fa26b6`, `176e0ab`, `c6aa94d`. |
+
+### → Fable 5 review request (do this on the next Fable-native session)
+
+Fable 5: review the **Opus-authored** changes above — start with the
+**security surface** (§8.5 browser auth, path confinement, diff/git
+resolution, the manifest lock), then the W1 domain logic and the W2
+scaffold. For each, assess: *would you have done it differently, and does
+it hold?* Record your assessment inline here under a "Fable review"
+heading — note anything you'd change, any Opus decision you'd reverse,
+and confirm/deny the Codex-fix set. This is a higher-tier pass over a
+lower-tier model's work on code that matters.
+
+- **Note:** Fable 5 does **not** use `fab-router` or the `fab-*` skills —
+  those are calibration aids for lower-tier models (like the Opus 4.8
+  fallback that ran most of this). The earlier RESUME-HERE line owing a
+  "fab-router discipline" pass applies only if a *lower-tier* model
+  continues; a Fable-native continuation ignores it.
+
+### → Forward policy (user, 2026-07-06)
+
+**Defer security-sensitive tasks to avoid doing them under a fallback
+model.** Fallback switches are silent and drop the work into a lower tier
+mid-task; security code (auth, confinement, injection surfaces, crypto,
+lock/atomicity) must not be authored by an unintended fallback model.
+When security work is next, either confirm the session is on the intended
+model first, or hold the task until it can be. The §8.5 auth here was
+authored under exactly the fallback we now want to avoid — hence the
+Fable review request above.
+
 ## Working rules (carried from BUILD.md, 2026-07-03)
 
 - No subagents; build in the main session.
@@ -135,10 +181,10 @@ State of the uncommitted checkpoint that this commit captures:
       redelivery after a missed wake; primary election with 2 agents;
       ask round-trip; asks survive restart. (None written yet.)
 - [ ] E2E: annotate → parked agent wakes via listen → marks addressed.
-- [ ] fab-router discipline owed: run fab-trust-boundaries sink-table
-      pass + fab-adversarial-self-review charges on the W2 diff before
-      the W2 "done" commit (skipped on W0/W1 — Codex caught what the
-      skill would have; do not repeat).
+- [ ] Review discipline on the W2 diff before its "done" commit:
+      trust-boundary sink pass + adversarial self-review. (If a
+      LOWER-TIER model continues, `fab-*` skills are the aid; a
+      Fable-native session uses its own judgment — see MODEL PROVENANCE.)
 
 ## W2 build order (original)
 
