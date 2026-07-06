@@ -233,7 +233,7 @@ function renderDock() {
   dock.append(body);
   if (dockTab === "chat") {
     renderChat(body, store.asksFor(wsKey), {
-      hasReviewAgent: hasReviewAgent(),
+      hasReviewAgent: hasReviewAgent(store.selectedWs()),
       onAsk: async (text) => {
         try { await bus.command("ask.create", { workspace: wsKey, text }); }
         catch (e) { toast("ask failed: " + (e instanceof Error ? e.message : e)); }
@@ -250,13 +250,21 @@ function renderDock() {
   });
 }
 
-function hasReviewAgent() {
-  // Honest only when we know: capability lists ride the snapshot; a
-  // session attached since then has none — do not claim its absence.
-  const sessions = [...store.sessions.values()];
-  if (!sessions.length) return false;
-  return sessions.some((s) => !Array.isArray(s.capabilities)
-    || s.capabilities.includes("review"));
+// Is a review-capable agent attached to THIS workspace (§4.3)? Session
+// home identity (host/root) rides the snapshot and session.attached.
+// Unknowable facts count in the agent's favor — never falsely claim
+// absence for a session we can't place.
+function hasReviewAgent(ws) {
+  if (!ws) return false;
+  const strip = (p) => String(p || "").replace(/\/+$/, "");
+  return [...store.sessions.values()].some((s) => {
+    const capOk = !Array.isArray(s.capabilities)
+      || s.capabilities.includes("review");
+    const placeKnown = s.host != null && s.root != null;
+    const placeOk = !placeKnown
+      || (s.host === ws.host && strip(s.root) === strip(ws.root));
+    return capOk && placeOk;
+  });
 }
 
 function revealFinding(f) {

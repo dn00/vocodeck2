@@ -89,6 +89,7 @@ COMMAND_TYPES = {
     "ask.create",
     "ask.list",
     "review.export",
+    "review.primary",
 }
 
 

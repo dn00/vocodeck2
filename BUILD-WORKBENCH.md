@@ -237,6 +237,31 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
 
 ## Journal
 
+- **2026-07-06 (Codex W2 build review applied)** — /xai adversarial
+  review of the W2 diff (security → out-of-repo side file per policy;
+  Codex's first attempt couldn't write it — sandbox — so a scoped
+  re-run routed it; response carried build feedback only). 6 findings,
+  all real, all fixed + tested:
+  1. BLOCKER — agent-scoped page findings now wake THAT page's agent
+     (§4.3): pending items carry `agent: call_name`; `_review_items_for`
+     delivers own-page items always, workspace items only to the
+     primary; `_wake_target` routes the wake. Departed owner → nobody
+     woken, ledger keeps the item.
+  2. WARNING — election rule 3 now prefers PARKED sessions (most
+     recently parked wins; merely recently-seen can't be woken).
+  3. WARNING — review wakes mark the session `reviewing` → state reads
+     "working" (no idle-nudge on mid-review voice input; honest dots).
+     Ephemeral, cleared on next listen, never persisted.
+  4. WARNING — exact-duplicate `ask_reply`/`finding_status` replays are
+     true no-ops (no event, no ts bump) — at-least-once converges;
+     different writes still last-writer-win per §4.1.
+  5. WARNING — chat dock's "no agent attached" note is now
+     workspace-scoped: session snapshot + session.attached carry
+     capabilities/host/root; unknowable place counts in the agent's
+     favor.
+  6. NOTE — `review.primary` control command (§4.3 override): pin/clear
+     a workspace's primary; stale override self-drops. In-memory.
+  Also: PROTOCOL.md regenerated (23 commands).
 - **2026-07-06 (W3 shipped)** — Worktrees first-class, native. New
   `adapters/worktree.py` (same injected-Runner shape as tmux so daemon
   tests fake both with one recorder; `git -C`, no cwd juggling;

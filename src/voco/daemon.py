@@ -127,6 +127,9 @@ class Daemon:
         # know we created it, and not-knowing fails safe — no removal).
         self._worktree_mgr: WorktreeManager | None = None
         self._spawned_worktrees: dict[str, str] = {}
+        # Per-workspace primary-review override (§4.3 UI selector):
+        # workspace key -> call_name. In-memory routing preference.
+        self._primary_override: dict[str, str] = {}
         self._port = 7777
         self._state = StateStore(
             Path(
@@ -541,6 +544,8 @@ class Daemon:
             return self._public_config()
         if cmd == "config.set":
             return self._config_set(payload)
+        if cmd == "review.primary":
+            return self._set_primary_override(payload)
         try:
             return handle_workbench_command(
                 self.workspaces, cmd, payload, data_dir=self._workspace_data_dir()
@@ -747,10 +752,12 @@ class Daemon:
     # ---- the unified wake (SPEC-WORKBENCH §4.2/§4.3) ------------------------
 
     def _primary_session(self, ws: Workspace) -> Session | None:
-        """Elect the workspace's primary review agent (§4.3): the active
-        session if it lives here, else the sole review-capable session, else
-        the most recently seen review-capable one. Election is a read —
-        home_of never creates workspaces or emits."""
+        """Elect the workspace's primary review agent (§4.3): the UI
+        override when set, else the active session if it lives here, else
+        the sole review-capable session, else the most recently PARKED
+        review-capable one (a parked listener can be woken now; a merely
+        recently-seen one cannot). Election is a read — home_of never
+        creates workspaces or emits."""
         here = [
             s
             for s in self.registry.all()
@@ -758,23 +765,48 @@ class Daemon:
         ]
         if not here:
             return None
+        override = self._primary_override.get(ws.key)
+        if override is not None:
+            for s in here:
+                if s.call_name == override:
+                    return s
+            # The overridden agent left: the override is stale, drop it.
+            del self._primary_override[ws.key]
         active = self.registry.active
         if active is not None and active in here:
             return active
         if len(here) == 1:
             return here[0]
-        return max(here, key=lambda s: s.last_seen)
+        pool = [s for s in here if s.parked] or here
+        return max(pool, key=lambda s: s.last_seen)
 
     def _review_items_for(self, session_id: str) -> list[dict]:
-        """Pending review items for a session — only when it is the primary
-        agent of its workspace (others read the shared ledger; no dup work)."""
+        """Pending review items for a session: items on its OWN agent-scoped
+        pages always; workspace-scoped items only when it is the primary
+        (others read the shared ledger; no dup work). §4.3."""
         s = self.registry.get(session_id)
         if s is None or "review" not in s.capabilities:
             return []
         ws = self.workspaces.home_of(s.identity)
-        if ws is None or self._primary_session(ws) is not s:
+        if ws is None:
             return []
-        return ws.pending_review()
+        primary = self._primary_session(ws) is s
+        return [
+            item
+            for item in ws.pending_review()
+            if item.get("agent") == s.call_name or ("agent" not in item and primary)
+        ]
+
+    def _wake_target(self, ws: Workspace, payload: dict) -> Session | None:
+        """Who a new finding/ask wakes: an agent-scoped page's finding wakes
+        THAT page's agent (§4.3); everything else wakes the primary."""
+        page = ws.pages.get(str(payload.get("page_id") or ""))
+        if page is not None and page.scope == "agent" and page.call_name:
+            s = self.registry.by_call_name(page.call_name)
+            if s is not None and "review" in s.capabilities:
+                return s
+            return None  # its agent is gone/ineligible; ledger still has it
+        return self._primary_session(ws)
 
     def _wire_review_wake(self) -> None:
         self.registry.review_items = self._review_items_for
@@ -786,11 +818,33 @@ class Daemon:
             ws = self.workspaces.get(key) if key else None
             if ws is None:
                 return
-            primary = self._primary_session(ws)
-            if primary is not None:
-                self.registry.wake_review(primary.session_id)
+            target = self._wake_target(ws, env.payload)
+            if target is not None:
+                self.registry.wake_review(target.session_id)
 
         self.bus.subscribe(on_event)
+
+    def _set_primary_override(self, payload: dict) -> dict:
+        """review.primary {workspace, agent?}: pin (or clear) the primary
+        review agent for a workspace. In-memory — a routing preference,
+        not durable state."""
+        key = str(payload.get("workspace", ""))
+        ws = self.workspaces.get(key)
+        if ws is None:
+            raise ValueError(f"unknown workspace: {key}")
+        agent = payload.get("agent")
+        if not agent:
+            self._primary_override.pop(key, None)
+            return {"workspace": key, "primary": None}
+        s = self.registry.by_call_name(str(agent))
+        if s is None:
+            raise ValueError(f"no session named {agent!r}")
+        if "review" not in s.capabilities:
+            raise ValueError(f"{s.call_name} has no review capability")
+        if self.workspaces.home_of(s.identity) is not ws:
+            raise ValueError(f"{s.call_name} is not in this workspace")
+        self._primary_override[key] = s.call_name
+        return {"workspace": key, "primary": s.call_name}
 
     def _schedule_state_save(self) -> None:
         """Debounced: one pending save absorbs every change in its window

@@ -316,6 +316,215 @@ def test_election_never_creates_workspaces(daemon):
     assert "mac:/tmp/loose" not in keys
 
 
+# ---- agent-scoped routing (§4.3; Codex W2-review BLOCKER 1) --------------------
+
+
+def screen_page_for(d: Daemon, session):
+    return d.workspaces.upsert_screen(
+        session.identity,
+        session_id=session.session_id,
+        call_name=session.call_name,
+        markdown="board",
+        title=None,
+        mode="show",
+    )
+
+
+def test_agent_scoped_finding_wakes_that_agent_not_primary(daemon):
+    s1, ws, _diff = attach(daemon)  # first-registered: active ⇒ primary
+    s2 = daemon.registry.register(
+        {**ident(), "instance": "pane-2"}, ["say", "listen", "review"]
+    )
+    screen = screen_page_for(daemon, s2)
+    delivery = Delivery()
+    daemon.registry.try_deliver = delivery
+    daemon.registry.on_listen_start(s1.session_id)
+    daemon.registry.on_listen_start(s2.session_id)
+
+    daemon.workspaces.add_finding(
+        ws.key, page_id=screen.page_id, anchor={}, text="fix your board"
+    )
+
+    assert {sid for sid, _ in delivery.calls} == {s2.session_id}
+
+
+def test_agent_scoped_items_deliver_to_owner_never_primary(daemon):
+    s1, ws, _diff = attach(daemon)
+    s2 = daemon.registry.register(
+        {**ident(), "instance": "pane-2"}, ["say", "listen", "review"]
+    )
+    screen = screen_page_for(daemon, s2)
+    f = daemon.workspaces.add_finding(
+        ws.key, page_id=screen.page_id, anchor={}, text="fix your board"
+    )
+
+    primary_view = daemon._review_items_for(s1.session_id)
+    owner_view = daemon._review_items_for(s2.session_id)
+    assert f.finding_id not in [i["id"] for i in primary_view]
+    assert [i["id"] for i in owner_view] == [f.finding_id]
+
+
+def test_departed_agents_scoped_item_wakes_nobody_but_stays_pending(daemon):
+    s1, ws, _diff = attach(daemon)
+    s2 = daemon.registry.register(
+        {**ident(), "instance": "pane-2"}, ["say", "listen", "review"]
+    )
+    screen = screen_page_for(daemon, s2)
+    daemon.registry.detach(s2.session_id)
+    delivery = Delivery()
+    daemon.registry.try_deliver = delivery
+    daemon.registry.on_listen_start(s1.session_id)
+
+    f = daemon.workspaces.add_finding(
+        ws.key, page_id=screen.page_id, anchor={}, text="orphaned"
+    )
+
+    assert delivery.calls == []  # nobody woken...
+    ws_obj = daemon.workspaces.get(ws.key)
+    assert f.finding_id in ws_obj.findings  # ...but the ledger keeps it
+
+
+# ---- election refinements (Codex W2-review 2 + 6) --------------------------------
+
+
+def test_parked_session_beats_recently_seen_unparked(daemon):
+    now = [1000.0]
+    daemon.registry._now = lambda: now[0]
+    s1, ws, page = attach(daemon)
+    s2 = daemon.registry.register(
+        {**ident(), "instance": "pane-2"}, ["say", "listen", "review"]
+    )
+    other, _, _ = attach(daemon, cwd="/repo/b")
+    daemon.registry.switch(other.call_name)  # active lives elsewhere
+
+    now[0] = 2000.0
+    daemon.registry.on_listen_start(s1.session_id)  # s1 parks at t=2000
+    now[0] = 3000.0
+    daemon.registry.register(
+        {**ident(), "instance": "pane-2"}, ["say", "listen", "review"]
+    )  # s2 re-registers at t=3000 — seen later, but NOT parked
+
+    assert daemon._primary_session(daemon.workspaces.get(ws.key)) is s1
+
+
+async def test_primary_override_pins_and_clears(daemon):
+    s1, ws, page = attach(daemon)  # active ⇒ would be primary
+    s2 = daemon.registry.register(
+        {**ident(), "instance": "pane-2"}, ["say", "listen", "review"]
+    )
+
+    result = await daemon._control(
+        "review.primary", {"workspace": ws.key, "agent": s2.call_name}
+    )
+    assert result == {"workspace": ws.key, "primary": s2.call_name}
+    assert daemon._primary_session(daemon.workspaces.get(ws.key)) is s2
+
+    await daemon._control("review.primary", {"workspace": ws.key})
+    assert daemon._primary_session(daemon.workspaces.get(ws.key)) is s1
+
+
+def test_stale_override_falls_back(daemon):
+    s1, ws, page = attach(daemon)
+    s2 = daemon.registry.register(
+        {**ident(), "instance": "pane-2"}, ["say", "listen", "review"]
+    )
+    daemon._primary_override[ws.key] = s2.call_name
+    daemon.registry.detach(s2.session_id)
+
+    assert daemon._primary_session(daemon.workspaces.get(ws.key)) is s1
+    assert ws.key not in daemon._primary_override  # dropped, not lingering
+
+
+async def test_override_rejects_wrong_workspace_or_capability(daemon):
+    _s1, ws, _page = attach(daemon)
+    elsewhere, _, _ = attach(daemon, cwd="/repo/b")
+    plain = daemon.registry.register(
+        {**ident(), "instance": "pane-3"}, ["say", "listen"]
+    )
+
+    with pytest.raises(ValueError, match="not in this workspace"):
+        await daemon._control(
+            "review.primary", {"workspace": ws.key, "agent": elsewhere.call_name}
+        )
+    with pytest.raises(ValueError, match="no review capability"):
+        await daemon._control(
+            "review.primary", {"workspace": ws.key, "agent": plain.call_name}
+        )
+
+
+# ---- review turns read as working (Codex W2-review 3) ----------------------------
+
+
+def test_review_wake_marks_session_working(daemon):
+    s, ws, page = attach(daemon)
+    f = add_finding(daemon, ws, page)
+
+    payload = daemon.registry.on_listen_start(s.session_id)
+    assert payload["status"] == "review"
+    assert s.state == "working"
+    # Voice landing mid-review queues as busy, not idle (no nudge).
+    assert daemon.registry.dispatch("also this", "t-5", target=s) == "queued"
+    daemon.workspaces.set_finding_status(ws.key, f.finding_id, "addressed", agent=True)
+    # Next listen delivers the queued transcript (a real turn)...
+    assert daemon.registry.on_listen_start(s.session_id)["status"] == "transcript"
+    assert s.state == "working"
+    # ...and with nothing left, the one after parks: review turn over.
+    assert daemon.registry.on_listen_start(s.session_id) is None
+    assert s.state == "parked"
+
+
+def test_wake_review_delivery_marks_working(daemon):
+    s, ws, page = attach(daemon)
+    delivery = Delivery()
+    daemon.registry.try_deliver = delivery
+    daemon.registry.on_listen_start(s.session_id)
+    add_finding(daemon, ws, page)
+    assert s.state == "working"
+
+
+# ---- reply idempotence (Codex W2-review 4) ---------------------------------------
+
+
+def test_duplicate_replies_and_statuses_are_true_noops():
+    events: list[tuple[str, dict]] = []
+    store = WorkspaceStore(emit=lambda t, p: events.append((t, p)))
+    ws = store.resolve({"host": "m", "worktree": "/r"})
+    page = store.upsert_diff(ws, ref="d", title="d", files=[], source=None)
+    f = store.add_finding(ws.key, page_id=page.page_id, anchor={}, text="x")
+    a = store.add_ask(ws.key, text="q?")
+
+    store.answer_ask(ws.key, a.ask_id, "the answer")
+    store.set_finding_status(ws.key, f.finding_id, "addressed", note="done")
+    n = len(events)
+
+    # Exact replays (at-least-once redelivery) change nothing and emit
+    # nothing; answered_ts/updated_ts stay put.
+    ts_a, ts_f = a.answered_ts, f.updated_ts
+    store.answer_ask(ws.key, a.ask_id, "the answer")
+    store.set_finding_status(ws.key, f.finding_id, "addressed", note="done")
+    assert len(events) == n
+    assert (a.answered_ts, f.updated_ts) == (ts_a, ts_f)
+
+    # A DIFFERENT write still lands (last-writer-wins, §4.1).
+    store.answer_ask(ws.key, a.ask_id, "revised answer")
+    assert a.answer == "revised answer"
+    assert len(events) == n + 1
+
+
+def test_duplicate_question_reply_is_noop_after_auto_address():
+    store = WorkspaceStore()
+    ws = store.resolve({"host": "m", "worktree": "/r"})
+    page = store.upsert_diff(ws, ref="d", title="d", files=[], source=None)
+    f = store.add_finding(
+        ws.key, page_id=page.page_id, anchor={}, text="why?", kind="question"
+    )
+    store.answer_finding(ws.key, f.finding_id, "because")
+    assert f.status == "addressed"
+    ts = f.updated_ts
+    store.answer_finding(ws.key, f.finding_id, "because")  # replay
+    assert f.updated_ts == ts
+
+
 # ---- durability -----------------------------------------------------------------
 
 

@@ -12,7 +12,7 @@
  *   session_id:?string, call_name:?string}} PageMeta
  * @typedef {{session_id:string, name:string, display_name:string,
  *   state:string, display_state?:DisplayState, unread_digest:number,
- *   capabilities?:string[]}} Session
+ *   capabilities?:string[], host?:?string, root?:?string}} Session
  */
 
 /** @typedef {"workspaces"|"sessions"|"selection"|"mic"|"conn"|"ticker"|"findings"|"asks"} Kind */
@@ -163,6 +163,11 @@ export class Store {
     if (p.state) s.state = p.state;
     if (p.display_state) s.display_state = p.display_state;
     if (typeof p.unread === "number") s.unread_digest = p.unread;
+    // session.attached carries capabilities + home identity (host/root)
+    // so workspace-scoped checks stay live between snapshots.
+    if (Array.isArray(p.capabilities)) s.capabilities = p.capabilities;
+    if (p.host !== undefined) s.host = p.host;
+    if (p.root !== undefined) s.root = p.root;
     this.sessions.set(p.session_id, s);
   }
 

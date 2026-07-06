@@ -70,6 +70,10 @@ class Session:
     capabilities: list[str]
     parked: bool = False
     outstanding_turn_id: str | None = None
+    # Working on delivered review items (ephemeral, not persisted): review
+    # wakes mint no turn_id, but the agent IS busy — state must say so or
+    # voice input during review work reads as queued-to-idle and nudges.
+    reviewing: bool = False
     queued: list[QueuedInput] = field(default_factory=list)
     say_log: deque[SayLine] = field(default_factory=lambda: deque(maxlen=50))
     unread_digest: int = 0
@@ -86,7 +90,7 @@ class Session:
     def state(self) -> SessionState:
         if self.parked:
             return "parked"
-        if self.outstanding_turn_id is not None:
+        if self.outstanding_turn_id is not None or self.reviewing:
             return "working"
         return "idle"
 
@@ -100,6 +104,14 @@ class Session:
         host = self.identity.get("host", "?")
         cwd = str(self.identity.get("cwd", "?")).rstrip("/").split("/")[-1]
         return f"{self.call_name} ({host}:{cwd})"
+
+    @property
+    def home_root(self) -> str | None:
+        """Where this session lives: the checkout root, else cwd — the
+        same rule WorkspaceStore.resolve/home_of applies. Rides snapshot
+        + session.attached so UIs can scope sessions to workspaces."""
+        root = self.identity.get("worktree") or self.identity.get("cwd")
+        return str(root) if root else None
 
 
 DispatchResult = Literal["live", "queued", "queued_idle", "no_session"]
@@ -171,7 +183,13 @@ class Registry:
             self._emit("session.activated", {"session_id": s.session_id})
         self._emit(
             "session.attached",
-            {"session_id": s.session_id, "name": s.display_name},
+            {
+                "session_id": s.session_id,
+                "name": s.display_name,
+                "capabilities": s.capabilities,
+                "host": s.identity.get("host"),
+                "root": s.home_root,
+            },
         )
         return s
 
@@ -308,6 +326,7 @@ class Registry:
             return None
         s.last_seen = self._now()
         s.outstanding_turn_id = None  # a new listen ends the working turn
+        s.reviewing = False  # ...and the review turn
         review = self.review_items(session_id)
         if s.queued:
             first, rest = s.queued[0], s.queued[1:]
@@ -323,6 +342,8 @@ class Registry:
             s.outstanding_turn_id = first.turn_id
             return payload
         if review:
+            s.reviewing = True
+            self._emit_session_state(s)
             return {"status": "review", "items": review}
         s.parked = True
         self._emit_session_state(s)
@@ -340,6 +361,7 @@ class Registry:
             return False
         if self.try_deliver(session_id, {"status": "review", "items": items}):
             s.parked = False
+            s.reviewing = True
             self._emit_session_state(s)
             return True
         return False
@@ -485,6 +507,8 @@ class Registry:
                     "display_name": s.display_name,
                     "state": s.state,
                     "capabilities": s.capabilities,
+                    "host": s.identity.get("host"),
+                    "root": s.home_root,
                     "unread_digest": s.unread_digest,
                     "queued": len(s.queued),
                     "pane_hint": s.pane_hint,

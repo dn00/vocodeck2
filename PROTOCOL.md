@@ -80,6 +80,7 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 - `page.close`
 - `page.reopen`
 - `review.export`
+- `review.primary`
 - `say_as_user`
 - `session.detach`
 - `session.kill`

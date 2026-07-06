@@ -156,18 +156,23 @@ class Workspace:
         + unanswered asks. Stable ids → idempotent, at-least-once safe.
         Item shape is `{kind: finding|ask, id, workspace, finding|ask}` —
         the payload nests under its kind so item keys can never collide
-        with domain keys (a finding has its own `kind`)."""
+        with domain keys (a finding has its own `kind`). An item on an
+        agent-scoped page carries `agent: <call_name>` — it belongs to
+        that page's agent, not the workspace primary (§4.3)."""
         items: list[dict[str, Any]] = []
         for f in self.findings.values():
-            if f.status == "open":
-                items.append(
-                    {
-                        "kind": "finding",
-                        "id": f.finding_id,
-                        "workspace": self.key,
-                        "finding": f.to_dict(),
-                    }
-                )
+            if f.status != "open":
+                continue
+            item: dict[str, Any] = {
+                "kind": "finding",
+                "id": f.finding_id,
+                "workspace": self.key,
+                "finding": f.to_dict(),
+            }
+            page = self.pages.get(f.page_id)
+            if page is not None and page.scope == "agent" and page.call_name:
+                item["agent"] = page.call_name
+            items.append(item)
         for a in self.asks.values():
             if a.answer is None:
                 items.append(
@@ -564,6 +569,15 @@ class WorkspaceStore:
         # resurrect a withdrawn finding (review WARNING 5).
         if agent and f.status == "withdrawn":
             raise ValueError("finding withdrawn; agents cannot change it")
+        # At-least-once means agents replay reports: an exact duplicate is
+        # a true no-op — no ts bump, no event (§4.2).
+        if (
+            status == f.status
+            and (note is None or note == f.note)
+            and (commit is None or commit == f.commit)
+            and (answer is None or answer == f.answer)
+        ):
+            return f
         f.status = status  # type: ignore[assignment]
         if note is not None:
             f.note = note
@@ -618,6 +632,8 @@ class WorkspaceStore:
         if ws is None or ask_id not in ws.asks:
             raise ValueError(f"unknown ask: {ask_id}")
         a = ws.asks[ask_id]
+        if a.answer == markdown:  # at-least-once replay: true no-op (§4.2)
+            return a
         a.answer = markdown
         a.answered_ts = self._now()
         self._emit("ask.answered", {"workspace": ws.key, **a.to_dict()})
@@ -629,8 +645,11 @@ class WorkspaceStore:
         """An agent answers a question-kind finding in place (§4.2). For a
         question the reply IS the round-trip, so an open question flips to
         addressed — at-least-once redelivery must converge without a
-        separate finding_status call. Other kinds keep their status."""
+        separate finding_status call. Other kinds keep their status.
+        An exact-duplicate reply (replay) is a true no-op."""
         ws, f = self._find(workspace_key, finding_id)
+        if f.answer == markdown and not (f.kind == "question" and f.status == "open"):
+            return f
         f.answer = markdown
         if f.kind == "question" and f.status == "open":
             f.status = "addressed"
