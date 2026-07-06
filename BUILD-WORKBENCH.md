@@ -24,16 +24,26 @@ Authorship split (by commit time vs the 09:49:46 switch):
 | **Fable 5** (pre-switch) | Design deliberation, SPEC-WORKBENCH v1.0 (grill + adversarial spec review), commit `ebbd161` (09:35). Started W0: wrote `core/workspace.py`, `core/agent_state.py`, `test_workspace.py`, `protocol/messages.py` additions, the mypy grammar fix. |
 | **Opus 4.8** (fallback, post-switch) | **All security-sensitive code** — §8.5 auth in `server/http.py`, `confined_read`/path confinement + diff resolution in `server/workbench.py`/`adapters/diffsource.py`. The entire browser client (`static/*`), CSP. All of W1 (diff, findings ledger, export, manifest persistence + lock). The Codex review + its fixes. The W2 scaffold. Commits `a38a04d`, `ac91134`, `2fa26b6`, `176e0ab`, `c6aa94d`. |
 
-### → Fable 5 review request (do this on the next Fable-native session)
+### → Plan: NO rewind. Fable inherits + reviews (decided 2026-07-06)
 
-Fable 5: review the **Opus-authored** changes above — start with the
-**security surface** (§8.5 browser auth, path confinement, diff/git
-resolution, the manifest lock), then the W1 domain logic and the W2
-scaffold. For each, assess: *would you have done it differently, and does
-it hold?* Record your assessment inline here under a "Fable review"
-heading — note anything you'd change, any Opus decision you'd reverse,
-and confirm/deny the Codex-fix set. This is a higher-tier pass over a
-lower-tier model's work on code that matters.
+Rewind was ruled out (it only rewinds to user messages, which would revert
+everything incl. these docs). So the Opus-authored code **stays**, and a
+fresh **Fable-native session inherits the current committed state** (tip
+`c6aa94d`) and continues. Nothing is re-authored from scratch.
+
+Fable 5's first job on that session: **review the Opus-authored changes**,
+security surface first (§8.5 browser auth, path confinement, diff/git
+resolution, the manifest lock), then W1 domain logic, then the W2 scaffold.
+For each: *would you have done it differently, does it hold?* Where you find
+a real defect or a design you'd genuinely reverse, **rewrite that specific
+file** (review is weaker than authorship for security — rewrite, don't just
+nod). Record findings inline here under a "Fable review" heading; confirm or
+deny the Codex-fix set (§3 of the out-of-repo HANDOFF, and the RESUME-HERE
+list below). Then finish W2.
+
+Out-of-repo reference copies (survive nothing automatically, but exist as
+convenience): `/home/denk/work/vocodeck2-workbench-HANDOFF.md`,
+`vocodeck2-SPEC-WORKBENCH.snapshot.md`, `vocodeck2-BUILD-WORKBENCH.snapshot.md`.
 
 - **Note:** Fable 5 does **not** use `fab-router` or the `fab-*` skills —
   those are calibration aids for lower-tier models (like the Opus 4.8
