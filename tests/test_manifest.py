@@ -107,3 +107,19 @@ def test_lock_takes_over_dead_holder(tmp_path):
     held = json.loads((tmp_path / "daemon.lock").read_text())
     assert held["pid"] == os.getpid()
     m.release()
+
+
+def test_lock_file_is_created_via_portable_exclusive_open(tmp_path):
+    """The raw os.open flag/mode combo failed on Windows (live report:
+    persistence off on the primary profile); open('x') is the portable
+    equivalent and the lock content survives it."""
+    import json
+
+    from voco.adapters.manifest import WorkspaceManifest
+
+    m = WorkspaceManifest(tmp_path)
+    m.acquire()
+    held = json.loads((tmp_path / "daemon.lock").read_text())
+    assert held["pid"] == __import__("os").getpid()
+    m.release()
+    assert not (tmp_path / "daemon.lock").exists()

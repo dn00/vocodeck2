@@ -157,6 +157,9 @@ class Registry:
         # derived by the daemon from transport facts. Injected; None =
         # no managed terminal. Rides the snapshot so UIs degrade per-cell.
         self.term_cells: Callable[[Session], dict | None] = lambda s: None
+        # Managed-terminal liveness for the display-state derivation
+        # (§6): daemon-injected; None = unmanaged/unknown.
+        self.handle_alive: Callable[[Session], bool | None] = lambda s: None
 
     # ---- registration ----------------------------------------------------
 
@@ -314,12 +317,30 @@ class Registry:
         )
         return "queued_idle" if was_idle else "queued"
 
+    def _display_state(self, s: Session) -> str:
+        """The rail dot (SPEC-WORKBENCH §6) — derived, total precedence."""
+        from voco.core.agent_state import display_state
+
+        return display_state(
+            bridge_state=s.state,
+            pane_hint=s.pane_hint,
+            idle_for_s=max(0.0, self._now() - s.last_seen),
+            handle_alive=self.handle_alive(s),
+        )
+
     def _emit_session_state(self, s: Session) -> None:
         """Emit session.state only on actual change: a healthy listener
         re-parks every slice and must not spam identical events."""
         if s.state != s.last_state_emitted:
             s.last_state_emitted = s.state
-            self._emit("session.state", {"session_id": s.session_id, "state": s.state})
+            self._emit(
+                "session.state",
+                {
+                    "session_id": s.session_id,
+                    "state": s.state,
+                    "display_state": self._display_state(s),
+                },
+            )
 
     # ---- bridge hooks --------------------------------------------------------
 
@@ -413,7 +434,13 @@ class Registry:
         prev, s.pane_hint = s.pane_hint, hint
         self._emit(
             "pane.hint",
-            {"session_id": session_id, "hint": hint, "prev": prev},
+            {
+                "session_id": session_id,
+                "hint": hint,
+                "prev": prev,
+                # A hint change can flip the dot (blocked/working/gone).
+                "display_state": self._display_state(s),
+            },
         )
         return True
 
@@ -515,6 +542,7 @@ class Registry:
                     "name": s.call_name,
                     "display_name": s.display_name,
                     "state": s.state,
+                    "display_state": self._display_state(s),
                     "capabilities": s.capabilities,
                     "host": s.identity.get("host"),
                     "root": s.home_root,

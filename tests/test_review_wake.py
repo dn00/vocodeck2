@@ -545,3 +545,25 @@ def test_asks_survive_dump_restore(daemon):
     # The unanswered ask is still pending after a daemon restart.
     pending = [i for i in restored.pending_review() if i["kind"] == "ask"]
     assert [i["id"] for i in pending] == [a.ask_id]
+
+
+def test_snapshot_carries_display_state(daemon):
+    """The rail dot renders display_state (§6) — a parked agent must
+    read 'listening', never a raw 'parked' with no CSS class (live-test
+    bug: registered agents looked offline)."""
+    s, _ws, _page = attach(daemon)
+    snap = daemon.registry.snapshot()["sessions"][0]
+    assert snap["display_state"] == "idle"
+    daemon.registry.on_listen_start(s.session_id)  # parks
+    snap = daemon.registry.snapshot()["sessions"][0]
+    assert snap["state"] == "parked"
+    assert snap["display_state"] == "listening"
+
+
+def test_session_state_events_carry_display_state(daemon):
+    events: list[tuple[str, dict]] = []
+    daemon.bus.subscribe(lambda env: events.append((env.type, env.payload)))
+    s, _ws, _page = attach(daemon)
+    daemon.registry.on_listen_start(s.session_id)
+    state_events = [p for t, p in events if t == "session.state"]
+    assert state_events and state_events[-1]["display_state"] == "listening"

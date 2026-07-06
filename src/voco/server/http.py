@@ -229,6 +229,12 @@ class BridgeServer:
             raise web.HTTPBadRequest(text="host and cwd are required")
         caps = body.get("capabilities") or ["say", "listen"]
         s = self._registry.register(identity, caps)
+        if self.workspaces is not None:
+            # A session's workspace exists the moment it registers — the
+            # rail must show every attached agent, not only the ones that
+            # already pushed a page (live-test bug: register-only agents
+            # were invisible).
+            self.workspaces.resolve(s.identity)
         return web.json_response(
             {
                 "session_id": s.session_id,

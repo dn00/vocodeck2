@@ -124,6 +124,7 @@ export class Store {
       case "session.detached":
       case "session.activated":
       case "digest.updated":
+      case "pane.hint": // carries a fresh display_state (dot precedence)
         this._applySessionEvent(env.type, p);
         this._notify("sessions");
         break;

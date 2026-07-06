@@ -558,6 +558,14 @@ class Daemon:
                     # local-only, dies with the daemon (stated in §5).
                     if payload.get("host"):
                         raise ValueError("pty backend is local-only; use tmux")
+                    if sys.platform == "win32":
+                        # ptyterm is Unix-only (fcntl/termios); ConPTY is
+                        # the planned Windows path — a clean error beats
+                        # an ImportError 500 meanwhile.
+                        raise ValueError(
+                            "pty backend needs Unix (Windows ConPTY pending)"
+                            " — use tmux via WSL2"
+                        )
                     from voco.adapters.ptyterm import PtyError
 
                     try:
@@ -798,6 +806,11 @@ class Daemon:
             n = self.registry.restore(data)
             if n:
                 print(f"voco-d: restored {n} session(s) from {self._state.path}")
+            for s in self.registry.all():
+                # Restored sessions get their workspaces back immediately,
+                # same as a fresh register — the rail must not be empty
+                # until agents happen to ping.
+                self.workspaces.resolve(s.identity)
 
     def _wire_state_saver(self) -> None:
         def on_event(env) -> None:
@@ -935,6 +948,10 @@ class Daemon:
         pinned `term:<call_name>` page — stream for daemon-owned ptys,
         read-only mirror for tmux panes. Cells ride the snapshot."""
         self.registry.term_cells = self._term_cells
+        # §6 display state: a daemon pty's liveness feeds the "gone" dot.
+        self.registry.handle_alive = lambda s: (
+            pp.alive if (pp := self._pty_for(s)) is not None else None
+        )
 
         def on_event(env) -> None:
             if env.type != "session.attached":

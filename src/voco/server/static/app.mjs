@@ -91,22 +91,37 @@ function renderRail() {
   }
   rail.append(top);
 
-  // Flat agent roster (presence + quick-switch).
+  // Flat agent roster (presence + quick-switch + at-a-glance state).
   const roster = h("div", { class: "rail-section" },
     h("div", { class: "rail-head" }, h("span", {}, "agents")));
-  for (const s of store.sessions.values())
-    roster.append(h("div",
+  for (const s of store.sessions.values()) {
+    const row = h("div",
       { class: "rail-item", onclick: () => quickSwitch(s) },
-      dot(s), h("span", {}, s.display_name || s.name)));
+      dot(s), h("span", {}, s.display_name || s.name));
+    if (s.unread_digest)
+      row.append(h("span", { class: "count-chip" }, String(s.unread_digest)));
+    row.append(h("span", { class: "rail-state" },
+      s.display_state || s.state || ""));
+    roster.append(row);
+  }
   if (!store.sessions.size)
     roster.append(h("div", { class: "empty-note" }, "no agents attached"));
   rail.append(roster);
 }
 
+const stripSlash = (p) => String(p || "").replace(/\/+$/, "");
+
+// A session is "in" a workspace when its home identity (host/root, rides
+// the snapshot + session.attached) matches — register-only agents count;
+// owning an agent-scoped page there also counts (pre-identity sessions).
+function sessionInWs(s, ws) {
+  if (s.host != null && s.root != null)
+    return s.host === ws.host && stripSlash(s.root) === stripSlash(ws.root);
+  return ws.pages.some((p) => p.call_name === s.name);
+}
+
 function agentsIn(ws) {
-  // A session is "in" a workspace when it owns an agent-scoped page there.
-  const names = new Set(ws.pages.filter((p) => p.call_name).map((p) => p.call_name));
-  return [...store.sessions.values()].filter((s) => names.has(s.name));
+  return [...store.sessions.values()].filter((s) => sessionInWs(s, ws));
 }
 
 // W3: spawn an agent in a fresh sibling worktree of this repo.
@@ -126,7 +141,7 @@ async function spawnWorktree(ws) {
 
 function quickSwitch(s) {
   for (const ws of store.workspaces.values())
-    if (ws.pages.some((p) => p.call_name === s.name)) {
+    if (sessionInWs(s, ws)) {
       store.selectWorkspace(ws.key);
       const term = ws.pages.find((p) => p.type === "terminal" && p.call_name === s.name);
       if (term) store.selectPage(term.page_id);
@@ -276,13 +291,12 @@ function renderDock() {
 // absence for a session we can't place.
 function hasReviewAgent(ws) {
   if (!ws) return false;
-  const strip = (p) => String(p || "").replace(/\/+$/, "");
   return [...store.sessions.values()].some((s) => {
     const capOk = !Array.isArray(s.capabilities)
       || s.capabilities.includes("review");
     const placeKnown = s.host != null && s.root != null;
     const placeOk = !placeKnown
-      || (s.host === ws.host && strip(s.root) === strip(ws.root));
+      || (s.host === ws.host && stripSlash(s.root) === stripSlash(ws.root));
     return capOk && placeOk;
   });
 }

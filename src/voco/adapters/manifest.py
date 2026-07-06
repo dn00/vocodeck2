@@ -16,8 +16,10 @@ decides WHEN to save (debounced on bus events + on shutdown).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import sys
 from pathlib import Path
 
 
@@ -36,6 +38,24 @@ def _proc_start(pid: int) -> str | None:
 
 
 def _pid_alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        # NEVER os.kill here: on Windows any non-CTRL signal — including
+        # 0 — is TerminateProcess, i.e. the "liveness probe" would KILL
+        # the lock holder. Query, don't touch.
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            return bool(ok) and code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -66,7 +86,13 @@ class WorkspaceManifest:
         payload = json.dumps({"pid": os.getpid(), "start": _proc_start(os.getpid())})
         for _ in range(2):
             try:
-                fd = os.open(self._lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                # open("x") is O_CREAT|O_EXCL portably — the raw os.open
+                # flag/mode combination was observed failing on Windows
+                # (live report: workbench persistence off on the primary
+                # profile). The lock holds only pid + start nonce, so a
+                # post-create chmod (best-effort, POSIX) suffices.
+                with open(self._lock, "x", encoding="utf-8") as fh:
+                    fh.write(payload)
             except FileExistsError:
                 # A lock exists. If its holder is dead/stale, remove it and
                 # retry the exclusive create; if it is live, refuse.
@@ -82,8 +108,8 @@ class WorkspaceManifest:
                     pass  # someone else took it over first; retry sees theirs
                 continue
             else:
-                with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                    fh.write(payload)
+                with contextlib.suppress(OSError):
+                    os.chmod(self._lock, 0o600)
                 return
         # Two rounds both lost the create race to a live holder.
         held = self._read_lock()
@@ -124,10 +150,17 @@ class WorkspaceManifest:
         path = self._path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(data, fh, separators=(",", ":"))
+            if os.name == "posix":
+                # 0600 at create: no window with looser permissions
+                # (proprietary review data, §8 sensitivity).
+                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump(data, fh, separators=(",", ":"))
+            else:
+                # Windows: mode bits don't map; plain create (ACLs apply).
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    json.dump(data, fh, separators=(",", ":"))
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise

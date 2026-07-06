@@ -330,3 +330,14 @@ async def test_remote_session_path_push_soft_rejected(client):
         json={"session_id": sid, "type": "doc", "name": "notes", "content": "hi"},
     )
     assert (await resp.json())["ok"] is True
+
+
+async def test_register_alone_creates_the_workspace(client):
+    """Live-test bug (Windows deck): agents that registered but never
+    pushed a page were invisible — no workspace existed, the rail was
+    empty. Registration itself must mint the workspace."""
+    resp = await client.post("/v1/bridge/register", json=ident(client.repo))
+    assert resp.status == 200
+    ws = client.store.home_of(ident(client.repo))
+    assert ws is not None and ws.kind == "workspace"
+    assert ws.key in {w["key"] for w in client.store.snapshot()}
