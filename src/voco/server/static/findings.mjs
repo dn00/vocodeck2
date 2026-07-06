@@ -28,14 +28,14 @@ const STATUS_LABEL = {
  * @param {HTMLElement} body
  * @param {any[]} findings
  * @param {{onWithdraw:(id:string)=>void, onReveal:(f:any)=>void,
- *   pageRev?:(pageId:string)=>?number}} ctx
+ *   pageRev?:(pageId:string)=>?number, emptyText?:string}} ctx
  */
 export function renderFindings(body, findings, ctx) {
   body.replaceChildren();
   const live = findings.filter((f) => f.status !== "withdrawn");
   if (!live.length) {
     body.append(el("div", { class: "empty-note",
-      text: "no findings — click a diff line to flag one" }));
+      text: ctx.emptyText || "no findings — click a diff line to flag one" }));
     return;
   }
   for (const f of live) {

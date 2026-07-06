@@ -23,10 +23,14 @@ const el = (tag, attrs = {}, ...kids) => {
 /**
  * @param {HTMLElement} body
  * @param {any[]} asks oldest first
- * @param {{hasReviewAgent:boolean, onAsk:(text:string)=>void}} ctx
+ * @param {{hasReviewAgent:boolean, onAsk:(text:string)=>void,
+ *   agentName?:?string}} ctx
  */
 export function renderChat(body, asks, ctx) {
   body.replaceChildren();
+  if (ctx.agentName)
+    body.append(el("div", { class: "chat-with",
+      text: "chat with " + ctx.agentName }));
   const list = el("div", { class: "chat-list" });
   for (const a of asks) {
     const card = el("div", { class: "ask" },
@@ -50,7 +54,8 @@ export function renderChat(body, asks, ctx) {
 
   const input = /** @type {HTMLTextAreaElement} */ (el("textarea", {
     class: "chat-input", rows: "2",
-    placeholder: "ask the agent… (Enter sends, Shift+Enter for a newline)",
+    placeholder: (ctx.agentName ? `ask ${ctx.agentName}` : "ask the agent")
+      + "… (Enter sends, Shift+Enter for a newline)",
   }));
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {

@@ -163,33 +163,35 @@ class Registry:
 
     # ---- registration ----------------------------------------------------
 
+    # Predecessor sweep windows (same host+cwd+harness, new instance):
+    # an unparked-IDLE sibling silent longer than one listen slice is a
+    # corpse (a live agent parks within its first slice); an unparked-
+    # WORKING one gets the long window (mid-turn agents go quiet).
+    SWEEP_IDLE_S = 60.0
+    SWEEP_WORKING_S = 900.0
+
     def register(self, identity: dict[str, Any], capabilities: list[str]) -> Session:
         key = _identity_key(identity)
         existing_id = self._by_identity.get(key)
         if existing_id is not None and existing_id in self._sessions:
             s = self._sessions[existing_id]
             s.identity.update(identity)  # refresh derived git facts
+            if capabilities:
+                # The adapter knows its CURRENT verbs — stale capability
+                # lists (pre-review sessions) must not survive re-register.
+                s.capabilities = self._with_inject(identity, capabilities)
             s.last_seen = self._now()
             return s
-        capabilities = list(capabilities)
-        has_terminal = (
-            identity.get("tmux_pane")
-            or identity.get("tmux_session")
-            # Daemon-owned pty (W4): the spawn baked its handle into the
-            # instance; writing to it is the inject transport.
-            or str(identity.get("instance") or "").startswith("pty-")
-        )
-        if has_terminal and "inject" not in capabilities:
-            capabilities.append("inject")
         s = Session(
             session_id=secrets.token_hex(16),
             identity=dict(identity),
             call_name=self._assign_name(key),
-            capabilities=capabilities,
+            capabilities=self._with_inject(identity, capabilities),
             last_seen=self._now(),
         )
         self._sessions[s.session_id] = s
         self._by_identity[key] = s.session_id
+        self._sweep_predecessors(s)
         if len(self._sessions) == 1:
             self._active_id = s.session_id  # auto-activate the only session
             self._emit("session.activated", {"session_id": s.session_id})
@@ -204,6 +206,57 @@ class Registry:
             },
         )
         return s
+
+    @staticmethod
+    def _with_inject(identity: dict[str, Any], capabilities: list[str]) -> list[str]:
+        caps = list(capabilities)
+        has_terminal = (
+            identity.get("tmux_pane")
+            or identity.get("tmux_session")
+            # Daemon-owned pty (W4): the spawn baked its handle into the
+            # instance; writing to it is the inject transport.
+            or str(identity.get("instance") or "").startswith("pty-")
+        )
+        if has_terminal and "inject" not in caps:
+            caps.append("inject")
+        return caps
+
+    def _sweep_predecessors(self, newcomer: Session) -> None:
+        """A fresh instance in the SAME (host, cwd, harness) marks older,
+        long-silent, unparked siblings as predecessors (a resumed Claude
+        session gets a new harness session id → a new identity — live-test
+        bug: every resume left a grey corpse that could still hold the
+        voice-active slot and hijack ask/wake routing). Detach them; if
+        one held active, the newcomer inherits it (registering where the
+        corpse lived is the clearest possible user intent)."""
+        coarse = (
+            newcomer.identity.get("host"),
+            newcomer.identity.get("cwd"),
+            newcomer.identity.get("harness"),
+        )
+        now = self._now()
+        inherited_active = False
+        for s in list(self._sessions.values()):
+            if s.session_id == newcomer.session_id:
+                continue
+            if (
+                s.identity.get("host"),
+                s.identity.get("cwd"),
+                s.identity.get("harness"),
+            ) != coarse:
+                continue
+            if s.parked:
+                continue  # a LIVE sibling (two agents, one cwd) is parked
+            silent = now - s.last_seen
+            window = self.SWEEP_WORKING_S if s.state == "working" else self.SWEEP_IDLE_S
+            if silent <= window:
+                continue  # fresh enough to be alive; leave it
+            if self._active_id == s.session_id:
+                inherited_active = True
+            self.detach(s.session_id)
+        if inherited_active:
+            self._active_id = newcomer.session_id
+            self._emit("session.activated", {"session_id": newcomer.session_id})
 
     def _assign_name(self, key: tuple) -> str:
         taken = {s.call_name for s in self._sessions.values()}

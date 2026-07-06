@@ -12,10 +12,12 @@
  *   session_id:?string, call_name:?string}} PageMeta
  * @typedef {{session_id:string, name:string, display_name:string,
  *   state:string, display_state?:DisplayState, unread_digest:number,
- *   capabilities?:string[], host?:?string, root?:?string}} Session
+ *   capabilities?:string[], host?:?string, root?:?string,
+ *   queued?:number, say_tail?:{ts:number, text:string}[],
+ *   screen_title?:?string, screen_markdown?:string}} Session
  */
 
-/** @typedef {"workspaces"|"sessions"|"selection"|"mic"|"conn"|"ticker"|"findings"|"asks"} Kind */
+/** @typedef {"workspaces"|"sessions"|"selection"|"mic"|"conn"|"ticker"|"findings"|"asks"|"voice"} Kind */
 
 export class Store {
   constructor() {
@@ -25,6 +27,11 @@ export class Store {
     /** @type {Map<string, Map<string, any>>} */ this.findings = new Map();
     // asks keyed the same way (workspace key -> Map<ask_id, ask>)
     /** @type {Map<string, Map<string, any>>} */ this.asks = new Map();
+    // Voice feed: the deck's heartbeat (transcripts, routing, says),
+    // newest last, bounded ring.
+    /** @type {{ts:number, kind:string, text:string, who:?string}[]} */
+    this.voiceFeed = [];
+    this.selectedAgent = /** @type {?string} */ (null); // session_id
     this.activeSession = /** @type {?string} */ (null);
     this.selectedWorkspace = /** @type {?string} */ (null);
     this.selectedPage = /** @type {?string} */ (null);
@@ -118,7 +125,15 @@ export class Store {
         this._notify("asks");
         break;
       }
-      case "screen.updated": break; // page.updated carries the same for us
+      case "screen.updated": { // page.updated re-renders the page view;
+        const s = this.sessions.get(p.session_id); // the agent card too
+        if (s) {
+          s.screen_markdown = p.markdown ?? s.screen_markdown;
+          s.screen_title = p.title ?? s.screen_title;
+          this._notify("sessions");
+        }
+        break;
+      }
       case "session.attached":
       case "session.state":
       case "session.detached":
@@ -132,12 +147,23 @@ export class Store {
         this.mic = { ...this.mic, ...p };
         this._notify("mic");
         break;
+      case "stt.final":
+        this._feed("you", p.text, null);
+        this.ticker = "";
+        this._notify("ticker");
+        return; // feed + ticker both handled
+      case "route.decision":
+        if (p.kind && p.kind !== "forward")
+          this._feed("route", `${p.kind}${p.late_reroute ? " (rerouted)" : ""}`, null);
+        break;
+      case "input.queued":
+        this._feed("queued", p.text, this._nameOf(p.session_id));
+        break;
+      case "agent.say":
+        this._feed("say", p.text, this._nameOf(p.session_id));
+        break;
       case "stt.partial":
         this.ticker = p.text || "";
-        this._notify("ticker");
-        break;
-      case "stt.final":
-        this.ticker = "";
         this._notify("ticker");
         break;
     }
@@ -158,8 +184,24 @@ export class Store {
       this.selectedPage = p.page_id;
   }
 
+  _nameOf(sessionId) {
+    const s = sessionId && this.sessions.get(sessionId);
+    return s ? s.name : null;
+  }
+
+  _feed(kind, text, who) {
+    if (!text) return;
+    this.voiceFeed.push({ ts: Date.now() / 1000, kind, text: String(text), who });
+    if (this.voiceFeed.length > 200) this.voiceFeed.shift();
+    this._notify("voice");
+  }
+
   _applySessionEvent(type, p) {
-    if (type === "session.detached") { this.sessions.delete(p.session_id); return; }
+    if (type === "session.detached") {
+      this.sessions.delete(p.session_id);
+      if (this.selectedAgent === p.session_id) this.selectedAgent = null;
+      return;
+    }
     if (type === "session.activated") { this.activeSession = p.session_id; return; }
     const s = this.sessions.get(p.session_id) || /** @type {Session} */ ({
       session_id: p.session_id, name: p.name || "?", display_name: p.name || "?",

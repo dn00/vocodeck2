@@ -908,7 +908,15 @@ class Daemon:
             # The overridden agent left: the override is stale, drop it.
             del self._primary_override[ws.key]
         active = self.registry.active
-        if active is not None and active in here:
+        if (
+            active is not None
+            and active in here
+            # An active session only wins the election while it is
+            # actually reachable — parked (wakeable now) or recently
+            # heard from. A stale corpse holding the active slot must
+            # not swallow asks/wakes (live-test bug).
+            and (active.parked or time.time() - active.last_seen < 600)
+        ):
             return active
         if len(here) == 1:
             return here[0]

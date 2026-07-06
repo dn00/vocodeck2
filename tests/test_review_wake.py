@@ -567,3 +567,88 @@ def test_session_state_events_carry_display_state(daemon):
     daemon.registry.on_listen_start(s.session_id)
     state_events = [p for t, p in events if t == "session.state"]
     assert state_events and state_events[-1]["display_state"] == "listening"
+
+
+# ---- session lifecycle (live-test: resumed harness = grey corpse) ----------------
+
+
+def resumed(daemon, instance: str, now: float):
+    daemon.registry._now = lambda: now
+    return daemon.registry.register(
+        {**ident(), "instance": instance}, ["say", "listen", "review"]
+    )
+
+
+def test_new_instance_sweeps_idle_predecessor_and_inherits_active(daemon):
+    old = resumed(daemon, "sess-1", 1000.0)
+    assert daemon.registry.active is old  # first session auto-activates
+    # Claude exits; its listener dies (unparked, idle). User resumes a
+    # couple of minutes later.
+    new = resumed(daemon, "sess-2", 1150.0)
+
+    assert daemon.registry.get(old.session_id) is None  # corpse swept
+    assert daemon.registry.active is new  # active slot inherited
+
+
+def test_parked_sibling_survives_new_registration(daemon):
+    """Two live agents in one cwd: the parked one is NOT a predecessor."""
+    a = resumed(daemon, "pane-1", 1000.0)
+    daemon.registry.on_listen_start(a.session_id)  # parked = alive
+    b = resumed(daemon, "pane-2", 1160.0)
+    assert daemon.registry.get(a.session_id) is not None
+    assert daemon.registry.get(b.session_id) is not None
+
+
+def test_just_registered_sibling_is_not_swept(daemon):
+    """Two agents starting in one cwd seconds apart: the first hasn't
+    parked yet (still booting) — the grace window protects it."""
+    a = resumed(daemon, "pane-1", 1000.0)
+    b = resumed(daemon, "pane-2", 1010.0)
+    assert daemon.registry.get(a.session_id) is not None
+    assert daemon.registry.get(b.session_id) is not None
+
+
+def test_working_sibling_survives_unless_ancient(daemon):
+    a = resumed(daemon, "pane-1", 1000.0)
+    daemon.registry.dispatch("do it", "t-1", target=a)
+    daemon.registry.on_listen_start(a.session_id)  # takes the turn
+    assert a.state == "working"
+    resumed(daemon, "pane-2", 1300.0)  # 5 min: mid-turn sibling stays
+    assert daemon.registry.get(a.session_id) is not None
+    resumed(daemon, "pane-3", 1300.0 + 2000)  # ancient silence: swept
+    assert daemon.registry.get(a.session_id) is None
+
+
+def test_reregister_refreshes_capabilities(daemon):
+    s = daemon.registry.register({**ident(), "instance": "x"}, ["say", "listen"])
+    assert "review" not in s.capabilities
+    s2 = daemon.registry.register(
+        {**ident(), "instance": "x"}, ["say", "listen", "review"]
+    )
+    assert s2 is s and "review" in s.capabilities
+
+
+def test_stale_active_session_does_not_swallow_asks(daemon):
+    """The election reachability guard: a corpse holding voice-active
+    must not out-elect the live parked agent (live-test bug: chat never
+    reached the selected agent)."""
+    now = [1000.0]
+    daemon.registry._now = lambda: now[0]
+    corpse = daemon.registry.register(
+        {**ident(), "instance": "old"}, ["say", "listen", "review"]
+    )
+    ws = daemon.workspaces.resolve(corpse.identity)
+    assert daemon.registry.active is corpse
+    now[0] = 5000.0  # corpse silent for over an hour; still "active"
+    live = daemon.registry.register(
+        {**ident(), "instance": "new", "tmux_pane": "%9"},
+        ["say", "listen", "review"],
+    )
+    # (tmux_pane keeps the corpse from being swept? no — different coarse
+    # key is NOT the case here; the sweep DOES remove it. Simulate the
+    # corpse surviving a sweep by re-adding it as active.)
+    daemon.registry._sessions[corpse.session_id] = corpse
+    daemon.registry._active_id = corpse.session_id
+    daemon.registry.on_listen_start(live.session_id)  # live agent parks
+
+    assert daemon._primary_session(daemon.workspaces.get(ws.key)) is live
