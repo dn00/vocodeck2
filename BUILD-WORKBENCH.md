@@ -208,7 +208,83 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
       command for per-workspace opt-out). Oracle re-review scenario
       ported as tests; verified live incl. manifest-restored pages.
 
-## RESUME HERE (updated 2026-07-06, Fable-native session — W2 shipped)
+## RESUME HERE (updated 2026-07-06 EOD — UI/UX RE-ARCHITECTURE MANDATE)
+
+**Read this section fully before writing any code. The machinery below
+(W0–W5) is built and solid; the PRODUCT on top of it failed its first
+real dogfood. The next session's job is a design-first UI/UX
+re-architecture plus one protocol-reliability fix, in that order of
+thought but reverse order of build.**
+
+### Field report (user dogfood, 2026-07-06 evening — verbatim distilled)
+
+1. **Voice has no visual presence.** Speaking produces NOTHING on
+   screen (no mic-live/VAD indicator, no partial transcript against the
+   speaking moment); an agent speaking back shows nothing either. For a
+   VOICE control plane this is the soul of the product and it is
+   absent. The `stt.partial` ticker in the status bar is not presence.
+2. **"Feels like a debugger, not a daily tool"** — for the owner, a
+   friend, or a GitHub rando. No product/UI engineering practices.
+3. **Less useful than the diff-annotate reference project**: there the
+   user could SEE diffs against branches in one step. Here the diff
+   never appeared (see protocol failure below) and there is no
+   user-side "show me the branch diff" affordance at all — publishing
+   is agent-initiated only. The reference bar for the review surface is
+   diff-annotate's UX, and we are under it.
+4. **Two chats confusion**: a dock "chat" tab AND a bottom-strip input.
+   Transport semantics (ask vs say_as_user vs transcript vs say) leak
+   into the UI as separate surfaces. Must become one coherent story.
+5. **Panels are not resizable.** Table stakes.
+6. **REJECTED design direction** (do not revive): messenger-first /
+   chat-app layout — "this is not a messenger tool, otherwise we would
+   just use the terminal." The conversation is not the center; the
+   WORK is. Voice presence + agent state + artifacts are the product.
+
+### Protocol failure from the same dogfood (root-caused, not yet fixed)
+
+Agent (MCP, cwd `/home/denk/vocodeck2` — note: a THIRD checkout) tried
+`page_push`:
+- `{"branch": ""}` and `{"branch": "origin/main"}` → **500**.
+- `diff.file` in /tmp → "outside workspace root" (correct), copied into
+  the repo → **"no such doc"**; `path: "README.md"` → **"no such doc"**
+  (the file plainly exists in the agent's cwd).
+
+Diagnosis: the resolver is EXONERATED — reproduced its paths green
+against an origin/main-only repo (no local main). The evidence pattern
+(500 on git sources + not-found on files that exist + confinement
+refusals) all matches ONE cause: **the server-side session carried a
+stale workspace root** — identity is captured at register and kept by
+the client session cache / state restore; every workspace verb then
+resolves against the wrong root. `git` run in a dead cwd raises
+unhandled (FileNotFoundError → bare 500 on builds before `b8a82df`).
+Fix class for next session:
+  a) **Refresh identity per bridge call** (adapters send current
+     cwd/worktree with page/findings verbs; server re-resolves) or
+     equivalent staleness kill;
+  b) **Errors must carry context** — echo the resolved workspace root
+     + attempted path in every 4xx (the agent flailed through six
+     blind attempts on "no such doc");
+  c) **No bare 500s** on the bridge — catch-all → 4xx/5xx with a
+     message body.
+
+### The mandate (agreed with user before session end)
+
+- Dogfood the WEB UI first; Tauri comes later. (v1 at
+  `~/code/vocodeck-p` is Tauri 2 + React + Vite with a Vd* component
+  library and global-PTT plugin — the eventual product shell; port map
+  deferred until the web UI earns daily use.)
+- **Design first, code second**: next session produces a real UX
+  re-audit and proposes the information architecture + mockups to the
+  user BEFORE building. The last two UI passes were built blind and
+  failed the first touch. Non-negotiables gathered so far: voice
+  presence (mic capture live, agent speaking live, per-agent state),
+  user-initiated branch-diff review (diff-annotate parity: pick a
+  branch, see the diff, no agent required), ONE input story, resizable
+  panels, product-grade empty/error states.
+- Protocol reliability fixes (a–c above) land WITH the redesign — the
+  best UI dies if page push 500s.
+
+## Previous RESUME (W2-era, kept for history)
 
 - Security findings live in `../vocodeck2-security/` ONLY. Codex /xai
   reviews cover build + security, but security issues route to the
@@ -262,6 +338,18 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
 
 ## Journal
 
+- **2026-07-06 (EOD — dogfood verdict: UI fails daily use; re-architecture
+  mandated)** — The user drove the workbench for real. Verdict: still a
+  debugger, not a product. Full field report + root-caused protocol
+  failure (stale session workspace root → 500s and "no such doc" on
+  real files) + the design mandate live in RESUME HERE at the top of
+  this file. Messenger-first concept was proposed and REJECTED; voice
+  presence and diff-annotate-parity review are the named bar. Session
+  ended here by user decision; next session starts with the UX
+  re-audit + IA proposal, user-approved before code. Also fixed the
+  "typo": one wwaged interrupt mid-session produced the verdict that
+  UI passes must end in user click-throughs, not green gates — the
+  discipline that produced tonight's honest verdict.
 - **2026-07-06 (product pass — agent-centric UI, user-driven redesign)** —
   Live use verdict: "worse debug page, unusable". Audit traced four
   roots: (1) resumed harness sessions mint a NEW identity (instance =
