@@ -1,0 +1,146 @@
+/* voco workbench — restrained terminal aesthetic (SPEC-WORKBENCH §7).
+   Dark by default, light via prefers-color-scheme; dense, monospace,
+   functional. No framework; these classes are the whole design system. */
+
+:root {
+  --bg: #0d1117;
+  --bg-rail: #0a0d13;
+  --bg-panel: #11161d;
+  --bg-tab: #161c24;
+  --border: #232b36;
+  --border-bright: #313c4a;
+  --fg: #c9d4e0;
+  --fg-dim: #7d8896;
+  --fg-faint: #4d5563;
+  --accent: #4a9eff;
+  --accent-dim: #2b5a8a;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --bad: #f85149;
+  --busy: #d29922;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo,
+    Consolas, monospace;
+  --row: 26px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f8fa; --bg-rail: #eef1f5; --bg-panel: #fff; --bg-tab: #e8ecf1;
+    --border: #d6dbe1; --border-bright: #c2c9d1;
+    --fg: #1f2937; --fg-dim: #5b6572; --fg-faint: #9aa3ae;
+    --accent: #0969da; --accent-dim: #8fbce8;
+  }
+}
+
+* { box-sizing: border-box; min-width: 0; }
+html, body { height: 100%; margin: 0; }
+body {
+  font: 13px/1.5 var(--mono);
+  background: var(--bg); color: var(--fg);
+  overflow: hidden;
+}
+#app { height: 100vh; display: flex; flex-direction: column; }
+
+/* ---- layout skeleton ------------------------------------------------------ */
+.workbench { flex: 1; display: grid;
+  grid-template-columns: 240px 1fr 320px;
+  grid-template-rows: 1fr auto; min-height: 0; }
+.rail { grid-row: 1; background: var(--bg-rail);
+  border-right: 1px solid var(--border); overflow-y: auto; }
+.editor { grid-row: 1; display: flex; flex-direction: column; min-width: 0; }
+.dock { grid-row: 1; background: var(--bg-panel);
+  border-left: 1px solid var(--border); display: flex; flex-direction: column;
+  overflow: hidden; }
+.statusbar { grid-column: 1 / 4; grid-row: 2;
+  border-top: 1px solid var(--border); background: var(--bg-rail);
+  display: flex; align-items: center; gap: 16px; padding: 0 12px;
+  height: 26px; font-size: 12px; color: var(--fg-dim); }
+.dock.hidden { display: none; }
+.workbench.nodock { grid-template-columns: 240px 1fr; }
+
+/* ---- rail ----------------------------------------------------------------- */
+.rail-section { padding: 6px 0; }
+.rail-head { padding: 4px 10px; color: var(--fg-faint);
+  text-transform: uppercase; font-size: 10px; letter-spacing: .08em;
+  display: flex; justify-content: space-between; }
+.rail-item { display: flex; align-items: center; gap: 7px;
+  padding: 3px 10px; height: var(--row); cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rail-item:hover { background: var(--bg-tab); }
+.rail-item.sel { background: var(--bg-panel);
+  box-shadow: inset 2px 0 0 var(--accent); }
+.rail-item.indent { padding-left: 24px; }
+.rail-item.indent2 { padding-left: 38px; color: var(--fg-dim); }
+.rail-repo { color: var(--fg); font-weight: 600; }
+.rail-branch { color: var(--fg-faint); font-size: 11px; }
+.count-chip { margin-left: auto; background: var(--accent-dim); color: #fff;
+  border-radius: 8px; padding: 0 6px; font-size: 10px; min-width: 16px;
+  text-align: center; }
+
+/* ---- state dots ----------------------------------------------------------- */
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--fg-faint); }
+.dot.listening { background: var(--accent); box-shadow: 0 0 5px var(--accent); }
+.dot.working { background: var(--busy);
+  animation: pulse 1.3s ease-in-out infinite; }
+.dot.blocked { background: var(--bad); box-shadow: 0 0 5px var(--bad); }
+.dot.idle { background: var(--fg-faint); }
+.dot.stale { background: var(--fg-faint); opacity: .5; }
+.dot.gone { background: transparent; border: 1px solid var(--fg-faint); }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* ---- tabs + views --------------------------------------------------------- */
+.tabstrip { display: flex; background: var(--bg-rail);
+  border-bottom: 1px solid var(--border); overflow-x: auto; flex: 0 0 auto; }
+.tab { display: flex; align-items: center; gap: 6px; padding: 5px 12px;
+  border-right: 1px solid var(--border); cursor: pointer; white-space: nowrap;
+  color: var(--fg-dim); background: var(--bg-tab); }
+.tab:hover { color: var(--fg); }
+.tab.on { color: var(--fg); background: var(--bg);
+  box-shadow: inset 0 -2px 0 var(--accent); }
+.tab .pin { color: var(--fg-faint); font-size: 10px; }
+.tab .rev { color: var(--fg-faint); font-size: 10px; }
+.tab .x { color: var(--fg-faint); padding: 0 2px; }
+.tab .x:hover { color: var(--bad); }
+.view { flex: 1; overflow: auto; padding: 14px 18px; }
+.view.empty { display: flex; align-items: center; justify-content: center;
+  color: var(--fg-faint); }
+
+/* ---- markdown ------------------------------------------------------------- */
+.md { max-width: 900px; }
+.md h1,.md h2,.md h3 { border-bottom: 1px solid var(--border);
+  padding-bottom: 3px; margin: 18px 0 10px; }
+.md h1 { font-size: 20px; } .md h2 { font-size: 16px; } .md h3 { font-size: 14px; }
+.md code { background: var(--bg-tab); padding: 1px 5px; border-radius: 3px; }
+.md pre { background: var(--bg-tab); border: 1px solid var(--border);
+  border-radius: 5px; padding: 10px 12px; overflow-x: auto; }
+.md pre code { background: none; padding: 0; }
+.md a { color: var(--accent); }
+.md table { border-collapse: collapse; } .md th,.md td {
+  border: 1px solid var(--border); padding: 4px 8px; }
+.md blockquote { border-left: 3px solid var(--border-bright);
+  margin: 0; padding-left: 12px; color: var(--fg-dim); }
+
+/* ---- dock ----------------------------------------------------------------- */
+.dock-tabs { display: flex; border-bottom: 1px solid var(--border);
+  flex: 0 0 auto; }
+.dock-tab { flex: 1; text-align: center; padding: 6px; cursor: pointer;
+  color: var(--fg-dim); }
+.dock-tab.on { color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
+.dock-body { flex: 1; overflow-y: auto; padding: 8px; }
+.dock-body.hidden { display: none; }
+.empty-note { color: var(--fg-faint); padding: 16px 8px; text-align: center; }
+
+/* ---- status bar ----------------------------------------------------------- */
+.st-item { display: flex; align-items: center; gap: 5px; }
+.st-item .k { color: var(--fg-faint); }
+.st-conn { margin-left: auto; }
+.st-conn.on { color: var(--ok); } .st-conn.off { color: var(--bad); }
+.ticker { color: var(--accent); font-style: italic;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 40vw; }
+
+/* ---- misc ----------------------------------------------------------------- */
+.banner { background: var(--bad); color: #fff; padding: 6px 12px;
+  font-size: 12px; text-align: center; }
+.hidden { display: none !important; }

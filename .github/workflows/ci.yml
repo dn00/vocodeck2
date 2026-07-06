@@ -26,3 +26,13 @@ jobs:
       - name: PROTOCOL.md must match the protocol package
         if: runner.os == 'Linux'
         run: uv run python scripts/gen_protocol.py && git diff --exit-code PROTOCOL.md
+      # Buildless client type-check (SPEC-WORKBENCH §7): TypeScript is a
+      # dev linter over JSDoc — no bundle, no emit. Pinned, Linux-only.
+      - name: Type-check the workbench client (JSDoc + tsc)
+        if: runner.os == 'Linux'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: tsc --checkJs
+        if: runner.os == 'Linux'
+        run: npx -y -p typescript@5.6.3 tsc -p src/voco/server/static/tsconfig.json

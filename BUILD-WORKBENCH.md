@@ -29,40 +29,47 @@ All work on branch **`workbench`** (user decision, 2026-07-06).
 4. [ ] Deferred verification (at W4 start, not a gate): pywinpty
        version floor + ConPTY minimum Windows build.
 
-## W0 build order (current)
+## W0 build order — **COMPLETE 2026-07-06**
 
-1. [ ] `core/workspace.py` — workspace identity (realpath(root) key,
-       sessionspace fallback, repo-group via common_dir) + in-memory
-       pages model (screen upsert, doc push, rev bump); pure, injected
-       git-facts. Port diff-annotate workspace/subject tests first.
-2. [ ] `protocol/` — page/workspace/finding/ask event + command
-       vocabulary, snapshot extension, `review` capability flag;
-       regenerate PROTOCOL.md (CI drift check keeps honesty).
-3. [ ] §8.5 auth in `server/http.py` — loopback-any-port Origin
-       discipline (WS upgrade + mutating routes), per-run workbench
-       token minted + injected into served page, bearer gating
-       widened to all mutating surfaces. Tests: cross-origin mutation
-       rejected; no-Origin curl passes. (Foundation-side fix, lands
-       here.)
-4. [ ] `server/` routes — static workbench serving at `/` with CSP,
-       `ui.html` → `/debug`, page read routes (by id), workspace.list
-       + page commands over WS.
-5. [ ] Client lift — `static/` bootstrap: panel-api, store,
-       editor-tabs, markdown renderer (+ vendored marked/hljs/mermaid/
-       DOMPurify + vendor/MANIFEST), bus-client rewritten for the WS
-       envelope (snapshot-first); rail (workspaces→agents dots +
-       roster), dock, status bar; screen + doc pages rendering live.
-6. [ ] `agent_state.py` — total-precedence display state +
-       session.state payload extension; dots wired into rail.
-7. [ ] JSDoc + pinned `tsc --noEmit --checkJs` CI job (blocking).
-8. [ ] README/PROTOCOL pointer updates (`/` = workbench, `/debug` =
-       reference client).
-9. [ ] W0 exit check: two agents in two worktrees show screen pages
-       in one workbench; cross-origin mutation attempt rejected.
+1. [x] `core/workspace.py` — realpath(root) key (+ host), sessionspace
+       fallback, repo-group via common_dir, in-memory pages (screen
+       upsert, doc push, rev bump), snapshot = metadata-only. Pure,
+       injected clock/emit. 10 tests.
+2. [x] `protocol/messages.py` — workspace/page/finding/ask/term events
+       + workspace/page/finding/ask/review commands; PROTOCOL.md
+       regenerated (30 events, 20 commands).
+3. [x] §8.5 auth in `server/http.py` — loopback-any-port Origin
+       discipline (WS upgrade + all mutating routes), per-run wb token
+       minted + injected into served pages, `allowed_origins` config,
+       bearer gating widened. WS commands gated on wb for browser
+       origins. Foundation gap (no Origin check) closed here. 10 tests.
+4. [x] `server/workbench.py` — `/` shell with CSP + nonce, `/static/*`,
+       `/v1/page/{id}` (read fresh, realpath-confined per read, size/
+       binary caps), `POST /v1/bridge/page` (doc; local_fs cell for
+       remote), `ui.html` → `/debug`. workspace.list/page.close/reopen
+       control commands.
+5. [x] Client (`static/`): store (+subscribe seam), bus (WS,
+       self-healing), markdown (vendored marked+DOMPurify, pinned, ESM
+       wrappers, plaintext fallback), app (rail repos→workspaces→agents
+       + roster, tabstrip, dock/status placeholders). tsc --checkJs
+       clean.
+6. [x] `agent_state.py` — total-precedence display state; dots in rail.
+7. [x] tsc CI step (Linux, `npx -p typescript@5.6.3 tsc`); verified
+       green locally.
+8. [x] Debug UI relocated to `/debug` (+ `/ui` alias kept); wb token
+       plumbed into its WS. README pointer update pending W-final.
+9. [x] E2E smoke: daemon boots headless, register→workspace, screen +
+       path-doc pages present, `/` serves shell + static 200, page
+       content resolves (doc read-fresh), foreign origin → 403.
+       **Pending user AM: live browser click-through** (no headless
+       browser in this env; all pieces verified at HTTP + module level).
+
+Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
+188 pytest passing, tsc --checkJs clean, PROTOCOL.md in sync.
 
 ## Milestones (W1–W5 tracked as reached; definitions in SPEC §11)
 
-- [ ] **W0 — pages + shell + auth** (build order above)
+- [x] **W0 — pages + shell + auth** (complete 2026-07-06; see build order above)
 - [ ] **W1 — diff review**: diff page + annotation + findings ledger +
       manifest persistence + `voco review export`.
 - [ ] **W2 — the wake**: `review` capability + listen status + queued
@@ -106,3 +113,14 @@ All work on branch **`workbench`** (user decision, 2026-07-06).
   9-step build order above. Still nothing committed — the two docs +
   branch are the whole diff; commit them as the branch's first commit
   before starting W0 step 1.
+- **2026-07-06 (W0 shipped)** — Full workbench foundation built native,
+  no subagents. New: `core/workspace.py`, `core/agent_state.py`,
+  `server/workbench.py`, `static/` client (store/bus/markdown/app +
+  vendored marked+DOMPurify), §8.5 browser auth in `server/http.py`
+  (closes a real foundation gap: verified no Origin check existed).
+  Screen verb now doubles as a pinned page with wire compat intact.
+  20 new tests (188 total green); mypy/ruff/tsc all clean. E2E smoke
+  passed at HTTP level. Adhoc improvements: mypy grammar bumped to 3.12
+  (numpy 2.4 PEP-695 stubs were unparseable — pre-existing latent CI
+  risk), CLI now derives `common_dir` for rail grouping. Committing +
+  pushing as milestone 1.

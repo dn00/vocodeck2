@@ -36,6 +36,7 @@ from voco.core.phrases import PhraseCommand
 from voco.core.registry import Registry
 from voco.core.router import Routed, Router
 from voco.core.turn import RouteDecision
+from voco.core.workspace import WorkspaceStore
 from voco.server.http import BridgeServer, run_server
 
 DEFAULT_CONFIG = Path.home() / ".config" / "voco" / "config.toml"
@@ -81,6 +82,7 @@ class Daemon:
         self._config_path = config_path or DEFAULT_CONFIG
         self.bus = EventBus()
         self.registry = Registry(emit=self.bus.emit)
+        self.workspaces = WorkspaceStore(emit=self.bus.emit)
         mate = None
         mate_cfg = cfg.get("first_mate")
         if mate_cfg:
@@ -112,6 +114,8 @@ class Daemon:
             token=cfg.get("bridge", {}).get("token"),
             on_control=self._control,
             snapshot_extra=lambda: {"mic": self._mic_payload()},
+            workspaces=self.workspaces,
+            allowed_origins=cfg.get("server", {}).get("allowed_origins"),
         )
         self.voice: VoiceLoop | None = None
         self._tmux_mgr: TmuxManager | None = None
@@ -460,6 +464,14 @@ class Daemon:
             return self._public_config()
         if cmd == "config.set":
             return self._config_set(payload)
+        if cmd == "workspace.list":
+            return {"workspaces": self.workspaces.snapshot()}
+        if cmd == "page.close":
+            page = self.workspaces.set_closed(str(payload.get("page_id", "")), True)
+            return {"page": page.meta()}
+        if cmd == "page.reopen":
+            page = self.workspaces.set_closed(str(payload.get("page_id", "")), False)
+            return {"page": page.meta()}
         raise ValueError(f"unknown command {cmd!r}")
 
     # Keys that take effect immediately; everything else persists and is

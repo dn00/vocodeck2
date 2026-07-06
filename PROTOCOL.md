@@ -35,10 +35,15 @@ Every event is one JSON object:
 Payload shapes are stable per type; see SPEC §10 for semantics.
 
 - `agent.say` *(turn-scoped: payload carries `turn_id`)*
+- `ask.answered`
+- `ask.created`
 - `daemon.error`
 - `digest.updated`
+- `finding.added`
+- `finding.updated`
 - `input.queued` *(turn-scoped: payload carries `turn_id`)*
 - `mic.state`
+- `page.updated`
 - `pane.hint`
 - `route.decision` *(turn-scoped: payload carries `turn_id`)*
 - `screen.updated`
@@ -54,15 +59,25 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 - `speech.started` *(turn-scoped: payload carries `turn_id`)*
 - `stt.final`
 - `stt.partial`
+- `term.closed`
+- `term.opened`
 - `turn.patience` *(turn-scoped: payload carries `turn_id`)*
 - `turn.state` *(turn-scoped: payload carries `turn_id`)*
+- `workspace.updated`
 
 ## Commands (clients → daemon)
 
+- `ask.create`
 - `config.get`
 - `config.set`
+- `finding.add`
+- `finding.update`
+- `finding.withdraw`
 - `interrupt`
 - `mic.set`
+- `page.close`
+- `page.reopen`
+- `review.export`
 - `say_as_user`
 - `session.detach`
 - `session.kill`
@@ -71,3 +86,4 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 - `session.spawn`
 - `state.get`
 - `switch_session`
+- `workspace.list`

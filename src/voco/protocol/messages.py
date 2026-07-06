@@ -39,6 +39,16 @@ EVENT_TYPES = {
     "pane.hint",
     "mic.state",
     "daemon.error",
+    # Workbench (SPEC-WORKBENCH §9). screen.updated stays alongside
+    # page.updated for screen pages — exact legacy payload, kept.
+    "workspace.updated",
+    "page.updated",
+    "finding.added",
+    "finding.updated",
+    "ask.created",
+    "ask.answered",
+    "term.opened",
+    "term.closed",
 }
 
 # Turn-scoped events MUST carry payload.turn_id (review finding 5).
@@ -67,6 +77,16 @@ COMMAND_TYPES = {
     "state.get",
     "config.get",
     "config.set",
+    # Workbench (SPEC-WORKBENCH §9): browser mutations ride commands so
+    # the debug UI and tests reach them too.
+    "workspace.list",
+    "page.close",
+    "page.reopen",
+    "finding.add",
+    "finding.update",
+    "finding.withdraw",
+    "ask.create",
+    "review.export",
 }
 
 

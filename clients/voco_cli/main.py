@@ -123,6 +123,12 @@ def derive_identity() -> dict:
         "repo": Path(repo_root).name if repo_root else None,
         "branch": _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd),
         "worktree": repo_root,
+        # Worktree siblings share this; the workbench rail groups by it.
+        "common_dir": _git(
+            ["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd
+        )
+        if repo_root
+        else None,
         "harness": harness,
         "pid": os.getpid(),
         "instance": _instance(),

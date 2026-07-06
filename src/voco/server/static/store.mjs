@@ -1,0 +1,155 @@
+// @ts-check
+/**
+ * Client state + subscribe seam (SPEC-WORKBENCH §7). Panels read the store
+ * and subscribe by kind; they never reach into each other. The WS bus and
+ * user actions mutate it; mutations notify subscribers of that kind.
+ *
+ * @typedef {"gone"|"blocked"|"working"|"listening"|"stale"|"idle"} DisplayState
+ * @typedef {{key:string, host:string, root:string, name:string, kind:string,
+ *   repo:?string, branch:?string, common_dir:?string, pages:PageMeta[]}} Workspace
+ * @typedef {{page_id:string, type:string, ref:string, title:string,
+ *   scope:string, rev:number, pinned:boolean, closed:boolean,
+ *   session_id:?string, call_name:?string}} PageMeta
+ * @typedef {{session_id:string, name:string, display_name:string,
+ *   state:string, display_state?:DisplayState, unread_digest:number}} Session
+ */
+
+/** @typedef {"workspaces"|"sessions"|"selection"|"mic"|"conn"|"ticker"} Kind */
+
+export class Store {
+  constructor() {
+    /** @type {Map<string, Workspace>} */ this.workspaces = new Map();
+    /** @type {Map<string, Session>} */ this.sessions = new Map();
+    this.activeSession = /** @type {?string} */ (null);
+    this.selectedWorkspace = /** @type {?string} */ (null);
+    this.selectedPage = /** @type {?string} */ (null);
+    this.mic = /** @type {any} */ ({});
+    this.connected = false;
+    this.ticker = "";
+    /** @type {Map<Kind, Set<Function>>} */ this._subs = new Map();
+  }
+
+  /** @param {Kind} kind @param {Function} fn @returns {() => void} */
+  subscribe(kind, fn) {
+    if (!this._subs.has(kind)) this._subs.set(kind, new Set());
+    const set = /** @type {Set<Function>} */ (this._subs.get(kind));
+    set.add(fn);
+    return () => set.delete(fn);
+  }
+
+  /** @param {Kind[]} kinds */
+  _notify(...kinds) {
+    for (const k of kinds)
+      for (const fn of this._subs.get(k) || []) {
+        try { fn(); } catch (e) { console.error("subscriber", k, e); }
+      }
+  }
+
+  // ---- snapshot + events ----------------------------------------------------
+
+  applySnapshot(snap) {
+    this.sessions.clear();
+    for (const s of snap.sessions || []) this.sessions.set(s.session_id, s);
+    this.activeSession = snap.active_session ?? null;
+    this.workspaces.clear();
+    for (const w of snap.workspaces || []) this.workspaces.set(w.key, w);
+    this.mic = snap.mic || {};
+    if (!this.selectedWorkspace && this.workspaces.size)
+      this.selectWorkspace([...this.workspaces.keys()][0]);
+    this._notify("workspaces", "sessions", "mic", "selection");
+  }
+
+  /** Route a bus event to the right slice. Unknown types are ignored. */
+  applyEvent(env) {
+    const p = env.payload || {};
+    switch (env.type) {
+      case "workspace.updated": {
+        const ex = this.workspaces.get(p.key);
+        if (ex) Object.assign(ex, { repo: p.repo, branch: p.branch,
+          common_dir: p.common_dir, name: p.name });
+        else this.workspaces.set(p.key,
+          { ...p, pages: [] });
+        if (!this.selectedWorkspace) this.selectWorkspace(p.key);
+        this._notify("workspaces");
+        break;
+      }
+      case "page.updated": {
+        this._applyPage(p);
+        this._notify("workspaces", "selection");
+        break;
+      }
+      case "screen.updated": break; // page.updated carries the same for us
+      case "session.attached":
+      case "session.state":
+      case "session.detached":
+      case "session.activated":
+      case "digest.updated":
+        this._applySessionEvent(env.type, p);
+        this._notify("sessions");
+        break;
+      case "mic.state":
+        this.mic = { ...this.mic, ...p };
+        this._notify("mic");
+        break;
+      case "stt.partial":
+        this.ticker = p.text || "";
+        this._notify("ticker");
+        break;
+      case "stt.final":
+        this.ticker = "";
+        this._notify("ticker");
+        break;
+    }
+  }
+
+  _applyPage(p) {
+    const ws = this.workspaces.get(p.workspace);
+    if (!ws) return;
+    const meta = {
+      page_id: p.page_id, type: p.type, ref: p.ref, title: p.title,
+      scope: p.scope, rev: p.rev, pinned: p.pinned, closed: p.closed,
+      session_id: p.session_id, call_name: p.call_name,
+    };
+    const i = ws.pages.findIndex((x) => x.page_id === p.page_id);
+    if (i >= 0) ws.pages[i] = meta; else ws.pages.push(meta);
+    // Auto-select the first page of the selected workspace.
+    if (p.workspace === this.selectedWorkspace && !this._selectedPageLive())
+      this.selectedPage = p.page_id;
+  }
+
+  _applySessionEvent(type, p) {
+    if (type === "session.detached") { this.sessions.delete(p.session_id); return; }
+    if (type === "session.activated") { this.activeSession = p.session_id; return; }
+    const s = this.sessions.get(p.session_id) || /** @type {Session} */ ({
+      session_id: p.session_id, name: p.name || "?", display_name: p.name || "?",
+      state: "idle", unread_digest: 0,
+    });
+    if (p.state) s.state = p.state;
+    if (p.display_state) s.display_state = p.display_state;
+    if (typeof p.unread === "number") s.unread_digest = p.unread;
+    this.sessions.set(p.session_id, s);
+  }
+
+  // ---- selection ------------------------------------------------------------
+
+  selectWorkspace(key) {
+    this.selectedWorkspace = key;
+    const ws = this.workspaces.get(key);
+    const open = ws && ws.pages.filter((p) => !p.closed);
+    this.selectedPage = open && open.length ? open[0].page_id : null;
+    this._notify("selection");
+  }
+
+  selectPage(pageId) {
+    this.selectedPage = pageId;
+    this._notify("selection");
+  }
+
+  _selectedPageLive() {
+    const ws = this.workspaces.get(this.selectedWorkspace || "");
+    return ws && ws.pages.some(
+      (p) => p.page_id === this.selectedPage && !p.closed);
+  }
+
+  selectedWs() { return this.workspaces.get(this.selectedWorkspace || ""); }
+}
