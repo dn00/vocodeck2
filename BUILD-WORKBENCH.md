@@ -208,7 +208,19 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
       command for per-workspace opt-out). Oracle re-review scenario
       ported as tests; verified live incl. manifest-restored pages.
 
-## RESUME HERE (updated 2026-07-06 EOD — UI/UX RE-ARCHITECTURE MANDATE)
+## RESUME HERE (updated 2026-07-06 night — PROPOSAL OUT, AWAITING THE YES)
+
+**State: the protocol-reliability fix is SHIPPED (`5a43f29`); the UI/UX
+re-architecture PROPOSAL is written and awaiting user approval.** Read
+`DESIGN-DECK.md` (+ its interactive mockup `DESIGN-DECK.mockup.html` /
+the artifact link inside) — it holds the IA, the signal map, the three
+protocol additions (page.publish, workspace.open, speech payload
+enrichment), the U0–U3 build order, and three open forks the user must
+answer. **Do not build any UI until the user approves** (and answers the
+forks); U0 (protocol commands, tested at the command seam) is the first
+build slice after the yes. The mandate text below stands.
+
+## Previous RESUME (2026-07-06 EOD — UI/UX RE-ARCHITECTURE MANDATE)
 
 **Read this section fully before writing any code. The machinery below
 (W0–W5) is built and solid; the PRODUCT on top of it failed its first
@@ -348,6 +360,27 @@ Fix class for next session:
 
 ## Journal
 
+- **2026-07-06 (design proposal delivered — DESIGN-DECK.md + interactive
+  mockup)** — The design-first half of the mandate. Full client audit
+  first (every field-report item traced to its code cause: no
+  turn.state/speech.* subscriptions; stt.partial declared but UNEMITTED
+  — batch whisper; §3.2's human diff picker speced but never built; two
+  inputs with different semantics; fixed 240/1fr/320 grid). Proposal:
+  presence strip (orb + live captions + ONE input + agent-speaking slot;
+  status bar and feed strip die), rail agents+repos with standing
+  Review buttons, review picker (branch/PR/staged, agentless), findings
+  + asks merged into one ledger (chat tab dies), history as a summoned
+  drawer (never docked — messenger-first stays rejected), draggable
+  persisted panels. Every presence visual is bound to an EXISTING
+  protocol signal (map in DESIGN-DECK.md); the one honest gap
+  (stt.partial) is labeled, the UI subscribes anyway. Three underlying-
+  logic additions proposed: `page.publish` + `workspace.open` control
+  commands (agentless review parity) and speech.started/finished
+  payload enrichment (who + text). Build order U0–U3, each ending at a
+  user click-through. Mockup is interactive (scenario states, working
+  panel-drag, one-input demo): DESIGN-DECK.mockup.html, published as an
+  artifact too. NOTHING BUILT — awaiting the user's yes + three fork
+  answers (orb interaction, input placement, drawer scope).
 - **2026-07-06 (protocol reliability shipped — the dogfood 500s/no-such-doc
   class is dead)** — Fable-native session, per the mandate's build order
   (protocol first, UI only after an approved design). Three fixes + one
