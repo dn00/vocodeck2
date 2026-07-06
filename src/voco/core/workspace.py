@@ -21,6 +21,7 @@ INVARIANTS:
 
 from __future__ import annotations
 
+import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -31,6 +32,50 @@ PageScope = Literal["workspace", "agent"]
 # Page types shipped in W0/W1; the set is data, additive by design.
 PAGE_TYPES = {"screen", "terminal", "diff", "doc"}
 PINNED_TYPES = {"screen", "terminal", "diff"}
+
+FindingKind = Literal["concern", "question", "nit"]
+FindingStatus = Literal["open", "addressed", "disputed", "wont-fix", "withdrawn"]
+# Statuses an AGENT may set via the bridge (never "withdrawn" — that is the
+# human's remove) and never "open" (agents don't re-open).
+AGENT_STATUSES = {"addressed", "disputed", "wont-fix"}
+
+
+@dataclass
+class Finding:
+    """A human annotation on a page (SPEC-WORKBENCH §2). Diff anchors are
+    {file, side, start_line, end_line} — byte-compatible with
+    diff-annotate's output for downstream consumers."""
+
+    finding_id: str
+    page_id: str
+    rev: int
+    anchor: dict[str, Any]
+    text: str
+    kind: FindingKind = "concern"
+    blocking: bool = False
+    status: FindingStatus = "open"
+    note: str | None = None
+    commit: str | None = None
+    answer: str | None = None
+    created_ts: float = 0.0
+    updated_ts: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "finding_id": self.finding_id,
+            "page_id": self.page_id,
+            "rev": self.rev,
+            "anchor": self.anchor,
+            "text": self.text,
+            "kind": self.kind,
+            "blocking": self.blocking,
+            "status": self.status,
+            "note": self.note,
+            "commit": self.commit,
+            "answer": self.answer,
+            "created_ts": self.created_ts,
+            "updated_ts": self.updated_ts,
+        }
 
 
 @dataclass
@@ -80,12 +125,19 @@ class Workspace:
     branch: str | None = None  # display state, refreshed from identity
     common_dir: str | None = None  # rail repo-grouping (worktree siblings)
     pages: dict[str, Page] = field(default_factory=dict)
+    findings: dict[str, Finding] = field(default_factory=dict)
 
     def page_by_ref(self, type_: str, ref: str) -> Page | None:
         for p in self.pages.values():
             if p.type == type_ and p.ref == ref:
                 return p
         return None
+
+    def finding_counts(self) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for f in self.findings.values():
+            out[f.status] = out.get(f.status, 0) + 1
+        return out
 
     def meta(self) -> dict[str, Any]:
         return {
@@ -98,6 +150,7 @@ class Workspace:
             "branch": self.branch,
             "common_dir": self.common_dir,
             "pages": [p.meta() for p in self.pages.values()],
+            "finding_counts": self.finding_counts(),
         }
 
 
@@ -308,6 +361,39 @@ class WorkspaceStore:
         self._emit_page(ws, page, "updated")
         return page
 
+    def upsert_diff(
+        self,
+        ws: Workspace,
+        *,
+        ref: str,
+        title: str,
+        files: list[dict],
+        source: dict | None,
+    ) -> Page:
+        """A diff page (SPEC-WORKBENCH §3.2). `ref` identifies the diff
+        (its source signature); re-resolving the same ref bumps rev and
+        marks older-rev findings stale. `files` is the parsed diff tree
+        (core.diff.parse_diff output); `source` is the recorded resolver
+        for W5 live-git tracking."""
+        page = ws.page_by_ref("diff", ref)
+        data = {"files": files, "source": source}
+        if page is None:
+            page = Page(
+                page_id="",
+                type="diff",
+                ref=ref,
+                title=title,
+                scope="workspace",
+                pinned=True,
+                data=data,
+            )
+            return self._mint_page(ws, page)
+        page.data = data
+        page.rev += 1
+        page.updated_ts = self._now()
+        self._emit_page(ws, page, "updated")
+        return page
+
     def set_closed(self, page_id: str, closed: bool) -> Page:
         page = self._pages_by_id.get(page_id)
         if page is None:
@@ -321,6 +407,122 @@ class WorkspaceStore:
             page.updated_ts = self._now()
             self._emit_page(ws, page, "updated")
         return page
+
+    # ---- findings ledger (SPEC-WORKBENCH §4) --------------------------------
+
+    def _find(self, workspace_key: str, finding_id: str) -> tuple[Workspace, Finding]:
+        ws = self._spaces.get(workspace_key)
+        if ws is None or finding_id not in ws.findings:
+            raise ValueError(f"unknown finding: {finding_id}")
+        return ws, ws.findings[finding_id]
+
+    def _emit_finding(self, action: str, ws: Workspace, f: Finding) -> None:
+        # Full state rides the event: last-writer-wins convergence (§4.1).
+        self._emit(f"finding.{action}", {"workspace": ws.key, **f.to_dict()})
+
+    def add_finding(
+        self,
+        workspace_key: str,
+        *,
+        page_id: str,
+        anchor: dict[str, Any],
+        text: str,
+        kind: str = "concern",
+        blocking: bool = False,
+    ) -> Finding:
+        ws = self._spaces.get(workspace_key)
+        if ws is None:
+            raise ValueError(f"unknown workspace: {workspace_key}")
+        page = ws.pages.get(page_id)
+        if page is None:
+            raise ValueError(f"finding references unknown page: {page_id}")
+        if kind not in ("concern", "question", "nit"):
+            raise ValueError(f"bad finding kind: {kind}")
+        fid = "f-" + secrets.token_hex(4)
+        f = Finding(
+            finding_id=fid,
+            page_id=page_id,
+            rev=page.rev,  # stamped at creation; staleness rides page.rev
+            anchor=dict(anchor),
+            text=text,
+            kind=kind,  # type: ignore[arg-type]
+            blocking=bool(blocking),
+            created_ts=self._now(),
+            updated_ts=self._now(),
+        )
+        ws.findings[fid] = f
+        self._emit_finding("added", ws, f)
+        return f
+
+    def update_finding(
+        self,
+        workspace_key: str,
+        finding_id: str,
+        *,
+        text: str | None = None,
+        kind: str | None = None,
+        blocking: bool | None = None,
+    ) -> Finding:
+        """Human edit of the finding body (never status — that is
+        finding_status / withdraw)."""
+        ws, f = self._find(workspace_key, finding_id)
+        if text is not None:
+            f.text = text
+        if kind is not None:
+            if kind not in ("concern", "question", "nit"):
+                raise ValueError(f"bad finding kind: {kind}")
+            f.kind = kind  # type: ignore[assignment]
+        if blocking is not None:
+            f.blocking = bool(blocking)
+        f.updated_ts = self._now()
+        self._emit_finding("updated", ws, f)
+        return f
+
+    def set_finding_status(
+        self,
+        workspace_key: str,
+        finding_id: str,
+        status: str,
+        *,
+        note: str | None = None,
+        commit: str | None = None,
+        answer: str | None = None,
+        agent: bool = False,
+    ) -> Finding:
+        """Status round-trip. Agents (agent=True) may set only
+        addressed/disputed/wont-fix; the human may also open/withdraw."""
+        ws, f = self._find(workspace_key, finding_id)
+        valid = (
+            AGENT_STATUSES
+            if agent
+            else {"open", "addressed", "disputed", "wont-fix", "withdrawn"}
+        )
+        if status not in valid:
+            raise ValueError(f"status {status!r} not allowed here")
+        f.status = status  # type: ignore[assignment]
+        if note is not None:
+            f.note = note
+        if commit is not None:
+            f.commit = commit
+        if answer is not None:
+            f.answer = answer
+        f.updated_ts = self._now()
+        self._emit_finding("updated", ws, f)
+        return f
+
+    def withdraw_finding(self, workspace_key: str, finding_id: str) -> Finding:
+        return self.set_finding_status(workspace_key, finding_id, "withdrawn")
+
+    def findings_for(
+        self, workspace_key: str, *, open_only: bool = False
+    ) -> list[dict]:
+        ws = self._spaces.get(workspace_key)
+        if ws is None:
+            return []
+        out = [f.to_dict() for f in ws.findings.values()]
+        if open_only:
+            out = [f for f in out if f["status"] == "open"]
+        return out
 
     # ---- snapshot (SPEC-WORKBENCH §9) ---------------------------------------
 

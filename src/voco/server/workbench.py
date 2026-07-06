@@ -54,6 +54,57 @@ def add_workbench_routes(app: web.Application, server: BridgeServer) -> None:
         app.router.add_static("/static/", STATIC_DIR, follow_symlinks=False)
     app.router.add_get("/v1/page/{page_id}", wb.page_content)
     app.router.add_post("/v1/bridge/page", wb.bridge_page)
+    app.router.add_get("/v1/bridge/findings", wb.bridge_findings)
+    app.router.add_post("/v1/bridge/finding_status", wb.bridge_finding_status)
+
+
+def handle_workbench_command(store, cmd: str, payload: dict, *, data_dir):
+    """Workbench control commands (SPEC-WORKBENCH §9) — pure store ops, no
+    audio/tmux. Shared by the daemon's control dispatch and tests. Returns a
+    reply dict, or raises KeyError for a non-workbench command (the caller
+    then tries its own handlers) / ValueError for a bad request."""
+    if cmd == "workspace.list":
+        return {"workspaces": store.snapshot()}
+    if cmd == "page.close":
+        return {"page": store.set_closed(str(payload.get("page_id", "")), True).meta()}
+    if cmd == "page.reopen":
+        return {"page": store.set_closed(str(payload.get("page_id", "")), False).meta()}
+    if cmd == "finding.list":
+        return {"findings": store.findings_for(str(payload.get("workspace", "")))}
+    if cmd == "finding.add":
+        f = store.add_finding(
+            str(payload.get("workspace", "")),
+            page_id=str(payload.get("page_id", "")),
+            anchor=payload.get("anchor") or {},
+            text=str(payload.get("text", "")),
+            kind=str(payload.get("kind", "concern")),
+            blocking=bool(payload.get("blocking", False)),
+        )
+        return {"finding": f.to_dict()}
+    if cmd == "finding.update":
+        f = store.update_finding(
+            str(payload.get("workspace", "")),
+            str(payload.get("finding_id", "")),
+            text=payload.get("text"),
+            kind=payload.get("kind"),
+            blocking=payload.get("blocking"),
+        )
+        return {"finding": f.to_dict()}
+    if cmd == "finding.withdraw":
+        f = store.withdraw_finding(
+            str(payload.get("workspace", "")), str(payload.get("finding_id", ""))
+        )
+        return {"finding": f.to_dict()}
+    if cmd == "review.export":
+        from voco.core.review_export import export_workspace
+
+        return export_workspace(
+            store,
+            str(payload.get("workspace", "")),
+            out=payload.get("out"),
+            data_dir=data_dir,
+        )
+    raise KeyError(cmd)
 
 
 def confined_read(root: str, path: str) -> str:
@@ -113,6 +164,11 @@ class WorkbenchRoutes:
             if "content" in page.data:
                 return {"markdown": page.data["content"]}
             return {"markdown": confined_read(ws.root, page.data["path"])}
+        if page.type == "diff":
+            return {
+                "files": page.data.get("files", []),
+                "source": page.data.get("source"),
+            }
         raise web.HTTPNotImplemented(text=f"page type {page.type} lands later")
 
     # ---- the page bridge verb (SPEC-WORKBENCH §3.2) ---------------------------
@@ -128,13 +184,21 @@ class WorkbenchRoutes:
         s = server._session_or_410(request, body.get("session_id"))
         ws = store.resolve(s.identity)
         type_ = body.get("type")
-        if type_ != "doc":
-            # diff push lands in W1; keep the refusal soft and honest.
-            raise web.HTTPBadRequest(text=f"page type {type_!r} not accepted yet")
+        if type_ not in ("doc", "diff"):
+            raise web.HTTPBadRequest(text=f"page type {type_!r} not accepted")
         if ws.kind == "sessionspace":
             raise web.HTTPBadRequest(
-                text="no repo detected for this session; docs need a workspace"
+                text="no repo for this session; review pages need a workspace"
             )
+        if type_ == "diff":
+            page = await self._push_diff(ws, s, body)
+        else:
+            page = self._push_doc(ws, s, body)
+        return web.json_response({"ok": True, "page_id": page.page_id, "rev": page.rev})
+
+    def _push_doc(self, ws, s, body):
+        store = self._server.workspaces
+        assert store is not None  # bridge_page guarded it
         path = body.get("path")
         if path:
             if s.identity.get("host") != self._host:
@@ -144,12 +208,93 @@ class WorkbenchRoutes:
                     text="remote session: push content instead of a path"
                 )
             confined_read(ws.root, str(path))  # confine + readable, up front
-            page = store.push_doc(ws, name=body.get("name"), path=str(path))
-        else:
-            try:
-                page = store.push_doc(
-                    ws, name=body.get("name"), content=body.get("content")
+            return store.push_doc(ws, name=body.get("name"), path=str(path))
+        try:
+            return store.push_doc(
+                ws, name=body.get("name"), content=body.get("content")
+            )
+        except ValueError as e:
+            raise web.HTTPBadRequest(text=str(e)) from e
+
+    async def _push_diff(self, ws, s, body):
+        import asyncio
+
+        from voco.adapters.diffsource import DiffResolveError, source_ref
+        from voco.core.diff import parse_diff
+
+        store = self._server.workspaces
+        assert store is not None  # bridge_page guarded it
+        content = body.get("content")
+        source = body.get("source")
+        if content is not None:
+            # A raw patch: never live-tracked (no recorded source).
+            ref = body.get("name") or "diff:pasted"
+            diff_text, recorded, title = str(content), None, body.get("name") or "diff"
+        elif isinstance(source, dict):
+            if s.identity.get("host") != self._host:
+                raise web.HTTPBadRequest(
+                    text="remote session: resolve locally and push diff content"
                 )
-            except ValueError as e:
+            if "diff_file" in source:
+                confined_read(ws.root, str(source["diff_file"]))  # confine like docs
+            loop = asyncio.get_running_loop()
+            try:
+                diff_text = await loop.run_in_executor(
+                    None, self._server.diff_resolver.resolve, source, ws.root
+                )
+            except DiffResolveError as e:
                 raise web.HTTPBadRequest(text=str(e)) from e
-        return web.json_response({"ok": True, "page_id": page.page_id, "rev": page.rev})
+            ref, recorded, title = source_ref(source), source, source_ref(source)
+        else:
+            raise web.HTTPBadRequest(text="diff needs `source` or `content`")
+        files = parse_diff(diff_text)
+        return store.upsert_diff(ws, ref=ref, title=title, files=files, source=recorded)
+
+    # ---- findings bridge verbs (SPEC-WORKBENCH §4.1) -------------------------
+
+    async def bridge_findings(self, request: web.Request) -> web.Response:
+        """An agent reads its workspace's ledger. Authorization: a session
+        sees ONLY its own workspace's findings (§4.1)."""
+        server = self._server
+        server._check_origin(request)
+        server._check_auth(request)
+        store = server.workspaces
+        if store is None:
+            raise web.HTTPNotFound(text="workbench disabled")
+        s = server._session_or_410(request, request.query.get("session_id"))
+        ws = store.resolve(s.identity)
+        open_only = request.query.get("pending") in ("1", "true")
+        return web.json_response(
+            {
+                "workspace": ws.key,
+                "findings": store.findings_for(ws.key, open_only=open_only),
+            }
+        )
+
+    async def bridge_finding_status(self, request: web.Request) -> web.Response:
+        """An agent reports a round-trip status (addressed/disputed/wont-fix)."""
+        server = self._server
+        server._check_browser_mutation(request)
+        server._check_auth(request)
+        store = server.workspaces
+        if store is None:
+            raise web.HTTPNotFound(text="workbench disabled")
+        body = await request.json()
+        s = server._session_or_410(request, body.get("session_id"))
+        ws = store.resolve(s.identity)
+        fid = str(body.get("finding_id", ""))
+        if fid not in ws.findings:
+            # A session may only touch its OWN workspace's ledger (§4.1).
+            raise web.HTTPNotFound(text="finding not in this session's workspace")
+        try:
+            f = store.set_finding_status(
+                ws.key,
+                fid,
+                str(body.get("status", "")),
+                note=body.get("note"),
+                commit=body.get("commit"),
+                agent=True,
+            )
+        except ValueError as e:
+            raise web.HTTPBadRequest(text=str(e)) from e
+        return web.json_response({"ok": True, "finding": f.to_dict()})

@@ -68,6 +68,12 @@ class BridgeServer:
         # ours. Required for browser-originated mutations and WS commands.
         self.wb_token = secrets.token_hex(16)
         self._allowed_origins = {o.rstrip("/") for o in (allowed_origins or [])}
+        # Diff resolution runs git/gh in a workspace root (SPEC-WORKBENCH
+        # §3.2); constructed lazily so a review-only daemon with no git in
+        # PATH still boots.
+        from voco.adapters.diffsource import DiffResolver
+
+        self.diff_resolver = DiffResolver()
         # Daemon-owned control commands (mic.set, interrupt, switch...).
         # Async so subprocess-backed commands (tmux/ssh) never block the
         # loop that pumps WS events and listen polls.

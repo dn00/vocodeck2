@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import signal
 import sys
 import time
@@ -38,6 +39,7 @@ from voco.core.router import Routed, Router
 from voco.core.turn import RouteDecision
 from voco.core.workspace import WorkspaceStore
 from voco.server.http import BridgeServer, run_server
+from voco.server.workbench import handle_workbench_command
 
 DEFAULT_CONFIG = Path.home() / ".config" / "voco" / "config.toml"
 
@@ -464,15 +466,20 @@ class Daemon:
             return self._public_config()
         if cmd == "config.set":
             return self._config_set(payload)
-        if cmd == "workspace.list":
-            return {"workspaces": self.workspaces.snapshot()}
-        if cmd == "page.close":
-            page = self.workspaces.set_closed(str(payload.get("page_id", "")), True)
-            return {"page": page.meta()}
-        if cmd == "page.reopen":
-            page = self.workspaces.set_closed(str(payload.get("page_id", "")), False)
-            return {"page": page.meta()}
+        try:
+            return handle_workbench_command(
+                self.workspaces, cmd, payload, data_dir=self._workspace_data_dir()
+            )
+        except KeyError:
+            pass  # not a workbench command; fall through
         raise ValueError(f"unknown command {cmd!r}")
+
+    def _workspace_data_dir(self) -> Path:
+        base = self.cfg.get("workbench", {}).get("data_dir")
+        if base:
+            return Path(base)
+        env = os.environ.get("VOCO_DATA_DIR")
+        return Path(env) if env else Path.home() / ".local" / "share" / "voco"
 
     # Keys that take effect immediately; everything else persists and is
     # honestly reported restart_required (a wrong "applied" is worse).

@@ -8,6 +8,8 @@
 import { Store } from "./store.mjs";
 import { connectBus } from "./bus.mjs";
 import { renderMarkdown } from "./markdown.mjs";
+import { renderDiff } from "./diff.mjs";
+import { renderFindings } from "./findings.mjs";
 
 const store = new Store();
 const bus = connectBus(store);
@@ -157,8 +159,32 @@ async function renderPage(view, page) {
     }
     return;
   }
+  if (page.type === "diff") {
+    view.textContent = "…";
+    try {
+      const c = await fetchContent(page.page_id, page.rev);
+      view.replaceChildren();
+      renderDiff(view, c, {
+        findings: store.findingsFor(store.selectedWorkspace || "")
+          .filter((f) => f.page_id === page.page_id),
+        onAnnotate: (anchor, text, kind) => addFinding(page, anchor, text, kind),
+      });
+    } catch (e) {
+      view.textContent = "could not load: " + (e instanceof Error ? e.message : e);
+    }
+    return;
+  }
   view.classList.add("empty");
   view.textContent = `${page.type} pages arrive in a later slice`;
+}
+
+async function addFinding(page, anchor, text, kind) {
+  try {
+    await bus.command("finding.add", {
+      workspace: store.selectedWorkspace, page_id: page.page_id,
+      anchor, text, kind,
+    });
+  } catch (e) { console.error("finding.add", e); }
 }
 
 async function closePage(p) {
@@ -166,14 +192,60 @@ async function closePage(p) {
   catch (e) { console.error(e); }
 }
 
-// ---- dock: chat + findings (placeholders until W1/W2) -----------------------
+// ---- dock: findings list (chat lands in W2) ---------------------------------
 function renderDock() {
-  dock.replaceChildren(
-    h("div", { class: "dock-tabs" },
-      h("div", { class: "dock-tab on" }, "findings"),
-      h("div", { class: "dock-tab" }, "chat")),
-    h("div", { class: "dock-body" },
-      h("div", { class: "empty-note" }, "findings & chat arrive in W1–W2")));
+  dock.replaceChildren();
+  dock.append(h("div", { class: "dock-tabs" },
+    h("div", { class: "dock-tab on" }, "findings"),
+    h("div", { class: "dock-tab", onclick: () => exportReview() }, "export")));
+  const body = h("div", { class: "dock-body" });
+  dock.append(body);
+  const wsKey = store.selectedWorkspace || "";
+  renderFindings(body, store.findingsFor(wsKey), {
+    onWithdraw: async (id) => {
+      try { await bus.command("finding.withdraw", { workspace: wsKey, finding_id: id }); }
+      catch (e) { console.error(e); }
+    },
+    onReveal: (f) => revealFinding(f),
+  });
+}
+
+function revealFinding(f) {
+  const ws = store.selectedWs();
+  if (ws && f.page_id !== store.selectedPage) store.selectPage(f.page_id);
+  // After the view renders, scroll the anchored line into view.
+  requestAnimationFrame(() => {
+    const a = f.anchor || {};
+    const sel = `.drow[data-file="${cssEscape(a.file)}"][data-side="${a.side}"][data-line="${a.startLine}"]`;
+    const row = editor.querySelector(sel);
+    if (row) { row.scrollIntoView({ block: "center" }); row.classList.add("blink"); }
+  });
+}
+const cssEscape = (s) => String(s).replace(/["\\]/g, "\\$&");
+
+async function exportReview() {
+  try {
+    const r = await bus.command("review.export", { workspace: store.selectedWorkspace });
+    toast(`exported ${r.count} finding(s) → ${r.out}`);
+  } catch (e) { toast("export failed: " + (e instanceof Error ? e.message : e)); }
+}
+
+function toast(msg) {
+  const t = h("div", { class: "toast-msg" }, msg);
+  document.body.append(t);
+  setTimeout(() => t.remove(), 4000);
+}
+
+// Fetch full findings when a workspace is selected (snapshot carries counts).
+async function loadFindings(wsKey) {
+  if (!wsKey || store.findings.has(wsKey)) return;
+  try {
+    const r = await bus.command("finding.list", { workspace: wsKey });
+    const m = new Map();
+    for (const f of r.findings || []) m.set(f.finding_id, f);
+    store.findings.set(wsKey, m);
+    store._notify("findings");
+  } catch (e) { /* not connected yet; a later event fills it */ }
 }
 
 // ---- status bar -------------------------------------------------------------
@@ -194,9 +266,16 @@ const stItem = (k, v) => h("span", { class: "st-item" },
 // ---- wire subscriptions -----------------------------------------------------
 store.subscribe("workspaces", renderRail);
 store.subscribe("sessions", renderRail);
-store.subscribe("selection", () => { renderRail(); renderEditor(); });
+store.subscribe("selection", () => {
+  renderRail(); renderEditor(); renderDock();
+  loadFindings(store.selectedWorkspace || "");
+});
+store.subscribe("findings", () => { renderDock(); renderEditor(); });
 store.subscribe("mic", renderStatus);
-store.subscribe("conn", renderStatus);
+store.subscribe("conn", () => {
+  renderStatus();
+  if (store.connected) loadFindings(store.selectedWorkspace || "");
+});
 store.subscribe("ticker", renderStatus);
 
 renderRail(); renderEditor(); renderDock(); renderStatus();

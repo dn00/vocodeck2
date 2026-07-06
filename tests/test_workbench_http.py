@@ -11,6 +11,7 @@ from voco.core.events import EventBus
 from voco.core.registry import Registry
 from voco.core.workspace import WorkspaceStore
 from voco.server.http import BridgeServer
+from voco.server.workbench import handle_workbench_command
 
 HOST = socket.gethostname().split(".")[0]
 
@@ -20,12 +21,20 @@ async def client(tmp_path):
     bus = EventBus()
     registry = Registry(emit=bus.emit)
     store = WorkspaceStore(emit=bus.emit)
+
+    async def control(cmd, payload):
+        try:
+            return handle_workbench_command(store, cmd, payload, data_dir=tmp_path)
+        except KeyError:
+            raise ValueError(f"unknown command {cmd!r}") from None
+
     server = BridgeServer(
         registry,
         bus,
         listen_slice_s=0.5,
         workspaces=store,
         allowed_origins=["https://proxy.example"],
+        on_control=control,
     )
     c = TestClient(TestServer(server.build_app()))
     await c.start_server()
@@ -186,6 +195,115 @@ async def test_symlink_escape_fails_on_read(client):
     inside.unlink()
     inside.symlink_to("/etc/hostname")
     resp = await client.get(f"/v1/page/{page_id}")
+    assert resp.status == 404
+
+
+async def test_diff_push_content_parses_and_serves(client):
+    sid = await register(client)
+    patch = (
+        "diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n"
+        "@@ -1,2 +1,2 @@\n import os\n-x=1\n+x=2\n"
+    )
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "diff", "content": patch, "name": "wip"},
+    )
+    body = await resp.json()
+    assert body["ok"] is True
+    resp = await client.get(f"/v1/page/{body['page_id']}")
+    files = (await resp.json())["content"]["files"]
+    assert files[0]["path"] == "f.py"
+    kinds = [r["kind"] for r in files[0]["hunks"][0]["rows"]]
+    assert kinds == ["context", "del", "add"]
+
+
+async def test_finding_round_trip_add_then_agent_status(client):
+    sid = await register(client)
+    patch = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n"
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "diff", "content": patch, "name": "d"},
+    )
+    page_id = (await resp.json())["page_id"]
+    ws_key = client.store.resolve(
+        {"host": HOST, "worktree": str(client.repo), "cwd": str(client.repo)}
+    ).key
+    # human adds a finding via control (workbench origin + wb)
+    wb = client.server_obj.wb_token
+    add = await client.post(
+        "/v1/control/finding.add",
+        json={
+            "workspace": ws_key,
+            "page_id": page_id,
+            "anchor": {"file": "f", "side": "new", "startLine": 1, "endLine": 1},
+            "text": "why b?",
+            "kind": "question",
+        },
+        headers={"Origin": "http://127.0.0.1:7777", "x-voco-wb": wb},
+    )
+    fid = (await add.json())["finding"]["finding_id"]
+    # agent lists pending
+    resp = await client.get(f"/v1/bridge/findings?session_id={sid}&pending=1")
+    findings = (await resp.json())["findings"]
+    assert len(findings) == 1 and findings[0]["finding_id"] == fid
+    # agent marks addressed
+    resp = await client.post(
+        "/v1/bridge/finding_status",
+        json={
+            "session_id": sid,
+            "finding_id": fid,
+            "status": "addressed",
+            "commit": "deadbeef",
+        },
+    )
+    assert (await resp.json())["finding"]["status"] == "addressed"
+    # agent cannot withdraw
+    resp = await client.post(
+        "/v1/bridge/finding_status",
+        json={"session_id": sid, "finding_id": fid, "status": "withdrawn"},
+    )
+    assert resp.status == 400
+
+
+async def test_finding_status_confined_to_own_workspace(client, tmp_path_factory):
+    sid = await register(client)
+    # another session in a different repo
+    other = tmp_path_factory.mktemp("other")
+    oident = {
+        **ident(client.repo),
+        "cwd": str(other),
+        "worktree": str(other),
+        "repo": "other",
+    }
+    resp = await client.post("/v1/bridge/register", json=oident)
+    osid = (await resp.json())["session_id"]
+    # finding in client.repo's workspace
+    patch = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n"
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "diff", "content": patch, "name": "d"},
+    )
+    page_id = (await resp.json())["page_id"]
+    ws_key = client.store.resolve(
+        {"host": HOST, "worktree": str(client.repo), "cwd": str(client.repo)}
+    ).key
+    wb = client.server_obj.wb_token
+    add = await client.post(
+        "/v1/control/finding.add",
+        json={
+            "workspace": ws_key,
+            "page_id": page_id,
+            "anchor": {"file": "f"},
+            "text": "x",
+        },
+        headers={"Origin": "http://127.0.0.1:7777", "x-voco-wb": wb},
+    )
+    fid = (await add.json())["finding"]["finding_id"]
+    # the OTHER session cannot touch it
+    resp = await client.post(
+        "/v1/bridge/finding_status",
+        json={"session_id": osid, "finding_id": fid, "status": "addressed"},
+    )
     assert resp.status == 404
 
 

@@ -82,6 +82,7 @@ COMMAND_TYPES = {
     "workspace.list",
     "page.close",
     "page.reopen",
+    "finding.list",
     "finding.add",
     "finding.update",
     "finding.withdraw",

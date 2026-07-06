@@ -14,12 +14,14 @@
  *   state:string, display_state?:DisplayState, unread_digest:number}} Session
  */
 
-/** @typedef {"workspaces"|"sessions"|"selection"|"mic"|"conn"|"ticker"} Kind */
+/** @typedef {"workspaces"|"sessions"|"selection"|"mic"|"conn"|"ticker"|"findings"} Kind */
 
 export class Store {
   constructor() {
     /** @type {Map<string, Workspace>} */ this.workspaces = new Map();
     /** @type {Map<string, Session>} */ this.sessions = new Map();
+    // findings keyed by workspace key -> Map<finding_id, finding>
+    /** @type {Map<string, Map<string, any>>} */ this.findings = new Map();
     this.activeSession = /** @type {?string} */ (null);
     this.selectedWorkspace = /** @type {?string} */ (null);
     this.selectedPage = /** @type {?string} */ (null);
@@ -27,6 +29,12 @@ export class Store {
     this.connected = false;
     this.ticker = "";
     /** @type {Map<Kind, Set<Function>>} */ this._subs = new Map();
+  }
+
+  /** @param {string} wsKey @returns {any[]} */
+  findingsFor(wsKey) {
+    const m = this.findings.get(wsKey);
+    return m ? [...m.values()] : [];
   }
 
   /** @param {Kind} kind @param {Function} fn @returns {() => void} */
@@ -76,6 +84,16 @@ export class Store {
       case "page.updated": {
         this._applyPage(p);
         this._notify("workspaces", "selection");
+        break;
+      }
+      case "finding.added":
+      case "finding.updated": {
+        // Full state rides every finding event (last-writer-wins, §4.1).
+        const key = p.workspace;
+        if (!this.findings.has(key)) this.findings.set(key, new Map());
+        /** @type {Map<string, any>} */ (this.findings.get(key))
+          .set(p.finding_id, p);
+        this._notify("findings");
         break;
       }
       case "screen.updated": break; // page.updated carries the same for us

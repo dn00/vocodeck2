@@ -71,6 +71,7 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 - `config.get`
 - `config.set`
 - `finding.add`
+- `finding.list`
 - `finding.update`
 - `finding.withdraw`
 - `interrupt`

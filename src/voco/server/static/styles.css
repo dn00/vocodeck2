@@ -144,3 +144,66 @@ body {
 .banner { background: var(--bad); color: #fff; padding: 6px 12px;
   font-size: 12px; text-align: center; }
 .hidden { display: none !important; }
+
+/* ---- diff view (W1) ------------------------------------------------------- */
+.diff { font-size: 12.5px; }
+.diff-file { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px;
+  position: sticky; top: 0; background: var(--bg); padding: 4px 0; z-index: 1; }
+.diff-path { color: var(--fg); font-weight: 600; }
+.diff-tag { font-size: 10px; padding: 0 5px; border-radius: 3px; }
+.diff-tag.add { background: rgba(63,185,80,.18); color: var(--ok); }
+.diff-tag.del { background: rgba(248,81,73,.18); color: var(--bad); }
+.diff-hunks { border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
+.hunk-head { background: var(--bg-tab); color: var(--fg-dim); padding: 2px 10px;
+  font-size: 11px; border-bottom: 1px solid var(--border); }
+.drow { display: grid; grid-template-columns: 44px 44px 14px 1fr; cursor: pointer;
+  white-space: pre; }
+.drow:hover { background: var(--bg-tab); }
+.drow .gutter { color: var(--fg-faint); text-align: right; padding-right: 6px;
+  user-select: none; font-size: 11px; }
+.drow .sign { text-align: center; user-select: none; }
+.drow .code { overflow-x: auto; }
+.drow.add { background: rgba(63,185,80,.08); } .drow.add .sign { color: var(--ok); }
+.drow.del { background: rgba(248,81,73,.08); } .drow.del .sign { color: var(--bad); }
+.drow.flagged { box-shadow: inset 3px 0 0 var(--warn); }
+.drow.blink { animation: blink 1s ease 2; }
+@keyframes blink { 50% { background: rgba(74,158,255,.28); } }
+
+.annot-editor { background: var(--bg-panel); border: 1px solid var(--border-bright);
+  border-radius: 5px; margin: 4px 8px; padding: 6px; }
+.annot-row { display: flex; gap: 6px; margin-bottom: 5px; }
+.annot-input { width: 100%; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 4px; font: inherit; padding: 5px; }
+.annot-kind { background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 4px; }
+.btn { background: var(--accent-dim); color: #fff; border: none; border-radius: 4px;
+  padding: 3px 10px; cursor: pointer; font: inherit; }
+.btn:hover { background: var(--accent); }
+.btn.ghost { background: transparent; color: var(--fg-dim);
+  border: 1px solid var(--border); }
+.btn.sm { padding: 1px 7px; font-size: 11px; }
+
+/* ---- findings dock (W1) --------------------------------------------------- */
+.finding { border: 1px solid var(--border); border-radius: 5px; padding: 7px 8px;
+  margin-bottom: 7px; background: var(--bg); }
+.finding-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.finding-kind { font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--fg-dim); }
+.kind-question .finding-kind { color: var(--accent); }
+.kind-nit .finding-kind { color: var(--fg-faint); }
+.finding-blocking { font-size: 10px; color: var(--bad);
+  border: 1px solid var(--bad); border-radius: 3px; padding: 0 4px; }
+.finding-status { margin-left: auto; font-size: 10px; padding: 0 6px;
+  border-radius: 8px; background: var(--bg-tab); color: var(--fg-dim); }
+.finding-status.s-addressed { background: rgba(63,185,80,.2); color: var(--ok); }
+.finding-status.s-disputed { background: rgba(210,153,34,.2); color: var(--warn); }
+.finding-status.s-wont-fix { background: var(--bg-tab); color: var(--fg-faint); }
+.finding-loc { color: var(--accent); font-size: 11px; cursor: pointer; }
+.finding-loc:hover { text-decoration: underline; }
+.finding-text { margin: 3px 0; }
+.finding-note, .finding-answer { font-size: 11px; color: var(--fg-dim);
+  border-left: 2px solid var(--border-bright); padding-left: 6px; margin-top: 3px; }
+.finding-actions { display: flex; justify-content: flex-end; margin-top: 4px; }
+.toast-msg { position: fixed; bottom: 34px; left: 50%; transform: translateX(-50%);
+  background: var(--bg-panel); border: 1px solid var(--border-bright); color: var(--fg);
+  padding: 8px 14px; border-radius: 6px; z-index: 100; max-width: 70vw; }
