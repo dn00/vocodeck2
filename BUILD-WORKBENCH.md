@@ -62,6 +62,114 @@ model first, or hold the task until it can be. The §8.5 auth here was
 authored under exactly the fallback we now want to avoid — hence the
 Fable review request above.
 
+## Fable review (2026-07-06) — the Opus-authored security surface
+
+Reviewed by a Fable-5-native session per the plan above: §8.5 auth
+(`server/http.py`), `confined_read` + page/diff routes
+(`server/workbench.py`), diff resolution (`adapters/diffsource.py`),
+manifest + lock (`adapters/manifest.py`), plus the supporting store
+(`core/workspace.py`), export (`core/review_export.py`), client token
+flow (`static/bus.mjs`, `static/app.mjs`), and daemon wiring.
+
+**Verdict: the architecture holds — no file warrants a rewrite.** The
+layered design (Origin discipline → per-run wb token → optional bearer;
+fd-based confinement; argv-only resolution with shape gates; O_EXCL
+lock) is what I would have built. All **11 Codex fixes verified
+present** in the code (checked each against its fix site — events-WS
+read gate http.py:359, fd-based `confined_read` workbench.py:141,
+confined diff_file content used workbench.py:278, O_EXCL lock
+manifest.py:69, withdrawn-finding guard workspace.py:554,
+`origin/main` kept diffsource.py:63, injection guards diffsource.py:41/83/98,
+MAX_DIFF_BYTES workbench.py:264, quoted-path deferral noted diff.py:100,
+connect-src 'self' http.py:183). Verified-correct details worth naming:
+`Origin: null` is rejected (urlsplit hostname → None), session_ids are
+128-bit capabilities, the workbench client already sends `x-voco-wb` on
+page fetches, `follow_symlinks=False` on static.
+
+### Deferred security fixes (found in review; NOT implemented — policy:
+### no security authoring while silent model fallback is possible)
+
+Ordered by severity. Each is specified so any confirmed-on-model session
+can implement without re-deriving.
+
+1. **`GET /v1/page/{page_id}` is completely ungated** (workbench.py
+   `page_content`) — no `_check_origin`, no `_check_auth`, no wb check,
+   and page ids are sequential (`pg-1`, `pg-2`…). On a bearer-configured
+   shared host any local user can read proprietary doc/diff/screen
+   content, and the response leaks `session_id`s (page.meta()), which
+   are capability tokens (chains into listen-stealing). Inconsistent
+   with Codex BLOCKER 1's own rationale: the snapshot (metadata) is
+   gated on browser WS reads while full page *content* is open. FIX:
+   `_check_origin` + `_check_auth` + wb-required-for-browser-origin
+   (same shape as `_events_ws`). Client compat: `app.mjs` already sends
+   `x-voco-wb`; the debug UI does not fetch `/v1/page`. Add tests:
+   foreign origin 403, loopback-origin-no-wb 403, no-Origin+bearer ok.
+2. **No `frame-ancestors` in the CSP** (http.py `html_response`) —
+   `default-src` does NOT cover framing, so a hostile page can iframe
+   `http://127.0.0.1:7777/` and clickjack the workbench (finding
+   mutations now; typed terminal input at W4). FIX: append
+   `; frame-ancestors 'none'` to the CSP and set
+   `X-Frame-Options: DENY` on `html_response`.
+3. **Manifest lock takeover race** (manifest.py `acquire`) — takeover
+   unlinks a stale lock by *path*: daemon A can pass the liveness check,
+   then unlink the FRESH lock daemon B just created in the window, and
+   both win. FIX (keeps the spec's O_EXCL+nonce design): atomic-rename
+   takeover — `os.rename(lock, lock.with-suffix(f".takeover-{pid}")`;
+   only one renamer wins; winner unlinks the renamed file and loops to
+   the O_EXCL create; `FileNotFoundError` on rename → lost the race →
+   loop. (Alternative architecture if ever revisited on-model: `flock`
+   on a persistent file — kernel-exclusive, auto-released on death,
+   deletes the whole pid/nonce machinery; POSIX-only, so it needs the
+   current scheme as the Windows fallback. Not required — the rename fix
+   is sufficient and spec-shaped.)
+4. **Data-dir/file permission gaps vs spec §8** ("data dir 0700, files
+   0600"): (a) `manifest.acquire`/`save` `mkdir` without `mode=0o700`
+   (default 0755-umask) — dir listing leaks workspace keys = repo paths;
+   (b) `review_export._atomic_write` writes tmp with default perms
+   (0644-umask) and chmods 0600 only AFTER `os.replace` — a
+   world-readable window for proprietary review JSON on shared hosts.
+   FIX: `mkdir(mode=0o700)` (+ one-time `chmod` of pre-existing dirs at
+   acquire), and write exports via `os.open(..., 0o600)` like
+   `manifest.save` (drop the after-the-fact chmod).
+5. **`confined_read` residual symlink race** (workbench.py) —
+   `O_NOFOLLOW` covers only the FINAL component; an intermediate dir
+   swapped to a symlink between `resolve()` and `open()` escapes root
+   once. Attacker needs write access inside the workspace root, so low.
+   FIX (portable, ~6 lines): after `fstat(fd)`, re-`resolve()` the base
+   path and re-check containment, and compare `(st_dev, st_ino)` of
+   `os.lstat(re-resolved)` against the fd's fstat — mismatch → 404.
+   (Hard links inside root remain readable — inherent to any
+   path-confinement, not a defect. openat2/RESOLVE_BENEATH or a
+   dir_fd component walk is the exact fix if ever needed; Linux-only.)
+6. **Timing-unsafe token comparisons** (http.py:129/133/157) — bearer
+   and wb tokens compared with `==`. FIX: `secrets.compare_digest`
+   (guard the None/str types first). Low (loopback + HTTP jitter), cheap.
+7. **`DiffResolver.resolve` still carries an unconfined `diff_file`
+   open** (diffsource.py:104) — dead code from the route (BLOCKER 3
+   fixed at the call site), but a future caller re-opens the hole
+   silently. FIX: delete the branch; raise
+   `DiffResolveError("diff_file is resolved by the caller (confined)")`.
+8. **Resolved diffs are uncapped + subprocess timeout unmapped**
+   (diffsource.py) — `MAX_DIFF_BYTES` caps only *pasted* content; a
+   giant `git diff`/`gh pr diff` output OOMs the daemon
+   (`capture_output` buffers all of it), and `subprocess.TimeoutExpired`
+   escapes as a raw 500. FIX: length-check resolver output against
+   MAX_DIFF_BYTES (raise DiffResolveError naming the cap), catch
+   TimeoutExpired → DiffResolveError.
+9. **Manifest save lacks fsync** (manifest.py `save`) — crash after
+   `replace` but before writeback can land an empty/truncated
+   manifest; `load_all` then silently skips it = lost review data.
+   FIX: `fh.flush()` + `os.fsync(fd)` before the replace. (Durability,
+   not confidentiality — kept on this list because it's the same file.)
+
+Notes, no action needed: wb token rides `?wb=` on the WS URL (spec said
+subprotocol; query is fine on loopback — aiohttp doesn't log URLs by
+default, WS URLs don't enter history); bearer accepted via `?token=` on
+non-WS routes too (same reasoning); binary sniff checks only the first
+8 KiB (rendering nuisance at worst); `html_response` replaces
+`{{nonce}}` body-wide — fine while only server-authored HTML flows
+through it, worth an invariant comment when next edited on-model.
+
 ## Working rules (carried from BUILD.md, 2026-07-03)
 
 - No subagents; build in the main session.
@@ -145,9 +253,16 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
 - [ ] **W5 — rev/staleness depth**: inter-diff, since-rev banner, stale
       chips, live-git tracker.
 
-## RESUME HERE (checkpoint 2026-07-06, mid-session model switch)
+## RESUME HERE (updated 2026-07-06, Fable session)
 
-State of the uncommitted checkpoint that this commit captures:
+- Security review of the Opus-authored surface: **DONE** (see "Fable
+  review" above). Architecture confirmed; 9 fixes deferred to that list
+  per the security-defer policy (user, 2026-07-06: note, don't author).
+- Now executing: **W2 (the wake)** — tests + MCP tools + client panel +
+  discipline text (list below). Then /xai review of the W2 diff, then
+  W3. Commit + push at milestone edges; journal mid-milestone.
+
+State of the checkpoint captured by commit `c6aa94d`:
 
 **DONE + VERIFIED (green: 207 tests, mypy, ruff, tsc all clean):**
 - W0 + W1 shipped in prior commits (see journal).
