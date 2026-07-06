@@ -365,6 +365,21 @@ Fix class for next session:
 
 ## Journal
 
+- **2026-07-06 (design rev 3.1 — agent live captions, one REVIEW home,
+  herdr borrows)** — Three more user notes folded in: (1) the speaking
+  agent now gets the same live-caption treatment the user gets —
+  current sentence in the strip, FULL ⌄ card with the whole response
+  karaoke-highlighted (dim said / highlight hearing / faint queued),
+  STOP cuts the rest; drivable today (sentence-wise TTS + agent.say +
+  enriched speech.started). (2) REVIEW button de-duplicated: repo group
+  header ONLY (work-header ⊕ removed) — one concept, one home. (3)
+  herdr reviewed (README only, concepts only per AGPL/SPEC decision 7):
+  adopted state-count aggregation in the status line and blocked-is-
+  loud attention-first rail ordering (U1); real terminals/detach-
+  survival/scriptable API we already have; its arrangement model stays
+  parked. Confirmed to the user worktrees are fully supported (W3).
+  Artifact re-published, same URL. Rev tracking: rev 3 targeted the
+  70-80% ask.
 - **2026-07-06 (design rev 3 — brutalism, transcript, rail tree; user at
   "50-60%", aiming 70-80%)** — Next redline batch, all folded into
   DESIGN-DECK.md rev 3 + mockup: tech-brutalist skin (zero

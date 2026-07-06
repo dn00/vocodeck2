@@ -117,6 +117,12 @@
     background: var(--m-panel); border: 1px solid var(--m-line); border-top: 2px solid var(--m-voice);
     padding: 12px 16px; z-index: 24; }
   .deck[data-live="routed"] .utter.open { display: block; }
+  /* the agent's live caption card — same pattern, agent color, karaoke highlight */
+  .utter.say { left: auto; right: 120px; border-top-color: var(--m-agent); }
+  .deck[data-live="speaking"] .utter.say.open { display: block; }
+  .say .said { color: var(--m-dim); }
+  .say .saying { background: rgba(87,168,255,.2); color: var(--m-fg); padding: 0 2px; }
+  .say .tosay { color: var(--m-faint); }
   .utter .uhead { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
   .utter .utext { font: 12.5px/1.65 var(--mono); color: var(--m-fg); white-space: pre-wrap; }
   .utter .ufoot { font-size: 10.5px; color: var(--m-faint); margin-top: 9px; }
@@ -444,6 +450,27 @@
       its terminal becomes a page), <b>Review a diff</b> (agentless), <b>Open a repo</b>. CLI one-liners live
       behind "connect →" for people who already run a session — an affordance you ask for, not a cheat-sheet
       you're greeted with.</td></tr>
+    <tr><td>Live caption for the speaking agent, like the user gets</td>
+      <td class="verdict">Symmetry restored: the speaking slot shows the sentence being voiced <b>now</b>, and
+      FULL ⌄ drops the whole response <b>karaoke-highlighted</b> — dim = already said, highlight = hearing now,
+      faint = still queued. ■ STOP cuts the queued rest. Drivable today: TTS already plays sentence-by-sentence
+      (<code>agent.say</code> carries the full text; enriched <code>speech.started</code> marks each sentence).</td></tr>
+    <tr><td>Why a REVIEW button everywhere?</td>
+      <td class="verdict">Over-affordance — fixed. Review is repo-scoped, so the button lives in exactly one
+      place: the repo group header. The work-header ⊕ is gone; first-run's "Review a diff" stays (it IS the
+      landing affordance). One concept, one home.</td></tr>
+    <tr><td>Do we support worktrees?</td>
+      <td class="verdict">Yes — shipped in W3, first-class: spawn into a fresh sibling worktree
+      (<code>&lt;repo&gt;-&lt;branch&gt;</code>), clean worktrees reaped on kill, <b>dirty ones never deleted</b>;
+      the rail already folds siblings into one repo group via <code>common_dir</code> (Orion above lives in the
+      <code>fix-pty</code> worktree), and the spawn modal's worktree field rides the same machinery.</td></tr>
+    <tr><td>Borrow from herdr</td>
+      <td class="verdict">Read it (concepts only — AGPL, per SPEC decision 7). Adopted: <b>state-at-a-glance
+      aggregation</b> (status line now counts <span class="small">1 WORKING · 1 LISTENING · 0 BLOCKED</span>)
+      and <b>blocked as a loud state</b> — blocked/asking agents sort to the TOP of the rail
+      (attention-first ordering, U1). Already ours: real terminals (W4), detach/reattach survival (tmux),
+      agent-scriptable control API. Its workspace/tab/pane arrangement stays parked with custom grouping
+      (SPEC decision 20).</td></tr>
   </table>
 
   <h2>The mockup — rev 3</h2>
@@ -455,7 +482,7 @@
     <button class="scn" data-s="routed" data-live="routed" data-dock="transcript"
       data-note="A long prompt, routed. One line + [ FULL ] in the strip; the complete utterance in the drop card; the permanent record in TRANSCRIPT (right) — a radio log, not a messenger.">Routed (long)</button>
     <button class="scn" data-s="speaking" data-live="speaking" data-dock="transcript"
-      data-note="Freya speaks: name + sentence + STOP in the strip, halo on her rail row, the sentence lands in the transcript. Click the slot to jump to the speaker.">Agent speaking</button>
+      data-note="Freya speaks — and you get the same live caption you get: the strip shows the sentence being voiced NOW; FULL ⌄ drops the whole response, karaoke-highlighted (dim = said, highlight = hearing, faint = queued). ■ STOP cuts the rest. Halo on her rail row; the record lands in TRANSCRIPT.">Agent speaking</button>
     <button class="scn" data-s="terminal" data-live="quiet" data-dock="review"
       data-note="Freya's terminal page — the W4 machinery, surfaced: pty pages stream over the /v1/term WS (xterm.js, ring replay on attach, interactive on focus); tmux pages mirror via peek with a say-as-user input row. It's just another page in her tree.">Terminal</button>
     <button class="scn" data-s="picker" data-live="quiet" data-dock="review"
@@ -489,7 +516,8 @@
       <div class="speaking" title="click to jump to the speaker">
         <span class="eq"><i></i><i></i><i></i></span>
         <span class="speak-who">Freya</span>
-        <span class="speak-text">“Ledger walked; two items were already stale. Gates are green.”</span>
+        <span class="speak-text">“Gates are green — 316 tests, mypy, ruff, tsc.”</span>
+        <button class="cap-more" id="say-more">FULL ⌄</button>
         <button class="stopbtn">■ STOP</button>
       </div>
       <div class="pctl">
@@ -504,6 +532,14 @@
       <div class="uhead"><span class="mlabel">you · 14:06:02 · voice</span><span class="route-chip">→ FREYA</span></div>
       <div class="utext">“okay the strip works but when I speak a long prompt like this one — walk the whole findings ledger, address everything that's still open, re-run the full gate set, and if the interdiff flags presence.mjs again re-push the branch diff so I can do another pass — I need to see that the deck actually heard all of it”</div>
       <div class="ufoot">also in <b>TRANSCRIPT</b> — the strip is the moment, the transcript is the record</div>
+    </div>
+
+    <!-- agent live caption: the whole response, karaoke-highlighted as TTS speaks it -->
+    <div class="utter say open" id="say-card">
+      <div class="uhead"><span class="mlabel">freya · 14:08:19 · speaking aloud</span>
+        <button class="stopbtn" style="margin-left:auto">■ STOP</button></div>
+      <div class="utext"><span class="said">Heard all of it. Ledger walked: f-2b77 was already addressed in 5a43f29, f-3ac1 is real and I've queued the fix.</span> <span class="saying">Gates are green — 316 tests, mypy, ruff, tsc.</span> <span class="tosay">The interdiff still flags presence.mjs, so I re-pushed the branch diff as r3 — the since-rev banner marks what moved.</span></div>
+      <div class="ufoot">spoken sentence by sentence — <b>the highlight is what you're hearing right now</b>; ■ STOP cuts the rest, dim text was already said, faint text is still queued</div>
     </div>
 
     <!-- body -->
@@ -561,7 +597,6 @@
             <button class="whbtn diffonly" id="expand-all">expand all</button>
             <span class="mtag termonly" style="color:var(--m-ok);border-color:var(--m-ok)">live · ring replay</span>
             <button class="whbtn termonly" style="color:var(--m-bad);border-color:var(--m-bad)">kill</button>
-            <button class="whbtn acc" data-open-picker>⊕ review</button>
           </div>
         </div>
         <div class="view">
@@ -725,7 +760,7 @@
       <span class="st attn"><b>wake</b> · full duplex</span>
       <span class="st">live-git 5s</span>
       <span class="st spacer"></span>
-      <span class="st">2 agents</span>
+      <span class="st"><b style="color:var(--m-warn)">1 working</b> · 1 listening · 0 blocked</span>
       <span class="st">1 open finding</span>
       <span class="st">exported 14:12</span>
     </div>
@@ -927,9 +962,13 @@
     expandBtn.textContent = anyClosed ? 'collapse all' : 'expand all';
   });
 
-  // long-utterance card toggle
+  // long-utterance card toggles (yours + the agent's)
   document.getElementById('cap-more').addEventListener('click', () =>
     document.getElementById('utter').classList.toggle('open'));
+  document.getElementById('say-more').addEventListener('click', e => {
+    e.stopPropagation();
+    document.getElementById('say-card').classList.toggle('open');
+  });
 
   // one-input demo
   const input = document.getElementById('deck-input');

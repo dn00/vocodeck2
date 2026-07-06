@@ -60,6 +60,25 @@ bordered buttons, no washes, no soft shadows, no border-radius.
    worktree, tmux/pty backend), **Review a diff** (agentless), **Open a
    repo**. CLI one-liners live behind a "connect →" modal for people
    who already run sessions (voice_init / voco listen / mcp add).
+10. **Live caption for the speaking agent** (rev 3.1) → symmetry with
+   the user's captions: the speaking slot shows the sentence being
+   voiced NOW; FULL ⌄ drops the whole response karaoke-highlighted
+   (dim = said, highlight = hearing, faint = queued); ■ STOP cuts the
+   rest. Drivable today: TTS plays sentence-by-sentence, `agent.say`
+   carries full text, enriched `speech.started` marks each sentence.
+11. **REVIEW button everywhere** (rev 3.1) → over-affordance fixed:
+   review is repo-scoped, so the button lives ONLY on the repo group
+   header (first-run's "Review a diff" stays — it is the landing).
+   Work-header ⊕ removed.
+12. **herdr borrows** (rev 3.1; concepts only — AGPL, SPEC decision 7)
+   → adopted: state-at-a-glance aggregation (status line counts
+   `1 working · 1 listening · 0 blocked`) and blocked-is-loud —
+   blocked/asking agents sort to the TOP of the rail (attention-first
+   ordering, lands in U1). Already ours: real terminals, tmux
+   detach/reattach survival, agent-scriptable control API. Its
+   workspace/tab/pane arrangement stays parked with custom grouping.
+   Worktrees: confirmed supported since W3 (sibling worktree spawn,
+   dirty trees never deleted, common_dir rail grouping).
 
 ## Zones (rev 3)
 
