@@ -262,6 +262,30 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
 
 ## Journal
 
+- **2026-07-06 (product pass — agent-centric UI, user-driven redesign)** —
+  Live use verdict: "worse debug page, unusable". Audit traced four
+  roots: (1) resumed harness sessions mint a NEW identity (instance =
+  harness session id) — the old session lingered as a grey corpse and
+  often still held voice-active, hijacking ask routing; (2) election
+  rule 1 trusted "active" with no liveness check; (3) the operator
+  affordances (activate/detach/mic controls/transcript log/say box)
+  never made it over from the debug UI; (4) empty states assumed pages
+  exist. User set the model (his words): "select one agent: that agent
+  is active, plus its pages, plus its chat, its findings." Built exactly
+  that: ONE selection — clicking an agent activates voice, opens its
+  pages (own screen first, else an agent CARD: state, last says, screen
+  preview, command hints), pins chat (review.primary). Rail is
+  agents-first with ✕ detach + unread/queued chips; workspaces are a
+  secondary browse list. Bottom voice-feed strip (you/route/say/queued
+  lines + type-as-user box, collapsible) — ported from the proven debug
+  UI pattern rather than invented. Status bar interactive (duplex,
+  attention, ■ interrupt). Lifecycle: predecessor sweep (unparked-idle
+  sibling > 60s silent, or working > 15 min, same host+cwd+harness) —
+  the newcomer inherits voice-active; election skips unreachable
+  actives; re-register refreshes capabilities. Findings stay one ledger
+  per checkout (deliberate). 306 tests green. VERIFICATION DISCIPLINE
+  CHANGE: UI passes now stop for a user click-through before further UI
+  work — gates green ≠ usable was this pass's lesson.
 - **2026-07-06 (live Windows report: agents invisible — fixed)** — User
   ran the workbench on the Windows profile: agents registered but the
   rail showed them as offline with no workspaces. THREE bugs, two of
