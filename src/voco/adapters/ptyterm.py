@@ -136,7 +136,15 @@ class PtyProcess:
 
     def kill(self) -> None:
         """SIGHUP the process group (a real hangup — shells exit
-        cleanly), escalate to SIGKILL, release the pty."""
+        cleanly), escalate to SIGKILL, release the pty. BLOCKS up to a
+        few seconds — daemon shutdown and tests only; the live control
+        path uses PtyBackend.akill (waits in the executor, never stalls
+        the loop that pumps WS events and listens)."""
+        self._terminate()
+        self._close()
+
+    def _terminate(self) -> None:
+        """Signal + wait, no loop state touched — safe off-loop."""
         if self._proc.poll() is None:
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(self._proc.pid, signal.SIGHUP)
@@ -146,7 +154,6 @@ class PtyProcess:
                 with contextlib.suppress(ProcessLookupError):
                     os.killpg(self._proc.pid, signal.SIGKILL)
                 self._proc.wait(timeout=5)
-        self._close()
 
     def _close(self) -> None:
         if self._closed:
@@ -222,6 +229,16 @@ class PtyBackend:
         if pp is None:
             raise PtyError(f"no such terminal: {handle}")
         pp.kill()
+
+    async def akill(self, handle: str) -> None:
+        """kill() for the live control path: the terminate wait runs in
+        the executor; only the (cheap) fd/subscriber cleanup touches the
+        loop."""
+        pp = self._procs.pop(handle, None)
+        if pp is None:
+            raise PtyError(f"no such terminal: {handle}")
+        await asyncio.get_running_loop().run_in_executor(None, pp._terminate)
+        pp._close()
 
     def shutdown(self) -> None:
         for handle in list(self._procs):

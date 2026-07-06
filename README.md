@@ -3,8 +3,11 @@
 Local-first voice control plane for coding agents. You talk; a fully local
 speech stack answers in under a second; your words reach whichever agent
 session is active — Claude Code, Codex, anything with a shell or MCP —
-local, in tmux, or over SSH. Design: [SPEC.md](SPEC.md). Build state:
-[BUILD.md](BUILD.md).
+local, in tmux, or over SSH. A browser **workbench** at the same port
+shows every agent's workspace: screens, docs, annotatable diffs,
+findings, chat, and live terminals. Design: [SPEC.md](SPEC.md) +
+[SPEC-WORKBENCH.md](SPEC-WORKBENCH.md). Build state: [BUILD.md](BUILD.md)
++ [BUILD-WORKBENCH.md](BUILD-WORKBENCH.md).
 
 ## Quickstart
 
@@ -25,11 +28,30 @@ uv run voco attach-cmd
 uv run voco doctor
 ```
 
-The daemon also serves a debug UI at <http://127.0.0.1:7777> — sessions
-with live states/digests/queues, each agent's screen, a terminal mirror
-(peek) with waiting/working hints, the live event stream, mic controls,
-and a type-as-user input. It speaks only the public WS protocol
-([PROTOCOL.md](PROTOCOL.md)), so it doubles as the reference client.
+The daemon serves the **workbench** at <http://127.0.0.1:7777> — the
+rail groups repos → worktree workspaces → agents (live state dots);
+the editor shows each workspace's pages (agent screens, pushed docs,
+annotatable diffs, live terminals); the dock holds findings and chat.
+A minimal protocol reference client lives at `/debug`
+([PROTOCOL.md](PROTOCOL.md)).
+
+### Review loop (workbench ⇄ agent)
+
+```sh
+voco page diff --branch          # agent publishes its branch diff
+voco page doc notes.md           # ...or any markdown doc
+# click a diff line in the browser to flag a finding; the agent's
+# parked `voco listen` wakes with it. The agent reports back:
+voco review status f-1a2b addressed --note "renamed" --commit abc123
+voco review reply a-9f8e "yes — covered by test_workspace.py"
+voco review export               # findings JSON + anchors sidecar
+```
+
+Diffs track the checkout live (re-push on change, per-file "changed
+since rev N" chips, stale finding markers); disable per workspace with
+the `workspace.live` command or globally with `[workbench]
+live_git_s = 0`. MCP agents get the same verbs as tools
+(`page_push`, `review_findings`, `review_reply`).
 
 Agent-side discipline (paste into CLAUDE.md / AGENTS.md equivalent):
 
@@ -49,6 +71,14 @@ Operator commands: `voco sessions` / `switch <name>` / `mic <mode>` /
 `input <text>` / `watch` (event tail) / `new <cmd>` / `kill` / `panes`
 (tmux managed sessions) / `peek <name>` (terminal mirror) /
 `detach <name>` / `doctor`.
+
+Managed sessions: `voco new claude --worktree feat-x --from main` spawns
+the agent in a fresh sibling git worktree (killed clean → the worktree
+is removed; dirty → kept). `--backend pty` gives it a daemon-owned pty
+with a live interactive terminal tab in the workbench (`--backend tmux`,
+the default, survives daemon restarts and supports `tmux attach`);
+default via `[terminal] default_backend`. Durable review data lands in
+`~/.local/share/voco/workspaces/` (`[workbench] data_dir`).
 
 ## Platform profiles
 
@@ -72,10 +102,14 @@ set `[bridge] token` (SPEC §9.1).
 
 ## Status
 
-M0–M3 buildable scope code-complete: turn machine, arbitration, phrase
+Foundation (M0–M3) code-complete: turn machine, arbitration, phrase
 table, registry, bridge + WS, first-mate contract (calibrated against
 real Gemma 4 E4B: 16/16 parse, 0 authority violations), attention modes,
-tmux managed sessions + inject, AEC, debug UI, doctor — 79 tests, ruff +
-mypy clean, CI on 3 OSes. Live-audio validation and the latency ladder
-measurement are the remaining exit items (need ears). Milestones:
-SPEC §12; running journal: BUILD.md.
+tmux managed sessions + inject, AEC, debug UI, doctor. Workbench
+(W0–W5) code-complete: pages + browser shell, diff review + findings
+ledger + export, the unified review wake, worktrees first-class,
+TerminalBackend (tmux mirror + Unix pty stream; Windows ConPTY pending
+Windows validation), interdiff/staleness + live-git tracking.
+291 tests, ruff + mypy + tsc clean. Live-audio validation and the
+latency ladder measurement remain (need ears); live browser
+click-through pending. Journals: BUILD.md, BUILD-WORKBENCH.md.

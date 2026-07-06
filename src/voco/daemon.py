@@ -606,7 +606,8 @@ class Daemon:
                 if self._pty is None:
                     raise ValueError(f"no such terminal: {name}")
                 try:
-                    self._pty.kill(name)
+                    # akill: the terminate wait must not stall the loop.
+                    await self._pty.akill(name)
                 except PtyError as e:
                     raise ValueError(str(e)) from e
             else:
