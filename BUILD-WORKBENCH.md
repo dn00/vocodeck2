@@ -262,6 +262,27 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
 
 ## Journal
 
+- **2026-07-06 (live Windows report: agents invisible — fixed)** — User
+  ran the workbench on the Windows profile: agents registered but the
+  rail showed them as offline with no workspaces. THREE bugs, two of
+  them cross-platform and masked by Linux e2e (which always pushed a
+  page first): (1) workspaces were only minted on page push — a
+  register-only agent belonged to nowhere; register + boot-restore now
+  resolve the workspace immediately, and the client groups agents by
+  home identity (host/root) instead of only agent-scoped pages.
+  (2) `display_state()` (§6) existed but was NEVER WIRED — snapshots
+  carried raw "parked", the CSS has no `.dot.parked`, so listening
+  agents rendered as unstyled/offline dots. Now derived server-side and
+  carried on snapshot + session.state + pane.hint; roster rows show
+  state + unread. (3) Windows: the lock's raw `os.open` flags failed
+  ([WinError 11] per the user's research agent), disabling persistence
+  → portable `open("x")` + best-effort chmod; ALSO found `_pid_alive`
+  used `os.kill(pid, 0)`, which on Windows is TerminateProcess — the
+  liveness probe would have KILLED the lock holder — now a
+  ctypes/OpenProcess query; manifest saves portable; `--backend pty`
+  on win32 gets a clean error (ConPTY still pending). 300 tests green.
+  Remaining Windows gap: terminal pages need tmux (WSL2) or the future
+  ConPTY backend; everything else works natively now.
 - **2026-07-06 (Codex W3–W5 build review + Fable self-review pass 2
   applied)** — Codex: 7 findings. Fixed (with tests): (1) BLOCKER —
   dirty worktrees were unreclaimable: kill killed the session first, so
