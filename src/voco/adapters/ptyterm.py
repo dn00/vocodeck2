@@ -20,14 +20,27 @@ import asyncio
 import contextlib
 import fcntl
 import os
+import re
 import signal
 import struct
 import subprocess
 import termios
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 RING_BYTES = 256 * 1024
 SUBSCRIBER_FRAMES = 512  # per-client queue bound; beyond it, drop-oldest
+
+# CSI / OSC / lone-ESC sequences — enough to read a raw stream as text.
+_ANSI_RE = re.compile(
+    r"\x1b\[[0-9;?]*[ -/]*[@-~]"  # CSI
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC
+    r"|\x1b[@-Z\\-_]"  # two-byte escapes
+)
+
+
+def strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text).replace("\r", "")
 
 
 class PtyError(Exception):
@@ -62,6 +75,7 @@ class PtyProcess:
         proc: subprocess.Popen,
         master_fd: int,
         loop: asyncio.AbstractEventLoop,
+        on_close: Callable[[], None] | None = None,
     ) -> None:
         self.handle = handle
         self._proc = proc
@@ -70,6 +84,10 @@ class PtyProcess:
         self._ring = _Ring()
         self._subs: set[asyncio.Queue[bytes | None]] = set()
         self._closed = False
+        # Deregistration hook: a NATURAL exit (agent quit, command done)
+        # must remove the handle from its backend, or dead terminals
+        # accumulate and /v1/term serves closed streams instead of 404s.
+        self._on_close = on_close
         loop.add_reader(self._fd, self._on_readable)
 
     # ---- output fan-out -----------------------------------------------------
@@ -110,6 +128,12 @@ class PtyProcess:
     def capture(self) -> str:
         """Point-in-time text view (watcher/peek parity with tmux)."""
         return self._ring.snapshot().decode("utf-8", errors="replace")
+
+    def capture_tail(self, chars: int = 4000) -> str:
+        """The recent screen, ANSI-stripped — what pane classification
+        reads (tmux capture-pane emits rendered text; a raw pty stream
+        needs its escapes removed for the same regexes to see prompts)."""
+        return strip_ansi(self.capture())[-chars:]
 
     # ---- input / control ------------------------------------------------------
 
@@ -165,6 +189,8 @@ class PtyProcess:
         for q in list(self._subs):
             q.put_nowait(None)  # honest EOF to every stream
         self._subs.clear()
+        if self._on_close is not None:
+            self._on_close()
 
 
 class PtyBackend:
@@ -217,7 +243,11 @@ class PtyBackend:
             with contextlib.suppress(OSError):
                 os.close(slave)
         os.set_blocking(master, False)
-        pp = PtyProcess(handle, proc, master, loop)
+
+        def deregister() -> None:
+            self._procs.pop(handle, None)
+
+        pp = PtyProcess(handle, proc, master, loop, on_close=deregister)
         self._procs[handle] = pp
         return pp
 

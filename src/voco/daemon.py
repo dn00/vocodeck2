@@ -600,22 +600,35 @@ class Daemon:
             return out
         if cmd == "session.kill":
             name = str(payload.get("name", ""))
-            if name.startswith("pty-"):
-                from voco.adapters.ptyterm import PtyError
+            kill_error: str | None = None
+            try:
+                if name.startswith("pty-"):
+                    from voco.adapters.ptyterm import PtyError
 
-                if self._pty is None:
-                    raise ValueError(f"no such terminal: {name}")
-                try:
-                    # akill: the terminate wait must not stall the loop.
-                    await self._pty.akill(name)
-                except PtyError as e:
-                    raise ValueError(str(e)) from e
-            else:
-                mgr = self._tmux()
-                await self._run_blocking(
-                    lambda: mgr.kill(name, host=payload.get("host"))
-                )
-            return await self._reap_worktree(name)
+                    if self._pty is None:
+                        raise ValueError(f"no such terminal: {name}")
+                    try:
+                        # akill: the terminate wait must not stall the loop.
+                        await self._pty.akill(name)
+                    except PtyError as e:
+                        raise ValueError(str(e)) from e
+                else:
+                    mgr = self._tmux()
+                    await self._run_blocking(
+                        lambda: mgr.kill(name, host=payload.get("host"))
+                    )
+            except Exception as e:
+                if name not in self._spawned_worktrees:
+                    raise
+                # The session already died (a natural exit, or an earlier
+                # kill that KEPT a dirty worktree): the reap below is the
+                # half that still matters — a dirty tree must stay
+                # reclaimable by a later clean kill.
+                kill_error = str(e)
+            out = await self._reap_worktree(name)
+            if kill_error is not None:
+                out["session"] = f"already gone ({kill_error})"
+            return out
         if cmd == "session.panes":
             mgr = self._tmux()
             panes = await self._run_blocking(lambda: mgr.list(host=payload.get("host")))
@@ -1058,6 +1071,20 @@ class Daemon:
         text = await self._run_blocking(resolve)
         if not text:
             return
+        from voco.server.workbench import MAX_DIFF_BYTES
+
+        if len(text) > MAX_DIFF_BYTES:
+            # An oversized diff would stall the loop every tick: stop
+            # tracking THIS workspace and say why, once.
+            self._live_workspaces[ws.key] = False
+            self.bus.emit(
+                "daemon.error",
+                {
+                    "error": f"live-git off for {ws.key}: diff exceeds "
+                    f"{MAX_DIFF_BYTES} bytes (workspace.live re-enables)"
+                },
+            )
+            return
         key = diff_fingerprint(text)
         if key == page.data.get("diff_key"):
             return
@@ -1081,11 +1108,16 @@ class Daemon:
             return
         from voco.watcher import PaneWatcher
 
+        def pty_capture(s: Session) -> str | None:
+            pp = self._pty_for(s)
+            return pp.capture_tail() if pp is not None else None
+
         watcher = PaneWatcher(
             self.registry,
             self._tmux(),
             interval_s=float(cfg.get("interval_s", 3.0)),
             on_waiting=self._on_pane_waiting if cfg.get("speak", True) else None,
+            pty_capture=pty_capture,
         )
         self._watcher_task = loop.create_task(watcher.run())
 

@@ -262,6 +262,28 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
 
 ## Journal
 
+- **2026-07-06 (Codex W3–W5 build review + Fable self-review pass 2
+  applied)** — Codex: 7 findings. Fixed (with tests): (1) BLOCKER —
+  dirty worktrees were unreclaimable: kill killed the session first, so
+  a retry died before the reap; kill failure with a PENDING worktree
+  now proceeds to reap (session honestly reported "already gone"); the
+  test fake now fails double-kills like real tmux. (3) /v1/term
+  replay/subscribe race → subscribe+snapshot are now atomic
+  (back-to-back, no await): no lost or duplicated frames on attach.
+  (4) naturally-exited ptys deregister from the backend (404, not a
+  dead stream). (5) resolved/live diffs now respect MAX_DIFF_BYTES
+  (route 413s; live tracker disables itself for that workspace and
+  says why). (6) missing git/tmux/gh binaries surface as clean
+  adapter errors, not FileNotFoundError. Deferred: (2) Windows/ConPTY
+  (needs Windows; already documented). DECLINED: (7) "unify tmux+pty
+  behind one Protocol" — deliberate design: capability CELLS drive
+  consumers, and the backends genuinely differ in execution model
+  (sync subprocess vs loop-native); a forced common interface would
+  abstract without payoff. Self-review pass 2 additionally fixed: pty
+  kill blocking the event loop (akill waits in the executor), snapshot
+  reconnects now invalidate findings/asks caches, watcher is
+  backend-agnostic (injected pty capture + ANSI strip so classify
+  reads raw streams). 296 tests, all gates green.
 - **2026-07-06 (W5 shipped — all planned slices done)** — Re-review
   depth, oracle-exact: `compute_interdiff` ports interdiff.mjs (hunk
   hashes, not line heuristics), `upsert_diff` records it on every

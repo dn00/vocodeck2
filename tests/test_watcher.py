@@ -90,3 +90,35 @@ def test_grounding_carries_terminal_hint():
     g = build_grounding(r, "full_duplex", now=0.0)
     by_name = {x["name"]: x for x in g["sessions"]}
     assert by_name[s.call_name]["terminal"] == "waiting"
+
+
+async def test_pty_sessions_watched_via_injected_capture():
+    """W4: daemon-owned ptys have no tmux pane — the injected capture
+    keeps them watched (SPEC-WORKBENCH §5: backend-agnostic watcher)."""
+    r, _events, _tmux_s, _plain, _parked = make_world()
+    pty_s = r.register(
+        {"host": "m", "cwd": "/d", "harness": "claude", "instance": "pty-1"},
+        ["say", "listen"],
+    )
+    tmux = FakeTmux()
+    tmux.by_target["%1"] = WORKING
+
+    def pty_capture(s):
+        return WAITING if s.session_id == pty_s.session_id else None
+
+    w = PaneWatcher(r, tmux, pty_capture=pty_capture)
+    await w.poll_once()
+    await w.poll_once()
+    assert pty_s.pane_hint == "waiting"
+    assert "%1" in tmux.captured  # tmux sessions still watched via tmux
+
+
+async def test_strip_ansi_lets_classify_see_prompts():
+    from voco.adapters.ptyterm import strip_ansi
+    from voco.core.pane_state import classify
+
+    raw = (
+        "\x1b[2J\x1b[1;1H\x1b[1mDo you want to proceed?\x1b[0m\r\n"
+        "\x1b[36m❯ 1. Yes\x1b[0m\r\n  2. No\r\n"
+    )
+    assert classify(strip_ansi(raw)) == "waiting"

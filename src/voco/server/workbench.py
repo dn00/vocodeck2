@@ -243,10 +243,13 @@ class WorkbenchRoutes:
             raise web.HTTPNotFound(text="no streaming terminal for this session")
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
+        # Subscribe THEN snapshot, back-to-back with no await between:
+        # a frame arriving after this pair lands in the queue only, one
+        # arriving before is in the replay only — no loss, no duplicate.
+        queue = pp.subscribe()
         replay = pp.replay()
         if replay:
             await ws.send_bytes(replay)
-        queue = pp.subscribe()
 
         async def pump() -> None:
             while True:
@@ -361,6 +364,12 @@ class WorkbenchRoutes:
                     )
                 except DiffResolveError as e:
                     raise web.HTTPBadRequest(text=str(e)) from e
+                if len(diff_text) > MAX_DIFF_BYTES:
+                    # Same cap as pasted content: a monster branch/PR diff
+                    # must not stall the daemon or bloat page state.
+                    raise web.HTTPRequestEntityTooLarge(
+                        max_size=MAX_DIFF_BYTES, actual_size=len(diff_text)
+                    )
             ref, recorded, title = source_ref(source), source, source_ref(source)
         else:
             raise web.HTTPBadRequest(text="diff needs `source` or `content`")

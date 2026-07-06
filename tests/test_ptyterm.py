@@ -141,3 +141,14 @@ async def test_spawned_env_and_cwd(backend, tmp_path):
     )
     out = await drain_until(pp, b"cell-check")
     assert str(tmp_path).encode() in out
+
+
+async def test_natural_exit_deregisters_from_backend(backend):
+    """Short-lived commands must not accumulate dead handles: a natural
+    exit removes the terminal from the backend, so /v1/term answers 404
+    instead of a closed stream (Codex W3-W5 review, WARNING 4)."""
+    pp = backend.spawn("echo done")
+    q = pp.subscribe()
+    while (await asyncio.wait_for(q.get(), timeout=5)) is not None:
+        pass
+    assert backend.get(pp.handle) is None

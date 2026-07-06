@@ -39,11 +39,16 @@ class PaneWatcher:
         *,
         interval_s: float = 3.0,
         on_waiting: Callable[[Session], None] | None = None,
+        pty_capture: Callable[[Session], str | None] | None = None,
     ) -> None:
         self._registry = registry
         self._tmux = tmux
         self._interval = interval_s
         self._on_waiting = on_waiting
+        # W4: daemon-owned ptys have no tmux pane; the daemon injects a
+        # ring-buffer capture so the watcher stays backend-agnostic
+        # (SPEC-WORKBENCH §5). None → not a pty session, use tmux.
+        self._pty_capture = pty_capture
         self._waiting_streak: dict[str, int] = {}
         self._announced: set[str] = set()
 
@@ -55,17 +60,24 @@ class PaneWatcher:
     async def poll_once(self) -> None:
         loop = asyncio.get_running_loop()
         for s in list(self._registry.all()):
-            target = s.inject_target
-            if target is None or s.parked:
+            if s.parked:
                 continue
-            host = s.identity.get("host_alias")
-            try:
-                text = await loop.run_in_executor(
-                    None, functools.partial(self._tmux.capture_pane, target, host=host)
-                )
-                hint = classify(text)
-            except Exception:
-                hint = None  # named fail-silent: observation is best-effort
+            pty_text = self._pty_capture(s) if self._pty_capture else None
+            if pty_text is not None:
+                hint = classify(pty_text)
+            else:
+                target = s.inject_target
+                if target is None:
+                    continue  # no terminal to watch
+                host = s.identity.get("host_alias")
+                try:
+                    text = await loop.run_in_executor(
+                        None,
+                        functools.partial(self._tmux.capture_pane, target, host=host),
+                    )
+                    hint = classify(text)
+                except Exception:
+                    hint = None  # named fail-silent: observation is best-effort
             self._registry.set_pane_hint(s.session_id, hint)
             self._track_waiting(s, hint)
 

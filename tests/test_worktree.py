@@ -123,6 +123,11 @@ class TmuxFake:
         return f"voco-{name}"
 
     def kill(self, name, host=None) -> None:
+        # Honest fake: a second kill of the same session fails, exactly
+        # like real tmux ("can't find session") — the reap-retry path
+        # must survive it.
+        if name in self.killed:
+            raise RuntimeError(f"can't find session: {name}")
         self.killed.append(name)
 
 
@@ -219,3 +224,29 @@ async def test_kill_keeps_dirty_worktree(daemon, tmp_path):
 async def test_kill_without_worktree_reports_nothing(daemon):
     result = await daemon._control("session.kill", {"name": "voco-plain"})
     assert result == {}
+
+
+async def test_dirty_worktree_reclaimed_by_later_kill(daemon, tmp_path):
+    """The session dies on the FIRST kill; the dirty worktree stays. A
+    later kill — session long gone — must still reach the reap once the
+    tree is clean (Codex W3-W5 review, BLOCKER 1)."""
+    await daemon._control(
+        "session.spawn",
+        {"harness": "claude", "cwd": "/repo/a", "worktree": {"branch": "feat-x"}},
+    )
+    daemon._worktree_mgr.dirty = True
+    first = await daemon._control("session.kill", {"name": "voco-feat-x"})
+    assert "worktree_kept" in first
+
+    daemon._worktree_mgr.dirty = False  # the human committed/stashed
+    second = await daemon._control("session.kill", {"name": "voco-feat-x"})
+    assert second["worktree_removed"] is True
+    assert "already gone" in second["session"]  # honest about the session
+    assert daemon._spawned_worktrees == {}
+
+
+async def test_double_kill_without_worktree_still_errors(daemon):
+    await daemon._control("session.spawn", {"harness": "claude", "cwd": None})
+    await daemon._control("session.kill", {"name": "voco-claude"})
+    with pytest.raises(RuntimeError, match="can't find session"):
+        await daemon._control("session.kill", {"name": "voco-claude"})

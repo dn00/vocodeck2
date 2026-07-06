@@ -30,7 +30,10 @@ Runner = Callable[[list[str], str], RunResult]
 
 
 def _default_runner(argv: list[str], cwd: str) -> RunResult:
-    proc = subprocess.run(argv, capture_output=True, text=True, timeout=30, cwd=cwd)
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=30, cwd=cwd)
+    except FileNotFoundError:
+        return RunResult(127, "", f"{argv[0]}: not installed (or not on PATH)")
     return RunResult(proc.returncode, proc.stdout, proc.stderr)
 
 

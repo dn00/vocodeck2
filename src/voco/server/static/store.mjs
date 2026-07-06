@@ -70,6 +70,10 @@ export class Store {
     this.activeSession = snap.active_session ?? null;
     this.workspaces.clear();
     for (const w of snap.workspaces || []) this.workspaces.set(w.key, w);
+    // A snapshot means a (re)connect: mutations may have been missed, so
+    // the lazy caches must refetch (the selection notify triggers it).
+    this.findings.clear();
+    this.asks.clear();
     this.mic = snap.mic || {};
     if (!this.selectedWorkspace && this.workspaces.size)
       this.selectWorkspace([...this.workspaces.keys()][0]);
