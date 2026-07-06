@@ -177,8 +177,14 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
       Client: chat dock tab (ask → answer, markdown-rendered), ask events
       in the store. Verified e2e: annotate → parked agent woke → status
       round-trip → ask → reply → restart persistence.
-- [ ] **W3 — worktrees first-class**: repo grouping, `voco new
-      --worktree`, clean-only removal.
+- [x] **W3 — worktrees first-class** (complete 2026-07-06): repo
+      grouping shipped in W0 (common_dir); new `adapters/worktree.py`
+      (sibling-path `<repo>-<branch-slug>`, ref shape gates, clean-only
+      removal — dirty work is never deleted), `voco new --worktree
+      BRANCH [--from BASE]`, `session.spawn` worktree spec (creates →
+      spawns inside; failed spawn reaps the fresh worktree), kill reaps
+      clean / keeps dirty with an honest reason, rail "+" spawns an
+      agent in a new worktree. Verified e2e with real git + tmux.
 - [ ] **W4 — TerminalBackend**: port + pty impl (Unix pty / Windows
       ConPTY), `/v1/term/*` stream, xterm.js page, per-spawn
       `--backend`.
@@ -230,6 +236,22 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
        redelivery covered by tests.
 
 ## Journal
+
+- **2026-07-06 (W3 shipped)** — Worktrees first-class, native. New
+  `adapters/worktree.py` (same injected-Runner shape as tmux so daemon
+  tests fake both with one recorder; `git -C`, no cwd juggling;
+  `valid_ref` now shared from diffsource). Daemon: `session.spawn`
+  gains `worktree: {branch, from}` (local-only, worktree created in
+  executor then spawned into; spawn failure reaps the fresh tree),
+  `session.kill` reaps clean worktrees this run created — dirty ones
+  are kept and say why; the map is in-memory BY DESIGN (post-restart
+  not-knowing fails safe: no removal). CLI `voco new --worktree/--from`;
+  rail "+" per repo group. 13 new tests (250 total). E2E with real
+  git+tmux: spawn → worktree created + session inside it; dirty kill
+  kept the tree; clean kill removed it; CLI path verified. Gotcha
+  caught live: a stale pre-W3 daemon still held the port and silently
+  served the first spawn attempt — the new daemon's bind refusal +
+  lock refusal surfaced it exactly as designed.
 
 - **2026-07-06** — Effort started. Deliberated the diff-annotate merge
   (federate vs port): decided **port into vocodeck2, one package**

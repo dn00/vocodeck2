@@ -38,10 +38,11 @@ class DiffResolveError(Exception):
     """Soft, message-carrying failure — the route maps it to a 4xx hint."""
 
 
-def _valid_ref(ref: str) -> bool:
+def valid_ref(ref: str) -> bool:
     """A conservative git ref shape: no leading dash (option injection), no
     whitespace or the chars git rev-names forbid. Not a full check-ref-format
-    reimplementation — a shape gate before argv (review WARNING 7)."""
+    reimplementation — a shape gate before argv (review WARNING 7). Shared
+    with the worktree adapter (branch/base names)."""
     return (
         bool(ref) and not ref.startswith("-") and not re.search(r"[\s~^:?*\[\\]", ref)
     )
@@ -93,7 +94,7 @@ class DiffResolver:
             return self._git(["diff", "--cached"], root)
         if "branch" in source:
             base = source.get("branch") or self.default_branch(root)
-            if not _valid_ref(base):
+            if not valid_ref(base):
                 raise DiffResolveError(f"invalid base ref: {base!r}")
             merge_base = self._git(["merge-base", "HEAD", "--", base], root).strip()
             if not merge_base:

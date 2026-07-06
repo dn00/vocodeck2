@@ -739,6 +739,19 @@ def main() -> None:
     p_new.add_argument("--name", default=None)
     p_new.add_argument("--cwd", default=None)
     p_new.add_argument("--host", default=None)
+    p_new.add_argument(
+        "--worktree",
+        metavar="BRANCH",
+        default=None,
+        help="spawn in a fresh sibling worktree on BRANCH (created if new)",
+    )
+    p_new.add_argument(
+        "--from",
+        dest="worktree_from",
+        metavar="BASE",
+        default=None,
+        help="base ref for a NEW worktree branch (default: current HEAD)",
+    )
     p_kill = sub.add_parser("kill")
     p_kill.add_argument("name", help="tmux session name (voco-...)")
     p_kill.add_argument("--host", default=None)
@@ -832,18 +845,19 @@ def main() -> None:
         knob = "duplex" if args.mode in ("full_duplex", "half_duplex") else "attention"
         sys.exit(control(client, "mic.set", {knob: args.mode}, timeout=5))
     elif args.cmd == "new":
-        sys.exit(
-            control(
-                client,
-                "session.spawn",
-                {
-                    "harness": args.harness,
-                    "name": args.name,
-                    "cwd": args.cwd,
-                    "host": args.host,
-                },
-            )
-        )
+        payload = {
+            "harness": args.harness,
+            "name": args.name,
+            "cwd": args.cwd,
+            "host": args.host,
+        }
+        if args.worktree:
+            # The daemon needs a repo to branch from; default to here.
+            payload["cwd"] = args.cwd or os.getcwd()
+            payload["worktree"] = {"branch": args.worktree}
+            if args.worktree_from:
+                payload["worktree"]["from"] = args.worktree_from
+        sys.exit(control(client, "session.spawn", payload))
     elif args.cmd == "kill":
         sys.exit(
             control(client, "session.kill", {"name": args.name, "host": args.host})

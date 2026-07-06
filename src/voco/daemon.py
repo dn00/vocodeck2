@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from voco.adapters.tmux import TmuxManager
+    from voco.adapters.worktree import WorktreeManager
     from voco.voice_loop import VoiceLoop
 
 from voco import config as config_mod
@@ -121,6 +122,11 @@ class Daemon:
         )
         self.voice: VoiceLoop | None = None
         self._tmux_mgr: TmuxManager | None = None
+        # tmux session -> worktree path, for the sessions THIS run spawned
+        # with --worktree (in-memory by design: after a restart we no longer
+        # know we created it, and not-knowing fails safe — no removal).
+        self._worktree_mgr: WorktreeManager | None = None
+        self._spawned_worktrees: dict[str, str] = {}
         self._port = 7777
         self._state = StateStore(
             Path(
@@ -145,6 +151,29 @@ class Daemon:
 
             self._tmux_mgr = TmuxManager(voco_url=f"http://127.0.0.1:{self._port}")
         return self._tmux_mgr
+
+    def _worktrees_mgr(self) -> WorktreeManager:
+        if self._worktree_mgr is None:
+            from voco.adapters.worktree import WorktreeManager
+
+            self._worktree_mgr = WorktreeManager()
+        return self._worktree_mgr
+
+    async def _reap_worktree(self, tmux_name: str) -> dict[str, Any]:
+        """After a kill: remove the worktree THIS daemon run created for
+        that session — clean ones only (W3; dirty work is sacred). Not
+        knowing the worktree (restart wiped the map) means keeping it."""
+        wt_path = self._spawned_worktrees.pop(tmux_name, None)
+        if wt_path is None:
+            return {}
+        from voco.adapters.worktree import WorktreeError
+
+        try:
+            await self._run_blocking(lambda: self._worktrees_mgr().remove(wt_path))
+        except WorktreeError as e:
+            self._spawned_worktrees[tmux_name] = wt_path  # still ours
+            return {"worktree": wt_path, "worktree_kept": str(e)}
+        return {"worktree": wt_path, "worktree_removed": True}
 
     # ---- VoiceHost port (decisions stay here; audio reacts in VoiceLoop) ----
 
@@ -436,21 +465,60 @@ class Daemon:
             # Manager is constructed HERE (loop thread), used in the
             # executor — no shared-state mutation off the loop.
             mgr = self._tmux()
-            name = await self._run_blocking(
-                lambda: mgr.spawn(
-                    harness,
-                    name=str(payload.get("name") or harness),
-                    cwd=payload.get("cwd"),
-                    host=payload.get("host"),
+            cwd = payload.get("cwd")
+            wt = payload.get("worktree")
+            # A worktree spawn names the session after its branch.
+            display = str(payload.get("name") or (wt or {}).get("branch") or harness)
+            wt_path: str | None = None
+            if wt:
+                # W3: create the worktree first, spawn inside it. Local
+                # only — a remote host's disk is not ours to branch on.
+                if payload.get("host"):
+                    raise ValueError("--worktree is local-only (no --host)")
+                if not cwd:
+                    raise ValueError("worktree spawn needs the source repo cwd")
+                wmgr = self._worktrees_mgr()
+                branch = str(wt.get("branch", "")).strip()
+                base = wt.get("from")
+                wt_path = await self._run_blocking(
+                    lambda: wmgr.add(str(cwd), branch, base)
                 )
-            )
-            return {"tmux_session": name}
+                cwd = wt_path
+            try:
+                name = await self._run_blocking(
+                    lambda: mgr.spawn(
+                        harness,
+                        name=display,
+                        cwd=cwd,
+                        host=payload.get("host"),
+                    )
+                )
+            except Exception:
+                if wt_path is not None:
+                    # The worktree was created for THIS spawn; a dead spawn
+                    # must not strand it (it is minutes old and clean).
+                    try:
+                        await self._run_blocking(
+                            lambda: self._worktrees_mgr().remove(wt_path)
+                        )
+                    except Exception as e:
+                        self.bus.emit(
+                            "daemon.error", {"error": f"worktree cleanup: {e}"}
+                        )
+                raise
+            if wt_path is not None:
+                self._spawned_worktrees[name] = wt_path
+            out = {"tmux_session": name}
+            if wt_path is not None:
+                out["worktree"] = wt_path
+            return out
         if cmd == "session.kill":
             mgr = self._tmux()
+            tmux_name = str(payload.get("name", ""))
             await self._run_blocking(
-                lambda: mgr.kill(str(payload.get("name", "")), host=payload.get("host"))
+                lambda: mgr.kill(tmux_name, host=payload.get("host"))
             )
-            return {}
+            return await self._reap_worktree(tmux_name)
         if cmd == "session.panes":
             mgr = self._tmux()
             panes = await self._run_blocking(lambda: mgr.list(host=payload.get("host")))

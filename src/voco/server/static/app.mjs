@@ -66,8 +66,14 @@ function renderRail() {
     h("div", { class: "rail-head" }, h("span", {}, "workspaces")));
   for (const [g, list] of groups) {
     const label = list[0].repo || (list[0].kind === "sessionspace" ? "no repo" : g);
-    top.append(h("div", { class: "rail-item rail-repo" },
-      h("span", {}, "▸ " + label)));
+    const repoRow = h("div", { class: "rail-item rail-repo" },
+      h("span", {}, "▸ " + label));
+    if (list[0].kind === "workspace")
+      repoRow.append(h("span", {
+        class: "rail-add", title: "spawn an agent in a new worktree",
+        onclick: (e) => { e.stopPropagation(); spawnWorktree(list[0]); },
+      }, "+"));
+    top.append(repoRow);
     for (const ws of list) {
       const sel = ws.key === store.selectedWorkspace ? " sel" : "";
       const branch = ws.branch ? h("span", { class: "rail-branch" }, ws.branch) : "";
@@ -100,6 +106,21 @@ function agentsIn(ws) {
   // A session is "in" a workspace when it owns an agent-scoped page there.
   const names = new Set(ws.pages.filter((p) => p.call_name).map((p) => p.call_name));
   return [...store.sessions.values()].filter((s) => names.has(s.name));
+}
+
+// W3: spawn an agent in a fresh sibling worktree of this repo.
+async function spawnWorktree(ws) {
+  const branch = prompt("new worktree branch:");
+  if (!branch) return;
+  const harness = prompt("harness command:", "claude");
+  if (!harness) return;
+  try {
+    const r = await bus.command("session.spawn",
+      { harness, cwd: ws.root, worktree: { branch } });
+    toast(`spawned ${r.tmux_session} in ${r.worktree || ws.root}`);
+  } catch (e) {
+    toast("spawn failed: " + (e instanceof Error ? e.message : e));
+  }
 }
 
 function quickSwitch(s) {

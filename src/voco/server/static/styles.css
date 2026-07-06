@@ -72,6 +72,9 @@ body {
 .rail-item.indent { padding-left: 24px; }
 .rail-item.indent2 { padding-left: 38px; color: var(--fg-dim); }
 .rail-repo { color: var(--fg); font-weight: 600; }
+.rail-add { margin-left: auto; color: var(--fg-faint); cursor: pointer;
+  padding: 0 4px; border-radius: 4px; }
+.rail-add:hover { color: var(--fg); background: var(--bg-tab); }
 .rail-branch { color: var(--fg-faint); font-size: 11px; }
 .count-chip { margin-left: auto; background: var(--accent-dim); color: #fff;
   border-radius: 8px; padding: 0 6px; font-size: 10px; min-width: 16px;
