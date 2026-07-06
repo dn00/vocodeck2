@@ -160,6 +160,7 @@ async def test_spawn_with_worktree_creates_then_spawns_inside(daemon, tmp_path):
     assert daemon._tmux_mgr.spawns[0]["cwd"] == str(tmp_path / "repo-feat-x")
     assert daemon._tmux_mgr.spawns[0]["name"] == "feat-x"  # branch names it
     assert result == {
+        "backend": "tmux",
         "tmux_session": "voco-feat-x",
         "worktree": str(tmp_path / "repo-feat-x"),
     }

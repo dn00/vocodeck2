@@ -56,6 +56,7 @@ def add_workbench_routes(app: web.Application, server: BridgeServer) -> None:
     if STATIC_DIR.is_dir():
         app.router.add_static("/static/", STATIC_DIR, follow_symlinks=False)
     app.router.add_get("/v1/page/{page_id}", wb.page_content)
+    app.router.add_get("/v1/term/{session_id}", wb.term_ws)
     app.router.add_post("/v1/bridge/page", wb.bridge_page)
     app.router.add_get("/v1/bridge/findings", wb.bridge_findings)
     app.router.add_post("/v1/bridge/finding_status", wb.bridge_finding_status)
@@ -199,7 +200,74 @@ class WorkbenchRoutes:
                 "files": page.data.get("files", []),
                 "source": page.data.get("source"),
             }
+        if page.type == "terminal":
+            # The page carries HOW to attach (SPEC-WORKBENCH §5): stream →
+            # /v1/term/{session_id} WS; mirror → poll session.peek.
+            return {
+                "mode": page.data.get("mode"),
+                "call_name": page.data.get("call_name"),
+                "session_id": page.session_id,
+            }
         raise web.HTTPNotImplemented(text=f"page type {page.type} lands later")
+
+    # ---- live terminal stream (SPEC-WORKBENCH §5, W4) --------------------------
+
+    async def term_ws(self, request: web.Request) -> web.WebSocketResponse:
+        """Binary frames: pty output (out) / keyboard input (in). Text
+        frames: JSON control ({"resize": {cols, rows}}). On open, the
+        scrollback ring replays as the first frame; the ring — not the
+        client queue — is the recovery source. A mutating surface: Origin
+        discipline + wb token for browsers + bearer when configured."""
+        import asyncio
+        import json as _json
+
+        from voco.adapters.ptyterm import PtyError
+
+        server = self._server
+        server._check_origin(request)
+        server._check_auth(request)
+        if request.headers.get("Origin") is not None and not server._wb_ok(request):
+            raise web.HTTPForbidden(text="workbench token required")
+        pp = server.pty_lookup(request.match_info["session_id"])
+        if pp is None:
+            raise web.HTTPNotFound(text="no streaming terminal for this session")
+        ws = web.WebSocketResponse(heartbeat=30)
+        await ws.prepare(request)
+        replay = pp.replay()
+        if replay:
+            await ws.send_bytes(replay)
+        queue = pp.subscribe()
+
+        async def pump() -> None:
+            while True:
+                frame = await queue.get()
+                if frame is None:
+                    await ws.close(message=b"terminal exited")
+                    return
+                await ws.send_bytes(frame)
+
+        sender = asyncio.create_task(pump())
+        try:
+            async for msg in ws:
+                if msg.type == web.WSMsgType.BINARY:
+                    try:
+                        pp.write(msg.data)
+                    except (PtyError, OSError):
+                        break  # terminal died mid-type; pump closes us
+                elif msg.type == web.WSMsgType.TEXT:
+                    try:
+                        control = _json.loads(msg.data)
+                    except ValueError:
+                        continue
+                    size = control.get("resize")
+                    if isinstance(size, dict):
+                        pp.resize(
+                            int(size.get("cols") or 80), int(size.get("rows") or 24)
+                        )
+        finally:
+            pp.unsubscribe(queue)
+            sender.cancel()
+        return ws
 
     # ---- the page bridge verb (SPEC-WORKBENCH §3.2) ---------------------------
 

@@ -390,8 +390,8 @@ def test_departed_agents_scoped_item_wakes_nobody_but_stays_pending(daemon):
 def test_parked_session_beats_recently_seen_unparked(daemon):
     now = [1000.0]
     daemon.registry._now = lambda: now[0]
-    s1, ws, page = attach(daemon)
-    s2 = daemon.registry.register(
+    s1, ws, _page = attach(daemon)
+    daemon.registry.register(
         {**ident(), "instance": "pane-2"}, ["say", "listen", "review"]
     )
     other, _, _ = attach(daemon, cwd="/repo/b")
@@ -408,7 +408,7 @@ def test_parked_session_beats_recently_seen_unparked(daemon):
 
 
 async def test_primary_override_pins_and_clears(daemon):
-    s1, ws, page = attach(daemon)  # active ⇒ would be primary
+    s1, ws, _page = attach(daemon)  # active ⇒ would be primary
     s2 = daemon.registry.register(
         {**ident(), "instance": "pane-2"}, ["say", "listen", "review"]
     )
@@ -424,7 +424,7 @@ async def test_primary_override_pins_and_clears(daemon):
 
 
 def test_stale_override_falls_back(daemon):
-    s1, ws, page = attach(daemon)
+    s1, ws, _page = attach(daemon)
     s2 = daemon.registry.register(
         {**ident(), "instance": "pane-2"}, ["say", "listen", "review"]
     )

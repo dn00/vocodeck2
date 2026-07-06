@@ -73,6 +73,8 @@ SCHEMA: dict[str, dict[str, tuple[type, ...]]] = {
     "state": {"dir": (str,)},
     # Workbench persistence (SPEC-WORKBENCH §8): manifests + exports.
     "workbench": {"data_dir": (str,)},
+    # Managed-session terminals (SPEC-WORKBENCH §5): tmux | pty.
+    "terminal": {"default_backend": (str,)},
     "watcher": {
         "enabled": (bool,),
         "interval_s": (int, float),

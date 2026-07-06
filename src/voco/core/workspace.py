@@ -427,6 +427,45 @@ class WorkspaceStore:
         self._emit_page(ws, page, "updated")
         return page
 
+    def upsert_terminal(
+        self,
+        identity: dict[str, Any],
+        *,
+        session_id: str,
+        call_name: str,
+        mode: str,
+        handle: str | None = None,
+    ) -> Page:
+        """A session's terminal page (SPEC-WORKBENCH §5, W4): agent-scoped,
+        pinned, one per agent (`term:<call_name>`). `mode` is cell-driven:
+        "stream" (pty — live xterm over /v1/term) or "mirror" (tmux —
+        read-only capture polling). Re-registration refreshes, no rev bump
+        (the terminal itself is the content)."""
+        if mode not in ("stream", "mirror"):
+            raise ValueError(f"bad terminal mode: {mode}")
+        ws = self.resolve(identity)
+        ref = f"term:{call_name}"
+        data = {"mode": mode, "handle": handle, "call_name": call_name}
+        page = ws.page_by_ref("terminal", ref)
+        if page is None:
+            page = Page(
+                page_id="",
+                type="terminal",
+                ref=ref,
+                title=f"term·{call_name}",
+                scope="agent",
+                pinned=True,
+                session_id=session_id,
+                call_name=call_name,
+                data=data,
+            )
+            return self._mint_page(ws, page)
+        page.session_id = session_id
+        page.data = data
+        page.updated_ts = self._now()
+        self._emit_page(ws, page, "updated")
+        return page
+
     def upsert_diff(
         self,
         ws: Workspace,

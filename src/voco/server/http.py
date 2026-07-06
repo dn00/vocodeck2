@@ -23,7 +23,7 @@ import json
 import secrets
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from aiohttp import WSMsgType, web
@@ -74,6 +74,10 @@ class BridgeServer:
         from voco.adapters.diffsource import DiffResolver
 
         self.diff_resolver = DiffResolver()
+        # W4: session_id -> live PtyProcess (or None). The daemon injects
+        # its lookup; the default means "no streaming terminals here"
+        # (tests, headless bridges).
+        self.pty_lookup: Callable[[str], Any] = lambda sid: None
         # Daemon-owned control commands (mic.set, interrupt, switch...).
         # Async so subprocess-backed commands (tmux/ssh) never block the
         # loop that pumps WS events and listen polls.

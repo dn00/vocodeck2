@@ -148,7 +148,13 @@ def _instance() -> str | None:
     stable across conversation restarts in the same pane; Claude Code's
     session id (also inherited by its MCP servers) covers non-tmux; None
     falls back to the legacy (host, cwd, harness) key."""
-    return os.environ.get("TMUX_PANE") or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    # VOCO_INSTANCE wins: a daemon-spawned pty bakes its handle here so
+    # the session links back to its terminal (W4).
+    return (
+        os.environ.get("VOCO_INSTANCE")
+        or os.environ.get("TMUX_PANE")
+        or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    )
 
 
 def derive_identity() -> dict:
@@ -740,6 +746,12 @@ def main() -> None:
     p_new.add_argument("--cwd", default=None)
     p_new.add_argument("--host", default=None)
     p_new.add_argument(
+        "--backend",
+        choices=["tmux", "pty"],
+        default=None,
+        help="terminal backend (default: daemon config, else tmux)",
+    )
+    p_new.add_argument(
         "--worktree",
         metavar="BRANCH",
         default=None,
@@ -851,6 +863,8 @@ def main() -> None:
             "cwd": args.cwd,
             "host": args.host,
         }
+        if args.backend:
+            payload["backend"] = args.backend
         if args.worktree:
             # The daemon needs a repo to branch from; default to here.
             payload["cwd"] = args.cwd or os.getcwd()

@@ -11,6 +11,7 @@ import { renderMarkdown } from "./markdown.mjs";
 import { renderDiff } from "./diff.mjs";
 import { renderFindings } from "./findings.mjs";
 import { renderChat } from "./chat.mjs";
+import { renderTerminal } from "./term.mjs";
 
 const store = new Store();
 const bus = connectBus(store);
@@ -193,6 +194,19 @@ async function renderPage(view, page) {
       });
     } catch (e) {
       view.textContent = "could not load: " + (e instanceof Error ? e.message : e);
+    }
+    return;
+  }
+  if (page.type === "terminal") {
+    try {
+      const c = await fetchContent(page.page_id, page.rev);
+      await renderTerminal(view, page, c, {
+        wb: (window.__VOCO__ || {}).wb || "",
+        command: (cmd, payload) => bus.command(cmd, payload),
+      });
+    } catch (e) {
+      view.textContent = "terminal unavailable: "
+        + (e instanceof Error ? e.message : e);
     }
     return;
   }

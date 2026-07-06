@@ -185,9 +185,18 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
       spawns inside; failed spawn reaps the fresh worktree), kill reaps
       clean / keeps dirty with an honest reason, rail "+" spawns an
       agent in a new worktree. Verified e2e with real git + tmux.
-- [ ] **W4 — TerminalBackend**: port + pty impl (Unix pty / Windows
-      ConPTY), `/v1/term/*` stream, xterm.js page, per-spawn
-      `--backend`.
+- [x] **W4 — TerminalBackend** (Unix complete 2026-07-06): capability
+      cells (`adapters/terminal.py`), asyncio pty backend
+      (`adapters/ptyterm.py`: ring buffer, fan-out with drop-oldest
+      backpressure, SIGHUP→SIGKILL, VOCO_INSTANCE session link),
+      `/v1/term/{session}` WS (replay-first, binary io + resize
+      control, browser wb-token gate), terminal pages (pty=stream via
+      vendored xterm.js 5.5 + fit; tmux=mirror with peek polling +
+      honest say_as_user input row), per-spawn `--backend tmux|pty` +
+      `[terminal] default_backend`, pty-aware inject/nudge/peek.
+      22 new tests + live e2e. **Windows/ConPTY deferred** — needs a
+      Windows machine to validate (pywinpty floor check still pending,
+      Phase 0 item 4); the seam is ready for it.
 - [ ] **W5 — rev/staleness depth**: inter-diff, since-rev banner, stale
       chips, live-git tracker.
 
@@ -197,15 +206,17 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
   reviews cover build + security, but security issues route to the
   parent-dir files only — never into the repo, never into the session
   reply. In-repo models don't read security content.
-- W0+W1+W2 are DONE and verified (see milestones + journal). Gates at
-  this checkpoint: 237 pytest, mypy (45 files), ruff + format, tsc
-  --checkJs, PROTOCOL.md regen-clean.
-- Next: **/xai build-only review of the W2 diff** (instruct Codex:
-  security observations → `../vocodeck2-security/`, do NOT return or
-  mention them; build feedback only), apply build fixes, then **W3
-  (worktrees first-class)**: `voco new --worktree`, clean-only removal
-  (repo grouping via common_dir already ships). Then W4 (TerminalBackend
-  — check pywinpty/ConPTY floors first, Phase 0 deferred item), W5.
+- W0–W4 are DONE and verified (W4 Unix-only; see milestones + journal).
+  Gates at this checkpoint: 283 pytest, mypy (48 files), ruff + format,
+  tsc --checkJs, PROTOCOL.md regen-clean. Codex build review of W2
+  applied (6/6 findings fixed + tested).
+- Next: **W5 — rev/staleness depth** (inter-diff on re-push, since-rev
+  banner, stale chips with area_changed, live-git tracker). Then:
+  Windows/ConPTY validation for W4 (needs a Windows machine; pywinpty
+  floor check pending), README refresh, live browser click-through of
+  the whole workbench (user AM).
+- Review policy (user): reviews — Codex or self — are on the BUILD
+  itself. No security side-channel orchestration in this track.
 - Env note: `~/.local/bin/node` is a self-looping symlink the user still
   needs to `rm`; use `PATH="$HOME/.nvm/versions/node/v24.11.1/bin:$PATH"`
   for tsc until then.
@@ -237,6 +248,18 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
 
 ## Journal
 
+- **2026-07-06 (W4 shipped, Unix)** — TerminalBackend native. The pty
+  backend is asyncio-first (loop.add_reader, no reader threads); the
+  ring buffer — not client queues — is the recovery source (reconnect
+  replays; stalled clients drop-oldest). Session↔terminal link is env
+  (`VOCO_INSTANCE=pty-N` baked at spawn; `derive_identity` prefers it),
+  so register-time wiring is pure data: terminal page + cells derive
+  from identity. Registry stays transport-free via an injected
+  `term_cells` hook (same pattern as review_items). tmux keeps its
+  superpowers (restart survival, native attach) as a mirror-mode page.
+  Live e2e: spawn pty → register → `term·Orion` page + cells → WS
+  replay → typed round-trip → kill. Windows/ConPTY: seam ready,
+  validation deferred to a Windows machine. 283 tests, all gates green.
 - **2026-07-06 (Codex W2 build review applied)** — /xai adversarial
   review of the W2 diff (security → out-of-repo side file per policy;
   Codex's first attempt couldn't write it — sandbox — so a scoped

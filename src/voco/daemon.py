@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
+    from voco.adapters.ptyterm import PtyBackend, PtyProcess
     from voco.adapters.tmux import TmuxManager
     from voco.adapters.worktree import WorktreeManager
     from voco.voice_loop import VoiceLoop
@@ -120,6 +121,7 @@ class Daemon:
             workspaces=self.workspaces,
             allowed_origins=cfg.get("server", {}).get("allowed_origins"),
         )
+        self.bridge.pty_lookup = self._pty_lookup  # /v1/term (W4)
         self.voice: VoiceLoop | None = None
         self._tmux_mgr: TmuxManager | None = None
         # tmux session -> worktree path, for the sessions THIS run spawned
@@ -127,6 +129,8 @@ class Daemon:
         # know we created it, and not-knowing fails safe — no removal).
         self._worktree_mgr: WorktreeManager | None = None
         self._spawned_worktrees: dict[str, str] = {}
+        # PTY terminals this daemon run owns (W4). Lazy like tmux.
+        self._pty: PtyBackend | None = None
         # Per-workspace primary-review override (§4.3 UI selector):
         # workspace key -> call_name. In-memory routing preference.
         self._primary_override: dict[str, str] = {}
@@ -161,6 +165,36 @@ class Daemon:
 
             self._worktree_mgr = WorktreeManager()
         return self._worktree_mgr
+
+    def _pty_backend(self) -> PtyBackend:
+        if self._pty is None:
+            from voco.adapters.ptyterm import PtyBackend
+
+            self._pty = PtyBackend()
+        return self._pty
+
+    def _pty_for(self, session: Session) -> PtyProcess | None:
+        """The daemon-owned pty behind a session, if we spawned one: the
+        spawn baked its handle into the identity `instance`."""
+        inst = str(session.identity.get("instance") or "")
+        if inst.startswith("pty-") and self._pty is not None:
+            return self._pty.get(inst)
+        return None
+
+    def _pty_lookup(self, session_id: str) -> PtyProcess | None:
+        """The bridge's /v1/term route resolves sessions through this."""
+        s = self.registry.get(session_id)
+        return self._pty_for(s) if s is not None else None
+
+    def _term_cells(self, session: Session) -> dict | None:
+        """Terminal capability cells for the snapshot (SPEC-WORKBENCH §5)."""
+        from voco.adapters.terminal import PTY_CELLS, TMUX_CELLS
+
+        if self._pty_for(session) is not None:
+            return PTY_CELLS.to_dict()
+        if session.inject_target is not None:
+            return TMUX_CELLS.to_dict()
+        return None
 
     async def _reap_worktree(self, tmux_name: str) -> dict[str, Any]:
         """After a kill: remove the worktree THIS daemon run created for
@@ -360,7 +394,16 @@ class Daemon:
 
     def _inject_escape(self, session) -> None:
         """Voice 'stop' becomes a real interrupt for inject-capable sessions."""
-        if session is None or session.inject_target is None:
+        if session is None:
+            return
+        pp = self._pty_for(session)
+        if pp is not None:
+            try:
+                pp.write(b"\x1b")
+            except Exception as e:
+                self.bus.emit("daemon.error", {"error": f"inject: {e}"})
+            return
+        if session.inject_target is None:
             return
         host = session.identity.get("host_alias")  # None = local
         loop = asyncio.get_running_loop()
@@ -377,6 +420,13 @@ class Daemon:
             s = self.registry.get(session_id)
             if s is None or s.state != "idle" or not s.queued:
                 return  # it picked the input up (or left) — stand down
+            pp = self._pty_for(s)
+            if pp is not None:
+                try:
+                    pp.write(self.NUDGE_TEXT.encode() + b"\r")
+                except Exception as e:
+                    self.bus.emit("daemon.error", {"error": f"inject: {e}"})
+                return
             if s.inject_target is None:
                 return
             host = s.identity.get("host_alias")
@@ -492,15 +542,39 @@ class Daemon:
                 except WorktreeError as e:
                     raise ValueError(str(e)) from e  # caller error → 400
                 cwd = wt_path
+            backend = str(
+                payload.get("backend")
+                or self.cfg.get("terminal", {}).get("default_backend")
+                or "tmux"
+            )
+            if backend not in ("tmux", "pty"):
+                raise ValueError(f"backend must be tmux|pty, not {backend!r}")
             try:
-                name = await self._run_blocking(
-                    lambda: mgr.spawn(
-                        harness,
-                        name=display,
-                        cwd=cwd,
-                        host=payload.get("host"),
+                if backend == "pty":
+                    # W4: daemon-owned pty — live streamed terminal page;
+                    # local-only, dies with the daemon (stated in §5).
+                    if payload.get("host"):
+                        raise ValueError("pty backend is local-only; use tmux")
+                    from voco.adapters.ptyterm import PtyError
+
+                    try:
+                        pp = self._pty_backend().spawn(
+                            harness,
+                            cwd=str(cwd) if cwd else None,
+                            env={"VOCO_URL": f"http://127.0.0.1:{self._port}"},
+                        )
+                    except PtyError as e:
+                        raise ValueError(str(e)) from e
+                    name = pp.handle
+                else:
+                    name = await self._run_blocking(
+                        lambda: mgr.spawn(
+                            harness,
+                            name=display,
+                            cwd=cwd,
+                            host=payload.get("host"),
+                        )
                     )
-                )
             except Exception:
                 if wt_path is not None:
                     # The worktree was created for THIS spawn; a dead spawn
@@ -516,17 +590,28 @@ class Daemon:
                 raise
             if wt_path is not None:
                 self._spawned_worktrees[name] = wt_path
-            out = {"tmux_session": name}
+            out = {"backend": backend}
+            out["term" if backend == "pty" else "tmux_session"] = name
             if wt_path is not None:
                 out["worktree"] = wt_path
             return out
         if cmd == "session.kill":
-            mgr = self._tmux()
-            tmux_name = str(payload.get("name", ""))
-            await self._run_blocking(
-                lambda: mgr.kill(tmux_name, host=payload.get("host"))
-            )
-            return await self._reap_worktree(tmux_name)
+            name = str(payload.get("name", ""))
+            if name.startswith("pty-"):
+                from voco.adapters.ptyterm import PtyError
+
+                if self._pty is None:
+                    raise ValueError(f"no such terminal: {name}")
+                try:
+                    self._pty.kill(name)
+                except PtyError as e:
+                    raise ValueError(str(e)) from e
+            else:
+                mgr = self._tmux()
+                await self._run_blocking(
+                    lambda: mgr.kill(name, host=payload.get("host"))
+                )
+            return await self._reap_worktree(name)
         if cmd == "session.panes":
             mgr = self._tmux()
             panes = await self._run_blocking(lambda: mgr.list(host=payload.get("host")))
@@ -541,6 +626,14 @@ class Daemon:
         if cmd == "session.peek":
             from voco.core.pane_state import classify
 
+            # A daemon-owned pty answers from its ring buffer — no tmux.
+            name = str(payload.get("name", "")).strip()
+            if name and not payload.get("target"):
+                s = self.registry.by_call_name(name)
+                pty_proc = self._pty_for(s) if s is not None else None
+                if pty_proc is not None:
+                    text = pty_proc.capture()
+                    return {"text": text, "hint": classify(text)}
             target, host = self._peek_target(payload)
             mgr = self._tmux()
             text = await self._run_blocking(lambda: mgr.capture_pane(target, host=host))
@@ -813,6 +906,37 @@ class Daemon:
             return None  # its agent is gone/ineligible; ledger still has it
         return self._primary_session(ws)
 
+    def _wire_terminal_pages(self) -> None:
+        """W4: a registering session with a managed terminal gets its
+        pinned `term:<call_name>` page — stream for daemon-owned ptys,
+        read-only mirror for tmux panes. Cells ride the snapshot."""
+        self.registry.term_cells = self._term_cells
+
+        def on_event(env) -> None:
+            if env.type != "session.attached":
+                return
+            s = self.registry.get(str(env.payload.get("session_id") or ""))
+            if s is None:
+                return
+            pp = self._pty_for(s)
+            if pp is not None:
+                self.workspaces.upsert_terminal(
+                    s.identity,
+                    session_id=s.session_id,
+                    call_name=s.call_name,
+                    mode="stream",
+                    handle=pp.handle,
+                )
+            elif s.inject_target is not None:
+                self.workspaces.upsert_terminal(
+                    s.identity,
+                    session_id=s.session_id,
+                    call_name=s.call_name,
+                    mode="mirror",
+                )
+
+        self.bus.subscribe(on_event)
+
     def _wire_review_wake(self) -> None:
         self.registry.review_items = self._review_items_for
 
@@ -933,6 +1057,7 @@ class Daemon:
         self._restore_manifests()
         self._wire_manifest_saver()
         self._wire_review_wake()
+        self._wire_terminal_pages()
         self._start_watcher(loop)
         try:
             runner = await run_server(self.bridge, host=host, port=port)
@@ -974,6 +1099,9 @@ class Daemon:
                 self._state.save(self.registry.dump())  # final synchronous save
             except Exception as e:
                 print(f"voco-d: state save failed: {e}", file=sys.stderr)
+            if self._pty is not None:
+                # v1: pty terminals die with the daemon (§5, honest).
+                self._pty.shutdown()
             if self._manifest_locked:
                 # Flush every workspace touched this run, then drop the lock.
                 self._dirty_workspaces.update(self.workspaces.dirty_keys())

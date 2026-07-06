@@ -153,6 +153,10 @@ class Registry:
         # At-least-once: recomputed every listen, so an agent that crashes
         # mid-wake sees them again; idempotent by item id.
         self.review_items: Callable[[str], list[dict]] = lambda sid: []
+        # Terminal capability cells (SPEC-WORKBENCH §5) for a session,
+        # derived by the daemon from transport facts. Injected; None =
+        # no managed terminal. Rides the snapshot so UIs degrade per-cell.
+        self.term_cells: Callable[[Session], dict | None] = lambda s: None
 
     # ---- registration ----------------------------------------------------
 
@@ -165,9 +169,14 @@ class Registry:
             s.last_seen = self._now()
             return s
         capabilities = list(capabilities)
-        if (identity.get("tmux_pane") or identity.get("tmux_session")) and (
-            "inject" not in capabilities
-        ):
+        has_terminal = (
+            identity.get("tmux_pane")
+            or identity.get("tmux_session")
+            # Daemon-owned pty (W4): the spawn baked its handle into the
+            # instance; writing to it is the inject transport.
+            or str(identity.get("instance") or "").startswith("pty-")
+        )
+        if has_terminal and "inject" not in capabilities:
             capabilities.append("inject")
         s = Session(
             session_id=secrets.token_hex(16),
@@ -509,6 +518,7 @@ class Registry:
                     "capabilities": s.capabilities,
                     "host": s.identity.get("host"),
                     "root": s.home_root,
+                    "term": self.term_cells(s),
                     "unread_digest": s.unread_digest,
                     "queued": len(s.queued),
                     "pane_hint": s.pane_hint,
