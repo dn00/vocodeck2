@@ -480,12 +480,17 @@ class Daemon:
                     raise ValueError("--worktree is local-only (no --host)")
                 if not cwd:
                     raise ValueError("worktree spawn needs the source repo cwd")
+                from voco.adapters.worktree import WorktreeError
+
                 wmgr = self._worktrees_mgr()
                 branch = str(wt.get("branch", "")).strip()
                 base = wt.get("from")
-                wt_path = await self._run_blocking(
-                    lambda: wmgr.add(str(cwd), branch, base)
-                )
+                try:
+                    wt_path = await self._run_blocking(
+                        lambda: wmgr.add(str(cwd), branch, base)
+                    )
+                except WorktreeError as e:
+                    raise ValueError(str(e)) from e  # caller error → 400
                 cwd = wt_path
             try:
                 name = await self._run_blocking(

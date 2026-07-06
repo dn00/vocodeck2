@@ -43,8 +43,8 @@ AGENT_STATUSES = {"addressed", "disputed", "wont-fix"}
 @dataclass
 class Finding:
     """A human annotation on a page (SPEC-WORKBENCH §2). Diff anchors are
-    {file, side, start_line, end_line} — byte-compatible with
-    diff-annotate's output for downstream consumers."""
+    {file, side, startLine, endLine} — camelCase, byte-compatible with
+    diff-annotate's output for downstream consumers (§3.3 export)."""
 
     finding_id: str
     page_id: str
