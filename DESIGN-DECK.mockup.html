@@ -1,67 +1,54 @@
-<title>voco deck — UI re-architecture proposal</title>
+<title>voco deck — UI re-architecture proposal (rev 2)</title>
 <style>
   /* ---------- wrapper tokens (theme-aware) ---------- */
   :root {
-    --bg: #f4f5f7;
-    --panel: #ffffff;
-    --ink: #1d2530;
-    --dim: #5c6775;
-    --faint: #97a1ad;
-    --line: #dde2e8;
-    --voice: #b06a1a;      /* human/voice signal — amber, darkened for light ground */
-    --agent: #1a6fd4;      /* agent/work signal — blue */
-    --ok: #1a7f37;
-    --bad: #c93c37;
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #1d2530; --dim: #5c6775;
+    --faint: #97a1ad; --line: #dde2e8;
+    --voice: #b06a1a; --agent: #1a6fd4; --ok: #1a7f37; --bad: #c93c37;
     --code-bg: #eceef2;
     --sans: system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
   }
   @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0e1116; --panel: #151a21; --ink: #d3dce8; --dim: #8b96a5;
+    :root { --bg: #0e1116; --panel: #151a21; --ink: #d3dce8; --dim: #8b96a5;
       --faint: #5a6371; --line: #242c37; --voice: #e5a24f; --agent: #5aa7f7;
-      --ok: #46b95e; --bad: #f0655f; --code-bg: #1b212b;
-    }
+      --ok: #46b95e; --bad: #f0655f; --code-bg: #1b212b; }
   }
-  :root[data-theme="dark"] {
-    --bg: #0e1116; --panel: #151a21; --ink: #d3dce8; --dim: #8b96a5;
+  :root[data-theme="dark"] { --bg: #0e1116; --panel: #151a21; --ink: #d3dce8; --dim: #8b96a5;
     --faint: #5a6371; --line: #242c37; --voice: #e5a24f; --agent: #5aa7f7;
-    --ok: #46b95e; --bad: #f0655f; --code-bg: #1b212b;
-  }
-  :root[data-theme="light"] {
-    --bg: #f4f5f7; --panel: #ffffff; --ink: #1d2530; --dim: #5c6775;
+    --ok: #46b95e; --bad: #f0655f; --code-bg: #1b212b; }
+  :root[data-theme="light"] { --bg: #f4f5f7; --panel: #ffffff; --ink: #1d2530; --dim: #5c6775;
     --faint: #97a1ad; --line: #dde2e8; --voice: #b06a1a; --agent: #1a6fd4;
-    --ok: #1a7f37; --bad: #c93c37; --code-bg: #eceef2;
-  }
+    --ok: #1a7f37; --bad: #c93c37; --code-bg: #eceef2; }
 
   body { background: var(--bg); color: var(--ink); font: 15px/1.65 var(--sans); margin: 0; }
-  .page { max-width: 1160px; margin: 0 auto; padding: 40px 24px 96px; }
+  .page { max-width: 1180px; margin: 0 auto; padding: 40px 24px 96px; }
   .prose { max-width: 74ch; }
   h1 { font-size: 30px; line-height: 1.2; margin: 8px 0 4px; letter-spacing: -.015em; text-wrap: balance; }
   h2 { font-size: 20px; margin: 56px 0 12px; letter-spacing: -.01em; }
-  h3 { font-size: 15px; margin: 28px 0 8px; }
   p { margin: 10px 0; }
   .eyebrow { font: 600 11px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--voice); }
   .sub { color: var(--dim); font-size: 15px; max-width: 74ch; }
   code { font: 12.5px var(--mono); background: var(--code-bg); padding: 1.5px 5px; border-radius: 4px; }
-  a { color: var(--agent); }
-  .quiet { color: var(--dim); }
-  .small { font-size: 13px; }
+  .quiet { color: var(--dim); } .small { font-size: 13px; }
 
   table.audit { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 13.5px; }
   table.audit th { text-align: left; font: 600 11px/1.3 var(--sans); letter-spacing: .1em;
     text-transform: uppercase; color: var(--faint); padding: 8px 12px 8px 0; border-bottom: 1px solid var(--line); }
   table.audit td { vertical-align: top; padding: 10px 14px 10px 0; border-bottom: 1px solid var(--line); }
-  table.audit td:first-child { font-weight: 600; white-space: nowrap; }
+  table.audit td:first-child { font-weight: 600; }
   .verdict { color: var(--voice); font-weight: 600; }
 
   .callout { border: 1px solid var(--line); border-left: 3px solid var(--voice);
     background: var(--panel); padding: 12px 18px; border-radius: 6px; margin: 18px 0; max-width: 74ch; }
-
-  ol.ia { max-width: 76ch; padding-left: 22px; }
-  ol.ia li { margin: 10px 0; }
-  ul.tight { max-width: 76ch; padding-left: 22px; }
+  ul.tight { max-width: 78ch; padding-left: 22px; }
   ul.tight li { margin: 7px 0; }
+
+  table.scope { border-collapse: collapse; width: 100%; max-width: 980px; font-size: 13.5px; margin: 14px 0; }
+  table.scope th { text-align: left; font: 600 10.5px var(--sans); letter-spacing: .09em; text-transform: uppercase;
+    color: var(--faint); padding: 7px 14px 7px 0; border-bottom: 1px solid var(--line); }
+  table.scope td { padding: 9px 16px 9px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.scope td:first-child { font-weight: 600; white-space: nowrap; }
 
   /* ---------- scenario switcher ---------- */
   .scn-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 10px; align-items: center; }
@@ -70,29 +57,26 @@
   .scn:hover { color: var(--ink); border-color: var(--faint); }
   .scn.on { color: #fff; background: var(--voice); border-color: var(--voice); }
   .scn:focus-visible, .grip:focus-visible { outline: 2px solid var(--agent); outline-offset: 2px; }
-  .scn-note { font-size: 13px; color: var(--dim); margin: 6px 0 14px; min-height: 1.4em; max-width: 90ch; }
+  .scn-note { font-size: 13px; color: var(--dim); margin: 6px 0 14px; min-height: 2.8em; max-width: 96ch; }
 
-  /* =========================================================
-     THE MOCKUP — the proposed deck. Committed dark ground
-     (the product's world); light theme ships via tokens.
-     ========================================================= */
+  /* ================= THE MOCKUP ================= */
   .mock-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px;
     box-shadow: 0 12px 40px rgba(0,0,0,.18); }
   .deck {
     --m-bg: #0d1015; --m-rail: #0a0d12; --m-panel: #12161d; --m-tab: #171d26;
     --m-line: #232b36; --m-fg: #ccd6e4; --m-dim: #8792a2; --m-faint: #4c5665;
     --m-voice: #e5a24f; --m-agent: #57a8ff; --m-ok: #42b959; --m-warn: #d2a022; --m-bad: #f85149;
-    --railw: 236px; --dockw: 324px;
-    min-width: 1080px; height: 660px; background: var(--m-bg); color: var(--m-fg);
+    --railw: 236px; --dockw: 340px;
+    min-width: 1100px; height: 680px; background: var(--m-bg); color: var(--m-fg);
     font: 13px/1.5 var(--sans); display: flex; flex-direction: column; position: relative;
     border-radius: 10px; overflow: hidden;
   }
   .deck .mono { font-family: var(--mono); }
 
-  /* ---- presence strip (top): orb · captions · ONE input · speaking · controls ---- */
+  /* ---- presence strip ---- */
   .presence { height: 46px; display: flex; align-items: center; gap: 12px; padding: 0 12px;
-    background: var(--m-rail); border-bottom: 1px solid var(--m-line); flex: none; }
-  .orb-wrap { display: flex; align-items: center; gap: 9px; min-width: 128px; }
+    background: var(--m-rail); border-bottom: 1px solid var(--m-line); flex: none; position: relative; z-index: 25; }
+  .orb-wrap { display: flex; align-items: center; gap: 9px; min-width: 126px; }
   .orb { width: 26px; height: 26px; border-radius: 50%; position: relative; flex: none;
     background: radial-gradient(circle at 35% 30%, #2a3242, #171c26);
     border: 2px solid var(--m-faint); cursor: pointer; }
@@ -101,14 +85,11 @@
   .deck[data-live="hearing"] .orb::after { background: var(--m-voice); opacity: 1; }
   .deck[data-live="routed"] .orb { border-color: var(--m-voice); }
   .deck[data-live="routed"] .orb::after { background: var(--m-voice); opacity: .75; }
-  @keyframes orbpulse {
-    0%,100% { box-shadow: 0 0 0 0 rgba(229,162,79,.42); }
-    50% { box-shadow: 0 0 0 9px rgba(229,162,79,0); }
-  }
+  @keyframes orbpulse { 0%,100% { box-shadow: 0 0 0 0 rgba(229,162,79,.42); } 50% { box-shadow: 0 0 0 9px rgba(229,162,79,0); } }
   .orb-label { font-size: 11px; color: var(--m-dim); line-height: 1.25; }
   .orb-label b { display: block; font-weight: 600; color: var(--m-fg); font-size: 11.5px; }
 
-  .caption { flex: 1 1 46%; min-width: 0; display: flex; align-items: center; gap: 10px; }
+  .caption { flex: 1 1 44%; min-width: 0; display: flex; align-items: center; gap: 10px; }
   .cap-idle { color: var(--m-faint); font-size: 12.5px; }
   .bars { display: none; align-items: flex-end; gap: 2.5px; height: 18px; }
   .bars i { width: 3px; background: var(--m-voice); border-radius: 2px; animation: bar .9s ease-in-out infinite; }
@@ -118,6 +99,9 @@
   .cap-live, .cap-final { display: none; align-items: center; gap: 10px; min-width: 0; }
   .cap-live .lstn { color: var(--m-voice); font-size: 12.5px; }
   .cap-text { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cap-more { flex: none; font: 600 11px var(--sans); color: var(--m-voice); background: none;
+    border: 1px solid color-mix(in srgb, var(--m-voice) 45%, transparent); border-radius: 5px;
+    padding: 2px 8px; cursor: pointer; }
   .route-chip { flex: none; font: 600 11px var(--sans); color: var(--m-agent);
     border: 1px solid var(--m-agent); border-radius: 999px; padding: 1.5px 9px; }
   .deck[data-live="hearing"] .cap-idle, .deck[data-live="routed"] .cap-idle,
@@ -126,13 +110,24 @@
   .deck[data-live="hearing"] .bars { display: flex; }
   .deck[data-live="routed"] .cap-final { display: flex; }
 
-  .deck-input { flex: 1 1 30%; min-width: 170px; }
+  /* the utterance card: full text of a long prompt, dropped below the strip */
+  .utter { position: absolute; top: 46px; left: 148px; width: 520px; display: none;
+    background: var(--m-panel); border: 1px solid var(--m-line); border-top: 2px solid var(--m-voice);
+    border-radius: 0 0 10px 10px; box-shadow: 0 18px 44px rgba(0,0,0,.5); padding: 12px 16px; z-index: 24; }
+  .deck[data-live="routed"] .utter.open { display: block; }
+  .utter .uhead { display: flex; align-items: center; gap: 8px; font: 600 11px var(--sans);
+    color: var(--m-dim); margin-bottom: 6px; }
+  .utter .utext { font: 12.5px/1.6 var(--mono); color: var(--m-fg); white-space: pre-wrap; }
+  .utter .ufoot { font-size: 11px; color: var(--m-faint); margin-top: 8px; }
+  .utter .ufoot b { color: var(--m-dim); }
+
+  .deck-input { flex: 1 1 28%; min-width: 170px; }
   .deck-input input { width: 100%; background: var(--m-panel); border: 1px solid var(--m-line);
     color: var(--m-fg); border-radius: 6px; padding: 6px 11px; font: 12.5px var(--mono); }
   .deck-input input::placeholder { color: var(--m-faint); }
   .deck-input input:focus { outline: none; border-color: var(--m-voice); }
 
-  .speaking { display: none; align-items: center; gap: 9px; max-width: 30%; min-width: 0; }
+  .speaking { display: none; align-items: center; gap: 9px; max-width: 30%; min-width: 0; cursor: pointer; }
   .deck[data-live="speaking"] .speaking { display: flex; }
   .eq { display: flex; align-items: flex-end; gap: 2px; height: 14px; }
   .eq i { width: 2.5px; background: var(--m-agent); border-radius: 2px; animation: bar 1s ease-in-out infinite; }
@@ -144,18 +139,19 @@
     border: 1px solid var(--m-bad); border-radius: 5px; padding: 3px 9px; cursor: pointer; }
 
   .pctl { display: flex; align-items: center; gap: 7px; margin-left: auto; flex: none; }
-  .pbtn { font: 600 11px var(--sans); color: var(--m-dim); background: var(--m-panel);
+  .pbtn { font: 600 12px var(--sans); color: var(--m-dim); background: var(--m-panel);
     border: 1px solid var(--m-line); border-radius: 5px; padding: 4px 9px; cursor: pointer; }
   .pbtn:hover { color: var(--m-fg); }
   .pbtn.warm { color: var(--m-voice); border-color: color-mix(in srgb, var(--m-voice) 45%, transparent); }
   .conn { width: 7px; height: 7px; border-radius: 50%; background: var(--m-ok); flex: none; }
 
-  /* ---- body: rail · grip · work · grip · dock ---- */
+  /* ---- body grid ---- */
   .deck-body { flex: 1; display: grid; min-height: 0;
     grid-template-columns: var(--railw) 5px 1fr 5px var(--dockw); }
   .grip { cursor: col-resize; background: transparent; position: relative; }
   .grip:hover::after, .grip.dragging::after { content: ""; position: absolute; inset: 0 1.5px; background: var(--m-agent); opacity: .55; }
 
+  /* ---- rail ---- */
   .m-rail { background: var(--m-rail); border-right: 1px solid var(--m-line); overflow-y: auto; padding: 10px 0; }
   .rail-h { font: 600 10px var(--sans); letter-spacing: .1em; text-transform: uppercase;
     color: var(--m-faint); padding: 6px 12px 4px; }
@@ -165,7 +161,6 @@
   .ar-top { display: flex; align-items: center; gap: 8px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
   .dot.working { background: var(--m-warn); } .dot.listening { background: var(--m-ok); }
-  .dot.idle { background: var(--m-faint); }
   .ar-name { font-weight: 600; font-size: 13px; }
   .halo { display: none; } .deck[data-live="speaking"] .halo.freya { display: flex; }
   .ar-state { margin-left: auto; font-size: 10.5px; color: var(--m-faint); }
@@ -189,7 +184,7 @@
   .rail-action { padding: 6px 12px; font-size: 12px; color: var(--m-faint); cursor: pointer; }
   .rail-action:hover { color: var(--m-fg); }
 
-  /* ---- work: tabstrip + view ---- */
+  /* ---- work ---- */
   .m-work { display: flex; flex-direction: column; min-width: 0; background: var(--m-bg); }
   .tabstrip { display: flex; align-items: center; gap: 2px; padding: 6px 8px 0;
     border-bottom: 1px solid var(--m-line); overflow-x: hidden; flex: none; }
@@ -204,11 +199,9 @@
   .deck[data-scene="firstrun"] .tabstrip { display: none; }
 
   .view { flex: 1; min-height: 0; overflow-y: auto; background: var(--m-panel); position: relative; }
-
-  /* diff view */
   .diff-head { display: flex; align-items: center; gap: 10px; padding: 9px 16px;
     border-bottom: 1px solid var(--m-line); font-size: 12px; color: var(--m-dim); position: sticky; top: 0;
-    background: var(--m-panel); }
+    background: var(--m-panel); z-index: 2; }
   .diff-head .mono { color: var(--m-fg); }
   .sr-banner { font: 600 10.5px var(--sans); color: var(--m-warn);
     border: 1px solid color-mix(in srgb, var(--m-warn) 45%, transparent);
@@ -228,15 +221,25 @@
   .drow code { background: none; padding: 0; font-size: 12px; }
   .fchip { display: inline-flex; margin-left: 10px; font: 600 10px var(--sans); color: var(--m-voice);
     border: 1px solid color-mix(in srgb, var(--m-voice) 50%, transparent); border-radius: 999px; padding: 0 7px; }
-  .annotate { margin: 4px 16px 10px 100px; background: var(--m-bg); border: 1px solid var(--m-line);
-    border-left: 2px solid var(--m-voice); border-radius: 7px; padding: 9px 12px; max-width: 560px; }
-  .annotate .arow { display: flex; gap: 8px; align-items: center; }
-  .annotate select, .annotate input[type=text] { background: var(--m-panel); color: var(--m-fg);
-    border: 1px solid var(--m-line); border-radius: 5px; font: 12px var(--sans); padding: 5px 8px; }
-  .annotate input[type=text] { flex: 1; font-family: var(--mono); }
-  .annotate .flag { font: 600 12px var(--sans); color: #14181f; background: var(--m-voice);
-    border: none; border-radius: 5px; padding: 5.5px 13px; cursor: pointer; }
-  .annotate .anote { font-size: 10.5px; color: var(--m-faint); margin-top: 6px; }
+
+  /* the inline editor — diff-annotate reference layout, verbatim structure */
+  .inline-editor { margin: 0 0 8px 0; background: var(--m-bg); border-block: 1px solid var(--m-line);
+    padding: 10px 16px 10px 100px; }
+  .editor-target { font: 600 11.5px var(--mono); color: var(--m-dim); margin-bottom: 7px; }
+  .inline-editor textarea { width: 100%; max-width: 640px; min-height: 52px; resize: vertical;
+    background: var(--m-panel); border: 1px solid var(--m-line); color: var(--m-fg);
+    border-radius: 6px; padding: 8px 10px; font: 12.5px/1.5 var(--mono); }
+  .inline-editor textarea:focus { outline: none; border-color: var(--m-voice); }
+  .finding-controls { display: flex; align-items: center; gap: 6px; margin: 8px 0; }
+  .fpill { font: 600 11.5px var(--sans); color: var(--m-dim); background: none;
+    border: 1px solid var(--m-line); border-radius: 999px; padding: 3px 12px; cursor: pointer; }
+  .fpill.active { color: #14181f; background: var(--m-voice); border-color: var(--m-voice); }
+  .fblock { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--m-dim); margin-left: 8px; }
+  .editor-actions { display: flex; gap: 8px; margin: 6px 0 4px; }
+  .tbtn { font: 600 12px var(--sans); color: var(--m-fg); background: none;
+    border: 1px solid var(--m-line); border-radius: 6px; padding: 6px 14px; cursor: pointer; }
+  .tbtn.primary { color: #14181f; background: var(--m-voice); border-color: var(--m-voice); }
+  .flow-note { font-size: 11px; color: var(--m-faint); }
 
   /* first-run empty state */
   .view-empty { display: none; height: 100%; align-items: center; justify-content: center; }
@@ -256,16 +259,27 @@
   .copybtn { font: 10.5px var(--sans); color: var(--m-faint); border: 1px solid var(--m-line);
     background: none; border-radius: 4px; padding: 1px 7px; cursor: pointer; flex: none; }
 
-  /* ---- dock: review ledger ---- */
+  /* ---- dock: tabs [review | chat], scoped to the selection ---- */
   .m-dock { background: var(--m-rail); border-left: 1px solid var(--m-line); display: flex;
     flex-direction: column; min-width: 0; }
-  .dock-head { display: flex; align-items: center; padding: 10px 14px 8px; gap: 8px; flex: none; }
-  .dock-head b { font-size: 12.5px; }
-  .dock-head .tally { font-size: 11px; color: var(--m-faint); }
-  .export { margin-left: auto; font: 600 11px var(--sans); color: var(--m-dim); background: none;
-    border: 1px solid var(--m-line); border-radius: 5px; padding: 3px 9px; cursor: pointer; }
-  .export:hover { color: var(--m-fg); }
-  .dock-scroll { overflow-y: auto; padding: 0 10px 12px; display: grid; gap: 8px; align-content: start; }
+  .dock-scope { padding: 9px 14px 0; }
+  .dock-scope .who { font: 600 12.5px var(--sans); }
+  .dock-scope .where { font: 11px var(--mono); color: var(--m-faint); }
+  .dock-tabs { display: flex; gap: 2px; padding: 8px 10px 0; border-bottom: 1px solid var(--m-line); }
+  .dock-tab { font: 600 12px var(--sans); color: var(--m-dim); padding: 6px 13px; cursor: pointer;
+    border: 1px solid transparent; border-bottom: none; border-radius: 7px 7px 0 0; }
+  .dock-tab:hover { color: var(--m-fg); }
+  .deck[data-dock="review"] .dock-tab.t-review,
+  .deck[data-dock="chat"] .dock-tab.t-chat { background: var(--m-panel); color: var(--m-fg); border-color: var(--m-line); }
+  .dock-tab .n { font-size: 10px; color: var(--m-voice); }
+  .dock-export { margin-left: auto; font: 600 11px var(--sans); color: var(--m-dim); background: none;
+    border: 1px solid var(--m-line); border-radius: 5px; padding: 3px 9px; cursor: pointer; align-self: center; }
+
+  .dock-review, .dock-chat { display: none; min-height: 0; flex: 1; flex-direction: column; }
+  .deck[data-dock="review"] .dock-review { display: flex; }
+  .deck[data-dock="chat"] .dock-chat { display: flex; }
+
+  .dock-scroll { overflow-y: auto; padding: 10px; display: grid; gap: 8px; align-content: start; flex: 1; }
   .fcard { background: var(--m-panel); border: 1px solid var(--m-line); border-radius: 8px; padding: 9px 12px; }
   .fcard .fhead { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--m-dim); }
   .badge { font: 600 9.5px var(--sans); letter-spacing: .05em; text-transform: uppercase;
@@ -281,161 +295,167 @@
     font-size: 12px; color: var(--m-dim); }
   .freply b { color: var(--m-agent); font-size: 11px; }
 
-  /* ---- history drawer ---- */
-  .drawer { position: absolute; top: 46px; right: 0; width: 460px; max-height: 380px;
-    background: var(--m-rail); border: 1px solid var(--m-line); border-top: none;
-    border-radius: 0 0 0 10px; box-shadow: 0 18px 40px rgba(0,0,0,.5); display: none;
-    flex-direction: column; z-index: 30; }
-  .deck[data-scene="history"] .drawer { display: flex; }
-  .drawer-head { display: flex; gap: 8px; align-items: center; padding: 9px 14px;
-    border-bottom: 1px solid var(--m-line); font: 600 11px var(--sans); color: var(--m-dim); }
-  .drawer-scroll { overflow-y: auto; padding: 8px 14px 12px; display: grid; gap: 5px; }
-  .hline { display: grid; grid-template-columns: 52px 58px 1fr; gap: 10px; font: 11.5px var(--mono); }
-  .hline .ts { color: var(--m-faint); }
-  .hline .who { font-weight: 600; }
-  .hline.you .who { color: var(--m-voice); }
-  .hline.agent .who { color: var(--m-agent); }
-  .hline.route .who, .hline.queued .who { color: var(--m-faint); }
-  .hline .txt { color: var(--m-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* chat: per-agent conversation, room to breathe */
+  .msg { max-width: 100%; }
+  .msg .mhead { display: flex; gap: 8px; align-items: baseline; font-size: 10.5px; color: var(--m-faint); }
+  .msg .mhead b { font-size: 11.5px; }
+  .msg.you .mhead b { color: var(--m-voice); }
+  .msg.agent .mhead b { color: var(--m-agent); }
+  .msg .mbody { margin-top: 3px; background: var(--m-panel); border: 1px solid var(--m-line);
+    border-radius: 8px; padding: 8px 11px; font: 12.5px/1.6 var(--mono); white-space: pre-wrap; }
+  .msg.you .mbody { border-left: 2px solid color-mix(in srgb, var(--m-voice) 60%, transparent); }
+  .msg.agent .mbody { border-left: 2px solid color-mix(in srgb, var(--m-agent) 55%, transparent); }
+  .mmeta { font-size: 10.5px; color: var(--m-faint); padding: 0 2px; }
+  .chat-foot { flex: none; border-top: 1px solid var(--m-line); padding: 8px 14px;
+    font-size: 11px; color: var(--m-faint); }
+  .chat-foot b { color: var(--m-dim); }
 
-  /* ---- review picker ---- */
+  /* ---- review picker + settings modals ---- */
   .scrim { position: absolute; inset: 46px 0 0; background: rgba(5,7,10,.55); display: none;
     align-items: flex-start; justify-content: center; z-index: 40; }
-  .deck[data-scene="picker"] .scrim { display: flex; }
-  .picker { margin-top: 60px; width: 440px; background: var(--m-panel); border: 1px solid var(--m-line);
-    border-radius: 10px; box-shadow: 0 24px 60px rgba(0,0,0,.55); padding: 18px 20px; }
-  .picker h4 { margin: 0 0 2px; font-size: 14.5px; }
-  .picker .pwhere { font: 11.5px var(--mono); color: var(--m-faint); margin-bottom: 14px; }
+  .deck[data-scene="picker"] .scrim.s-picker { display: flex; }
+  .deck[data-scene="settings"] .scrim.s-settings { display: flex; }
+  .modal { margin-top: 48px; width: 460px; background: var(--m-panel); border: 1px solid var(--m-line);
+    border-radius: 10px; box-shadow: 0 24px 60px rgba(0,0,0,.55); padding: 18px 20px;
+    max-height: 540px; overflow-y: auto; }
+  .modal h4 { margin: 0 0 2px; font-size: 14.5px; }
+  .modal .pwhere { font: 11.5px var(--mono); color: var(--m-faint); margin-bottom: 14px; }
   .seg { display: flex; border: 1px solid var(--m-line); border-radius: 7px; overflow: hidden; margin-bottom: 12px; }
   .seg button { flex: 1; font: 600 12px var(--sans); color: var(--m-dim); background: none;
     border: none; padding: 7px 0; cursor: pointer; }
   .seg button.on { color: #14181f; background: var(--m-agent); }
-  .picker label { display: block; font: 600 10.5px var(--sans); letter-spacing: .07em;
+  .modal label { display: block; font: 600 10.5px var(--sans); letter-spacing: .07em;
     text-transform: uppercase; color: var(--m-faint); margin: 10px 0 4px; }
-  .picker input { width: 100%; background: var(--m-bg); border: 1px solid var(--m-line); color: var(--m-fg);
+  .modal input[type=text] { width: 100%; background: var(--m-bg); border: 1px solid var(--m-line); color: var(--m-fg);
     border-radius: 6px; padding: 7px 10px; font: 12.5px var(--mono); }
-  .picker .hintline { font-size: 11px; color: var(--m-faint); margin-top: 5px; }
-  .picker .pactions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+  .modal .hintline { font-size: 11px; color: var(--m-faint); margin-top: 5px; }
+  .modal .pactions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+  .set-h { font: 600 10.5px var(--sans); letter-spacing: .09em; text-transform: uppercase;
+    color: var(--m-voice); margin: 16px 0 4px; }
+  .set-h:first-of-type { margin-top: 8px; }
+  .set-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--m-line); }
+  .set-row .sk { flex: 1; font-size: 12.5px; }
+  .set-row .sk small { display: block; color: var(--m-faint); font-size: 10.5px; }
+  .set-row select, .set-row input[type=text] { background: var(--m-bg); color: var(--m-fg);
+    border: 1px solid var(--m-line); border-radius: 5px; font: 12px var(--sans); padding: 4px 8px; width: 130px; }
+  .set-row .ro { font: 11px var(--mono); color: var(--m-faint); }
+  .rr { font: 600 9px var(--sans); letter-spacing: .05em; color: var(--m-warn); text-transform: uppercase; }
 
-  /* mockup annotation labels (proposal layer, not product UI) */
-  .mock-caption { font-size: 13px; color: var(--dim); margin: 10px 2px 0; max-width: 90ch; }
+  .mock-caption { font-size: 13px; color: var(--dim); margin: 10px 2px 0; max-width: 92ch; }
 
-  .fig-label { font: 600 11px var(--sans); letter-spacing: .12em; text-transform: uppercase;
-    color: var(--faint); margin: 34px 0 8px; }
-
-  table.sig { border-collapse: collapse; width: 100%; max-width: 860px; font-size: 13px; margin: 12px 0; }
-  table.sig th { text-align: left; font: 600 10.5px var(--sans); letter-spacing: .09em; text-transform: uppercase;
-    color: var(--faint); padding: 7px 12px 7px 0; border-bottom: 1px solid var(--line); }
-  table.sig td { padding: 8px 14px 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
-  table.sig td:first-child { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
-
-  .slice { border: 1px solid var(--line); background: var(--panel); border-radius: 8px;
-    padding: 14px 18px; margin: 10px 0; max-width: 80ch; }
-  .slice b.sname { color: var(--voice); }
-  .slice p { margin: 6px 0 0; font-size: 14px; color: var(--dim); }
-
-  @media (prefers-reduced-motion: reduce) {
-    .orb, .bars i, .eq i { animation: none !important; }
-  }
+  @media (prefers-reduced-motion: reduce) { .orb, .bars i, .eq i { animation: none !important; } }
 </style>
 
 <div class="page">
   <div class="prose">
-    <div class="eyebrow">Design proposal · needs your yes before any code</div>
+    <div class="eyebrow">Design proposal · rev 2 · needs your yes before any code</div>
     <h1>voco deck — from debugger to product</h1>
-    <p class="sub">The W0–W5 machinery held up in dogfood; the surface on top of it didn't.
-    This is the re-architecture proposal from the mandate: information architecture,
-    an interactive mockup, the underlying-logic changes it needs, and the build order.
-    Nothing here is built yet.</p>
+    <p class="sub">Revision 2, reworked against your six redlines. The headline change is a crisp scoping
+    model: <b>one selection — the agent — and every surface follows it</b>: pages, review ledger,
+    chat history, input routing. Voice moments stay global; everything else is scoped.</p>
   </div>
 
-  <h2>What failed, and what this design answers</h2>
-  <div class="prose"><p>Every row is from your field report, traced to its actual cause in the current client.</p></div>
+  <h2>Your redlines → what changed</h2>
   <table class="audit">
-    <tr><th>Field report</th><th>Root cause in the code</th><th>Design answer</th></tr>
-    <tr>
-      <td>Voice has no visual presence</td>
-      <td>The client never subscribes to <code>turn.state</code> or <code>speech.*</code>;
-        <code>stt.partial</code> is declared but nothing emits it (batch whisper). Feed lines appear only after <code>stt.final</code>.</td>
-      <td class="verdict">The presence strip — a permanent top strip: mic orb pulses the moment VAD opens a turn,
-        live captions land against the speaking moment, agent speech shows who + the sentence + interrupt, right where it happens.</td>
-    </tr>
-    <tr>
-      <td>Feels like a debugger</td>
-      <td>Everything is 13px mono; controls are raw <code>&lt;select&gt;</code>s and <code>prompt()</code> dialogs;
-        empty states are CLI hints without affordances.</td>
-      <td class="verdict">Sans chrome / mono content split, real buttons and pickers, every empty state carries a working action, no <code>prompt()</code> anywhere.</td>
-    </tr>
-    <tr>
-      <td>Less useful than diff-annotate</td>
-      <td>Spec §3.2 promises a human diff picker ("works with no agent attached") — it was never built;
-        publishing is agent-only via a session-scoped bridge verb.</td>
-      <td class="verdict">"Review" is a first-class affordance: a button on every repo and in the tabstrip opens
-        branch / PR / staged picker → daemon resolves → diff opens. No agent required. Needs one new control command (below).</td>
-    </tr>
-    <tr>
-      <td>Two chats</td>
-      <td>Dock "chat" tab (<code>ask.create</code>) and feed input (<code>say_as_user</code>) are two text boxes with different semantics.</td>
-      <td class="verdict">One input story: typing = speaking (one box, in the presence strip, routed exactly like voice).
-        Questions to the agent are annotations — created in context on a diff line or page, and read in the review ledger. The "chat" tab is gone.</td>
-    </tr>
-    <tr>
-      <td>Panels not resizable</td>
-      <td>Fixed grid: <code>240px 1fr 320px</code>.</td>
-      <td class="verdict">Drag grips on both panel edges (live in this mockup — try them), sizes persisted locally. Dock and rail collapsible.</td>
-    </tr>
-    <tr>
-      <td>Messenger-first — rejected</td>
-      <td>—</td>
-      <td class="verdict">Honored. The center is always the work (diffs, docs, screens, terminals).
-        Conversation history is a drawer you summon, never a docked panel.</td>
-    </tr>
+    <tr><th>Redline</th><th>Rev 2 answer</th></tr>
+    <tr><td>Long prompts don't fit the routed caption</td>
+      <td class="verdict">The strip stays one line (it's the moment, not the record) but gains a
+      <b>“⌄ full” expansion card</b> with the complete utterance — and every utterance lands in full in the
+      Chat tab, which has room. Routed scenario shows a genuinely long prompt.</td></tr>
+    <tr><td>History popover is weak; long in/out doesn't fit; needs a better home</td>
+      <td class="verdict">The drawer is dead. History is now the <b>Chat tab in the right panel</b> — your
+      suggestion — scoped per agent, full-width wrapped messages, timestamps, queued markers. Needs one small
+      daemon addition (below): the agent half (<code>say_log</code>) already exists server-side; the user half doesn't.</td></tr>
+    <tr><td>Review panel mixed agents/repos together</td>
+      <td class="verdict">The dock is <b>scoped to the selection</b> and says so in its header
+      ("Freya · vocodeck2 · workbench"). Orion's findings live under Orion's selection. Nothing global.</td></tr>
+    <tr><td>Right panel could use tabs</td>
+      <td class="verdict">It has them: <b>Review | Chat</b>, both scoped to the same selection.</td></tr>
+    <tr><td>Annotation input must match diff-annotate</td>
+      <td class="verdict">Adopted verbatim from <code>diff-panel.mjs</code>: inline editor under the row,
+      "Concern for file:line" target label, <b>textarea</b>, pill row Concern | Question | Nit + blocking,
+      Add annotation / Cancel, the shift-click + Ctrl/Cmd+Enter tip line.</td></tr>
+    <tr><td>Nowhere to change settings</td>
+      <td class="verdict">Gear in the strip → <b>settings modal</b> over the existing
+      <code>config.get/config.set</code> commands, honest about hot-apply vs restart-required
+      (the daemon already reports which is which).</td></tr>
   </table>
 
-  <h2>The mockup</h2>
-  <div class="prose">
-    <p>This is the proposed deck, drawn with the real vocabulary: repo <code>vocodeck2</code>,
-    branch <code>workbench</code>, agents Freya and Orion. The scenario buttons walk the states that matter.
-    <b>The panel grips actually drag</b>, the tabs switch, the input routes on Enter — try it.</p>
-  </div>
+  <h2>The scoping model (the "one agent → one surface" semantics)</h2>
+  <table class="scope">
+    <tr><th>You select…</th><th>Center</th><th>Dock · Review</th><th>Dock · Chat</th><th>Voice + input route to</th></tr>
+    <tr><td>Agent (e.g. Freya)</td>
+      <td>her workspace's pages — diffs against <i>her</i> branch/worktree, her screen, her terminal</td>
+      <td>her workspace's ledger only</td>
+      <td>your conversation with <i>her</i></td>
+      <td>her (voice-active)</td></tr>
+    <tr><td>Workspace (no agent)</td>
+      <td>its pages + the review picker — agentless review works fully</td>
+      <td>its ledger</td>
+      <td>"no agent here" + the attach affordance</td>
+      <td>unchanged (last active agent)</td></tr>
+  </table>
+  <div class="callout"><b>The one global exception is voice itself.</b> The presence strip always tells the
+  truth about sound: if Orion speaks while you're looking at Freya, his name and words show in the speaking
+  slot (and his rail row gets the halo) — click the slot to jump to him. Sound is unscopeable; work is scoped.
+  Rail chips (flagged / queued counts) also stay live for every agent, so nothing important goes dark.</div>
 
+  <h2>The mockup — rev 2</h2>
   <div class="scn-row" role="tablist" aria-label="mockup scenarios">
-    <button class="scn on" data-s="quiet" data-live="quiet" data-note="Mic armed, nobody talking. The orb is the standing proof the deck is listening for the wake word — its ring color IS the attention mode.">Quiet</button>
-    <button class="scn" data-s="hearing" data-live="hearing" data-note="You started talking: VAD opened a turn (turn.state=capturing) — the orb pulses amber and bars run. When streaming STT lands, partial words print here live; today the state itself is the presence.">Hearing you</button>
-    <button class="scn" data-s="routed" data-live="routed" data-note="Utterance closed (stt.final) and routed (route.decision): your words print against the moment, with the route chip naming who got them. The line then settles into the history drawer.">Routed</button>
-    <button class="scn" data-s="speaking" data-live="speaking" data-note="Freya speaks aloud (speech.started): her name + the sentence being spoken + stop, in the strip — and a small equalizer halo on her rail row. Interrupt lives where the speech is.">Agent speaking</button>
-    <button class="scn" data-s="picker" data-live="quiet" data-note="The diff-annotate-parity affordance: Review on any repo (or ⊕ in the tabstrip) opens this picker. Daemon resolves branch/PR/staged in the workspace root and the diff page opens. No agent involved.">Review picker</button>
-    <button class="scn" data-s="history" data-live="quiet" data-note="The old bottom feed becomes a summoned drawer: full transcript/route/say history, filterable, out of the way. The conversation is never the center — this is the concession to history, not a messenger.">History drawer</button>
-    <button class="scn" data-s="firstrun" data-live="quiet" data-note="First run, nothing attached: both paths are buttons that work — review a branch diff right now (agentless), or copy the exact command that attaches an agent. No dead ends.">First run</button>
+    <button class="scn on" data-s="quiet" data-live="quiet" data-dock="review"
+      data-note="Mic armed, nobody talking. The orb is the standing proof the deck listens; its ring is the attention mode. Dock shows the selected agent's review ledger — note the scope header.">Quiet</button>
+    <button class="scn" data-s="hearing" data-live="hearing" data-dock="review"
+      data-note="VAD opened your turn (turn.state=capturing): orb pulses, bars run. When a streaming STT lands, partial words print here; until then the state itself is the honest presence.">Hearing you</button>
+    <button class="scn" data-s="routed" data-live="routed" data-dock="chat"
+      data-note="A LONG prompt, routed. The strip shows one line + “⌄ full” — the expansion card carries the whole utterance. And it's already in the Chat tab (right), in full, where the record lives. Strip = moment; chat = record.">Routed (long prompt)</button>
+    <button class="scn" data-s="speaking" data-live="speaking" data-dock="chat"
+      data-note="Freya speaks (speech.started): name + sentence + stop in the strip, halo on her rail row, and the sentence lands in her chat history. Click the speaking slot to jump to the speaker.">Agent speaking</button>
+    <button class="scn" data-s="picker" data-live="quiet" data-dock="review"
+      data-note="Diff-annotate parity: Review on any repo (or ⊕ in the tabstrip) → branch/PR/staged → daemon resolves in that workspace root → diff opens. No agent involved.">Review picker</button>
+    <button class="scn" data-s="settings" data-live="quiet" data-dock="review"
+      data-note="Gear → settings over config.get/config.set. Hot-apply keys apply live; the rest say RESTART honestly (the daemon already reports which). Client prefs (panels, theme) live here too.">Settings</button>
+    <button class="scn" data-s="firstrun" data-live="quiet" data-dock="review"
+      data-note="First run: both paths are working buttons — review a branch diff right now (agentless), or copy the command that attaches an agent. No dead ends.">First run</button>
   </div>
-  <div class="scn-note" id="scn-note">Mic armed, nobody talking. The orb is the standing proof the deck is listening for the wake word — its ring color IS the attention mode.</div>
+  <div class="scn-note" id="scn-note">Mic armed, nobody talking. The orb is the standing proof the deck listens; its ring is the attention mode. Dock shows the selected agent's review ledger — note the scope header.</div>
 
   <div class="mock-scroll">
-  <div class="deck" id="deck" data-live="quiet" data-scene="normal">
+  <div class="deck" id="deck" data-live="quiet" data-scene="normal" data-dock="review">
 
     <!-- presence strip -->
     <div class="presence">
       <div class="orb-wrap">
-        <div class="orb" id="orb" title="attention: wake — click to cycle (muted → wake → always), hold for push-to-talk"></div>
-        <div class="orb-label"><b id="orb-mode">wake</b><span id="orb-sub">full duplex</span></div>
+        <div class="orb" id="orb" title="attention: wake — click cycles (muted → wake → always), hold = push-to-talk"></div>
+        <div class="orb-label"><b id="orb-mode">wake</b><span>full duplex</span></div>
       </div>
       <div class="caption">
         <span class="cap-idle">say “deck …” or type — the deck is listening</span>
-        <span class="cap-live"><span class="bars"><i></i><i></i><i></i><i></i><i></i></span><span class="lstn">listening…</span><span class="cap-text quiet" id="partial-slot"></span></span>
-        <span class="cap-final"><span class="cap-text" id="final-text">“run the tests, then push if green”</span><span class="route-chip" id="route-chip">→ Freya</span></span>
+        <span class="cap-live"><span class="bars"><i></i><i></i><i></i><i></i><i></i></span><span class="lstn">listening…</span></span>
+        <span class="cap-final">
+          <span class="cap-text" id="final-text">“okay the strip works but when I speak a long prompt like this one — walk the ledger, addr…”</span>
+          <button class="cap-more" id="cap-more">⌄ full</button>
+          <span class="route-chip" id="route-chip">→ Freya</span>
+        </span>
       </div>
       <div class="deck-input"><input id="deck-input" type="text" placeholder="type as speech — routes to Freya" aria-label="type as speech"></div>
-      <div class="speaking">
+      <div class="speaking" title="click to jump to the speaker">
         <span class="eq"><i></i><i></i><i></i></span>
         <span class="speak-who">Freya</span>
-        <span class="speak-text">“Tests are green. Pushing to workbench now.”</span>
+        <span class="speak-text">“Ledger walked; two items were already stale. Gates are green.”</span>
         <button class="stopbtn">■ stop</button>
       </div>
       <div class="pctl">
-        <button class="pbtn" id="history-btn" title="voice history">☰ history</button>
         <button class="pbtn warm" title="interrupt: barge-in + Escape to the active agent">■</button>
+        <button class="pbtn" id="gear-btn" title="settings">⚙</button>
         <span class="conn" title="connected"></span>
       </div>
+    </div>
+
+    <!-- long-utterance expansion card -->
+    <div class="utter open" id="utter">
+      <div class="uhead"><span>you · 14:06:02 · voice</span><span class="route-chip">→ Freya</span></div>
+      <div class="utext">“okay the strip works but when I speak a long prompt like this one — walk the whole findings ledger, address everything that's still open, re-run the full gate set, and if the interdiff flags presence.mjs again re-push the branch diff so I can do another pass — I need to see that the deck actually heard all of it”</div>
+      <div class="ufoot">the full text is also in <b>Freya's chat tab</b> — the strip is the moment, chat is the record</div>
     </div>
 
     <!-- body -->
@@ -455,7 +475,7 @@
             <span class="dot listening"></span><span class="ar-name">Orion</span>
             <span class="ar-state">listening</span>
           </div>
-          <div class="ar-sub"><span>vocodeck2-fix-pty · fix-pty</span></div>
+          <div class="ar-sub"><span>vocodeck2-fix-pty · fix-pty</span><span class="chip">1 flagged</span></div>
         </div>
 
         <div class="rail-h" style="margin-top:14px">repos</div>
@@ -478,7 +498,7 @@
           <div class="tab"><span>◆ screen · Freya</span></div>
           <div class="tab on"><span class="mono">diff · vs origin/main</span><span class="rev">r2</span></div>
           <div class="tab"><span class="mono">plan.md</span></div>
-          <div class="tab"><span class="mono">term · Orion</span></div>
+          <div class="tab"><span class="mono">term · Freya</span></div>
           <div class="tab tab-review" data-open-picker>⊕ review</div>
         </div>
         <div class="view">
@@ -494,22 +514,31 @@
             <div class="drow add"><span class="ln"></span><span class="ln">39</span><code><span class="sign">+</span>   if (mic.attention === "muted") return "muted";</code></div>
             <div class="drow add flagged"><span class="ln"></span><span class="ln">40</span><code><span class="sign">+</span>   if (turn === "capturing") return "hearing";</code><span class="fchip">f-3ac1</span></div>
             <div class="drow add selected"><span class="ln"></span><span class="ln">41</span><code><span class="sign">+</span>   return mic.attention === "always" ? "hot" : "armed";</code></div>
-            <div class="annotate">
-              <div class="arow">
-                <select><option>concern</option><option>question</option><option>praise</option></select>
-                <label class="quiet small" style="display:flex;align-items:center;gap:4px"><input type="checkbox" style="width:auto"> blocking</label>
-                <input type="text" value="ptt_only should render as armed too — muted ring reads as 'deck off'">
-                <button class="flag">flag</button>
+
+            <!-- diff-annotate reference editor, structure verbatim -->
+            <div class="inline-editor">
+              <div class="editor-target">Concern for  presence.mjs:41 (new side)</div>
+              <textarea>ptt_only should render as armed too — a muted-looking ring while PTT is configured reads as "deck off", and that's exactly the presence bug this module exists to fix</textarea>
+              <div class="finding-controls">
+                <button class="fpill active">Concern</button>
+                <button class="fpill">Question</button>
+                <button class="fpill">Nit</button>
+                <label class="fblock"><input type="checkbox"> blocking</label>
               </div>
-              <div class="anote">flags land in the ledger → Freya wakes with them (shift-click extends the range)</div>
+              <div class="editor-actions">
+                <button class="tbtn primary">Add annotation</button>
+                <button class="tbtn">Cancel</button>
+              </div>
+              <div class="flow-note">Tip: shift-click another line first to annotate a range. Ctrl/Cmd+Enter to add.</div>
             </div>
+
             <div class="drow"><span class="ln">52</span><span class="ln">55</span><code>&nbsp;&nbsp;const strip = h("div", { class: "presence" });</code></div>
             <div class="drow del"><span class="ln">53</span><span class="ln"></span><code><span class="sign">−</span> statusbar.append(micSelect("mic", …));</code></div>
             <div class="drow add"><span class="ln"></span><span class="ln">56</span><code><span class="sign">+</span> strip.append(orb, captions, input, speaking, controls);</code></div>
             <div class="file-head"><span>src/voco/server/static/app.mjs</span>
               <span class="stat"><span class="add">+61</span> <span class="del">−38</span></span></div>
             <div class="drow del"><span class="ln">461</span><span class="ln"></span><code><span class="sign">−</span> function renderFeed() { /* bottom strip */ }</code></div>
-            <div class="drow add"><span class="ln"></span><span class="ln">470</span><code><span class="sign">+</span> // history drawer replaces the feed strip (one input story)</code></div>
+            <div class="drow add"><span class="ln"></span><span class="ln">470</span><code><span class="sign">+</span> // chat tab replaces the feed strip (one input story)</code></div>
           </div>
 
           <div class="view-empty">
@@ -533,149 +562,147 @@
       <div class="grip" id="grip-dock" tabindex="0" role="separator" aria-label="resize dock"></div>
 
       <div class="m-dock">
-        <div class="dock-head"><b>review</b><span class="tally">1 open · 1 addressed · 1 answered</span>
-          <button class="export">export ↓</button></div>
-        <div class="dock-scroll">
-          <div class="fcard">
-            <div class="fhead"><span class="badge open">open</span><span class="badge blocking">blocking</span>
-              <span class="loc">presence.mjs:40</span></div>
-            <div class="ftext">orb must reflect attention mode, not just VAD — muted should read differently from idle</div>
-          </div>
-          <div class="fcard">
-            <div class="fhead"><span class="badge done">addressed</span><span class="loc">http.py:359</span></div>
-            <div class="ftext">events WS lets a browser read the snapshot before the wb gate</div>
-            <div class="freply"><b>Freya</b> — gated at upgrade; regression test added. <span class="quiet mono small">5a43f29</span></div>
-          </div>
-          <div class="fcard">
-            <div class="fhead"><span class="badge ask">question</span><span class="badge done">answered</span></div>
-            <div class="ftext">why poll for tmux peek instead of a WS stream?</div>
-            <div class="freply"><b>Orion</b> — tmux mirror has no stream to attach; polling peek is the honest transport. pty pages do stream.</div>
+        <div class="dock-scope">
+          <span class="who">Freya</span> <span class="where">· vocodeck2 · workbench</span>
+        </div>
+        <div class="dock-tabs">
+          <div class="dock-tab t-review" data-docktab="review">review <span class="n">1</span></div>
+          <div class="dock-tab t-chat" data-docktab="chat">chat</div>
+          <button class="dock-export">export ↓</button>
+        </div>
+
+        <div class="dock-review">
+          <div class="dock-scroll">
+            <div class="fcard">
+              <div class="fhead"><span class="badge open">open</span><span class="badge blocking">blocking</span>
+                <span class="loc">presence.mjs:40</span></div>
+              <div class="ftext">orb must reflect attention mode, not just VAD — muted should read differently from idle</div>
+            </div>
+            <div class="fcard">
+              <div class="fhead"><span class="badge done">addressed</span><span class="loc">http.py:359</span></div>
+              <div class="ftext">events WS lets a browser read the snapshot before the wb gate</div>
+              <div class="freply"><b>Freya</b> — gated at upgrade; regression test added. <span class="quiet mono small">5a43f29</span></div>
+            </div>
+            <div class="fcard">
+              <div class="fhead"><span class="badge ask">question</span><span class="badge done">answered</span></div>
+              <div class="ftext">should the orb also carry PTT press state, or is that the halo's job?</div>
+              <div class="freply"><b>Freya</b> — the orb: press state is attention-level truth, same family as muted/wake/always. Halo stays speech-only.</div>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- history drawer -->
-    <div class="drawer">
-      <div class="drawer-head">voice history <span class="quiet">· transcripts, routes, says — newest last</span></div>
-      <div class="drawer-scroll">
-        <div class="hline you"><span class="ts">14:02:11</span><span class="who">you</span><span class="txt">“what's left before we can merge”</span></div>
-        <div class="hline agent"><span class="ts">14:02:14</span><span class="who">Freya</span><span class="txt">“Two findings open on the presence module.”</span></div>
-        <div class="hline route"><span class="ts">14:05:37</span><span class="who">route</span><span class="txt">answer (first mate, no dispatch)</span></div>
-        <div class="hline you"><span class="ts">14:06:02</span><span class="who">you</span><span class="txt">“run the tests, then push if green”</span></div>
-        <div class="hline queued"><span class="ts">14:06:02</span><span class="who">queued</span><span class="txt">Freya was mid-turn — delivered on her next listen</span></div>
-        <div class="hline agent"><span class="ts">14:08:19</span><span class="who">Freya</span><span class="txt">“Tests are green. Pushing to workbench now.”</span></div>
+        <div class="dock-chat">
+          <div class="dock-scroll">
+            <div class="msg you">
+              <div class="mhead"><b>you</b><span>14:06:02 · voice</span></div>
+              <div class="mbody">“okay the strip works but when I speak a long prompt like this one — walk the whole findings ledger, address everything that's still open, re-run the full gate set, and if the interdiff flags presence.mjs again re-push the branch diff so I can do another pass — I need to see that the deck actually heard all of it”</div>
+            </div>
+            <div class="mmeta">queued 8s — Freya was mid-turn; delivered on her next listen</div>
+            <div class="msg agent">
+              <div class="mhead"><b>Freya</b><span>14:08:19 · said aloud</span></div>
+              <div class="mbody">Heard all of it. Ledger walked: f-2b77 was already addressed in 5a43f29, f-3ac1 is real and I've queued the fix. Gates are green — 316 tests, mypy, ruff, tsc. The interdiff still flags presence.mjs, so I re-pushed the branch diff as r3; the since-rev banner marks what moved since your last pass.</div>
+            </div>
+            <div class="msg you">
+              <div class="mhead"><b>you</b><span>14:09:02 · typed</span></div>
+              <div class="mbody">“praise on the r3 hunk layout, flag stays open until I re-read”</div>
+            </div>
+          </div>
+          <div class="chat-foot"><b>One input.</b> Type in the strip above — typing = speaking. This tab is the record, per agent, and survives restarts.</div>
+        </div>
       </div>
     </div>
 
     <!-- review picker -->
-    <div class="scrim">
-      <div class="picker">
+    <div class="scrim s-picker">
+      <div class="modal">
         <h4>Review a diff</h4>
         <div class="pwhere">vocodeck2 · ~/work/vocodeck2 · workbench</div>
-        <div class="seg">
-          <button class="on">branch</button><button>PR #</button><button>staged</button>
-        </div>
+        <div class="seg"><button class="on">branch</button><button>PR #</button><button>staged</button></div>
         <label>against base</label>
         <input type="text" value="origin/main">
         <div class="hintline">empty = the repo's default branch · resolved by the daemon in the workspace root</div>
         <div class="pactions">
-          <button class="btn-ghost" data-close-picker>cancel</button>
-          <button class="btn-primary" data-close-picker>open diff</button>
+          <button class="btn-ghost" data-close-modal>cancel</button>
+          <button class="btn-primary" data-close-modal>open diff</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- settings -->
+    <div class="scrim s-settings">
+      <div class="modal">
+        <h4>Settings</h4>
+        <div class="pwhere">daemon config · ~/.config/voco/voco.toml — via config.get / config.set</div>
+        <div class="set-h">voice</div>
+        <div class="set-row"><span class="sk">duplex<small>full hears you over TTS; half mutes the mic while speaking</small></span>
+          <select><option>full_duplex</option><option>half_duplex</option></select></div>
+        <div class="set-row"><span class="sk">attention<small>when the deck listens</small></span>
+          <select><option>wake</option><option>always</option><option>ptt_only</option><option>muted</option></select></div>
+        <div class="set-row"><span class="sk">vad threshold<small>0–1 · higher = less sensitive</small></span>
+          <input type="text" value="0.5" style="width:70px"></div>
+        <div class="set-row"><span class="sk">dispatch hold<small>ms of patience before routing</small></span>
+          <input type="text" value="800" style="width:70px"></div>
+        <div class="set-h">workbench</div>
+        <div class="set-row"><span class="sk">live git tracking<small>seconds between re-resolves · 0 = off</small></span>
+          <input type="text" value="5" style="width:70px"></div>
+        <div class="set-row"><span class="sk">data dir<small>manifests + exports</small></span>
+          <span class="ro">~/.local/share/voco</span></div>
+        <div class="set-h">stt / tts</div>
+        <div class="set-row"><span class="sk">whisper model <span class="rr">restart</span><small>batch STT — streaming STT would light up live captions</small></span>
+          <select><option>small</option><option>medium</option></select></div>
+        <div class="set-h">this browser</div>
+        <div class="set-row"><span class="sk">theme</span>
+          <select><option>auto</option><option>dark</option><option>light</option></select></div>
+        <div class="set-row"><span class="sk">panel sizes</span>
+          <button class="tbtn" style="padding:4px 10px; font-size:11px">reset</button></div>
+        <div class="hintline" style="margin-top:10px">Unmarked keys apply live (the daemon's hot-apply list);
+          <span class="rr">restart</span> keys persist and say so — no silent "applied".</div>
+        <div class="pactions">
+          <button class="btn-ghost" data-close-modal>close</button>
+          <button class="btn-primary" data-close-modal>apply</button>
         </div>
       </div>
     </div>
 
   </div>
   </div>
-  <p class="mock-caption">Dark theme shown — the product's home ground. Light ships through the same
-  token layer as today. The grips between panels drag for real in this mockup; sizes would persist in
-  <code>localStorage</code>. Type in the input and press Enter to see the one-input story route it.</p>
+  <p class="mock-caption">Dark theme shown — the product's ground; light ships through the same tokens.
+  Grips drag for real. In the <b>Routed</b> scenario, “⌄ full” toggles the utterance card; the same text sits
+  in Freya's chat tab. Type in the input and press Enter to watch typing route like speech.</p>
 
-  <h2>The information architecture, in words</h2>
-  <ol class="ia">
-    <li><b>Presence strip (top, permanent).</b> The soul of the product gets the primary chrome:
-      mic orb (attention mode = ring color; VAD pulse when a turn opens; click cycles attention, hold = push-to-talk),
-      live caption area (listening state → your transcript → route chip), the <b>one input</b>
-      (typing = speaking, routed by the same arbitration as voice), agent-speaking slot
-      (who + sentence + stop), history toggle, interrupt, connection. The status bar and the bottom feed strip are gone —
-      their contents live here and in the drawer.</li>
-    <li><b>Rail (left): agents, then repos.</b> Agents keep the one-selection model from the product pass
-      (click = voice-active + their pages + pinned review). New: a speaking halo when their words are being
-      voiced, and repos get a standing <b>Review</b> button — review is a place you go, not a thing you wait for.</li>
-    <li><b>Work (center).</b> Unchanged in role: tabstrip + pages (agent card, screen, diff, doc, terminal).
-      New: the <code>⊕ review</code> tab affordance, product empty states with working buttons,
-      and the annotation composer styled as a first-class object.</li>
-    <li><b>Review ledger (right dock).</b> Findings and questions are one ledger (a question is just an
-      annotation without a line). The chat tab dies; replies render under their cards. Export stays.</li>
-    <li><b>History drawer (summoned).</b> The full voice feed — you/route/say/queued — slides from the strip
-      when asked. It is deliberately not dockable: the conversation is never the center.</li>
-  </ol>
-
-  <div class="callout">
-    <b>The one-input story, precisely:</b> there is exactly one free-text box in the app, and it means
-    "say this". It goes through <code>say_as_user</code> → arbitration → the active agent, identically to voice.
-    Questions <i>to an agent about work</i> are annotations, created in context (diff line, page) and answered
-    in the ledger. Nothing else accepts prose.
-  </div>
-
-  <h2>Voice presence: every visual is an existing signal</h2>
-  <p class="prose">No invented state. Each element binds to a protocol event that already fires today —
-  plus one honest gap, named below.</p>
-  <table class="sig">
-    <tr><th>Signal</th><th>Fires when</th><th>Drives</th></tr>
-    <tr><td>mic.state</td><td>duplex / attention changes</td><td>orb ring color + label (muted / wake / always / ptt)</td></tr>
-    <tr><td>turn.state = capturing</td><td>VAD opens your turn</td><td>orb pulse + "listening…" bars — presence at the speaking moment</td></tr>
-    <tr><td>turn.state = holding / routing</td><td>patience window / routing</td><td>orb steady-glow; caption keeps the floor</td></tr>
-    <tr><td>stt.final + route.decision</td><td>utterance transcribed + routed</td><td>your words in the caption slot + route chip ("→ Freya")</td></tr>
-    <tr><td>speech.started / finished</td><td>TTS starts/stops an item</td><td>agent-speaking slot + rail halo + stop button</td></tr>
-    <tr><td>input.queued</td><td>agent mid-turn, input parked</td><td>caption suffix "queued for Freya" + rail chip</td></tr>
-    <tr><td>stt.partial <span class="quiet">(declared, unemitted)</span></td><td>batch whisper never streams</td><td>the caption slot subscribes today and lights up the day a streaming STT lands — the UI is ready, honestly labeled until then</td></tr>
-  </table>
-
-  <h2>Underlying-logic changes this needs (small, all protocol-first)</h2>
+  <h2>Daemon support this revision adds (kept deliberately small)</h2>
   <ul class="tight">
-    <li><b><code>page.publish</code> control command</b> — human-initiated publish:
-      <code>{workspace, type: "diff", source: {branch|pr|staged}}</code>, resolved daemon-side in the workspace
-      root by the same resolver agents use. This is the §3.2 sentence ("humans can also add a diff… no agent
-      attached") that was speced and never built. The bridge verb can't do it — it demands a session.</li>
-    <li><b><code>workspace.open</code> control command</b> — mint a workspace from a path on the daemon host
-      (validated real directory). Completes agentless parity: first-run users can review a repo before any
-      agent ever attaches, exactly like diff-annotate.</li>
-    <li><b>Enrich <code>speech.started/finished</code></b> with <code>who</code> (call name) and the
-      <code>text</code> being voiced. Today they carry only source + turn_id — not enough to say
-      <i>who is saying what</i> without fragile client-side correlation.</li>
-    <li><b>Client-only:</b> resizable grid with persisted sizes; presence strip; history drawer;
-      ledger merge; empty states. No other daemon changes.</li>
+    <li><b>Per-session user-input log</b> — the chat tab's missing half. The agent half already exists
+      (<code>say_log</code>, bounded deque of 50, persisted in the state dump). Symmetric addition: record
+      dispatched transcripts on the session at <code>dispatch()</code> — <code>{ts, text, origin: voice|typed,
+      queued: bool}</code>, same bound, same persistence. <b>Not</b> stored: route decisions and other moment
+      data — the strip shows those live and they die with the moment. That's the whole complexity budget.</li>
+    <li><b><code>page.publish</code></b> + <b><code>workspace.open</code></b> control commands (unchanged from rev 1)
+      — agentless review parity.</li>
+    <li><b><code>speech.started/finished</code> payloads gain <code>who</code> + <code>text</code></b>
+      (unchanged from rev 1) — the speaking slot and rail halo need to know who says what.</li>
   </ul>
 
-  <h2>What stays untouched</h2>
-  <p class="prose">The store/bus seam, the pages model, findings/asks convergence, diff rendering + interdiff
-  chips, xterm terminal pages, the agent card, worktree spawn — all keep their logic. This is a re-skin of
-  chrome + three protocol additions, not a rewrite. The 316-test protocol surface stays the source of truth.</p>
-
-  <h2>Build order (each slice ends at a click-through checkpoint with you)</h2>
-  <div class="slice"><b class="sname">U0 — protocol first:</b> <code>page.publish</code>, <code>workspace.open</code>,
-    speech payload enrichment — tests at the command seam before any pixel moves.
-    <p>Everything the UI will do exists as a tested command first. (Also answers your CLI question — see the session notes.)</p></div>
-  <div class="slice"><b class="sname">U1 — the presence strip + one input:</b> orb, captions, speaking slot,
-    history drawer; feed strip and status bar removed; chat tab removed, ledger merged.
-    <p>Checkpoint: you talk, you see it; Freya talks, you see it. If this fails the touch-test, U2 doesn't start.</p></div>
-  <div class="slice"><b class="sname">U2 — review as a place:</b> picker (branch/PR/staged), repo Review buttons,
-    ⊕ tab, empty states with working actions, agentless flow end-to-end.
-    <p>Checkpoint: the diff-annotate parity test — pick a branch, see the diff, flag a line, no agent running.</p></div>
-  <div class="slice"><b class="sname">U3 — product polish:</b> resizable/persisted panels, sans/mono type split,
-    focus states, reduced-motion, light-theme pass.
-    <p>Checkpoint: the "would a GitHub rando get it" walk-through, together.</p></div>
-
-  <h2>Open forks — your call before U1</h2>
+  <h2>Build order (unchanged shape, rev-2 content; each slice ends at your click-through)</h2>
   <ul class="tight">
-    <li><b>Orb interaction:</b> proposal says click cycles attention (muted → wake → always) and press-and-hold is PTT.
-      Alternative: click = PTT toggle, attention only via a small menu. Which matches your hands?</li>
-    <li><b>Input placement:</b> proposed in the top strip (typing = speaking lives with the captions).
-      If your muscle memory demands bottom, it can sit as a single bottom bar instead — but only one of the two exists.</li>
-    <li><b>History drawer scope:</b> proposed voice-only (transcripts/routes/says). Findings activity could
-      interleave there too — or stay purely in the ledger. Lean: voice-only.</li>
+    <li><b>U0 — protocol:</b> page.publish, workspace.open, speech payload enrichment, per-session input log.
+      Tests at the command seam before any pixel.</li>
+    <li><b>U1 — presence + scoping:</b> strip (orb/captions/expansion card/one input/speaking slot),
+      dock tabs Review|Chat with the scope header, feed strip + status bar + old chat tab removed.
+      Checkpoint: you talk — you see it, long prompts readable; Freya talks — you see it; Orion's findings
+      never appear under Freya.</li>
+    <li><b>U2 — review as a place:</b> picker, repo Review buttons, ⊕ tab, the reference annotation editor,
+      empty states, agentless flow. Checkpoint: diff-annotate parity, no agent running.</li>
+    <li><b>U3 — polish:</b> settings modal, resizable persisted panels, type split, focus states,
+      reduced-motion, light theme. Checkpoint: the "GitHub rando" walkthrough.</li>
+  </ul>
+
+  <h2>Still open — your call</h2>
+  <ul class="tight">
+    <li><b>Orb interaction:</b> click cycles attention + hold = PTT (proposed), vs click = PTT toggle + attention via menu.</li>
+    <li><b>Input placement:</b> top strip (proposed, shown) vs a single bottom bar. Exactly one exists either way.</li>
+    <li><b>Chat depth:</b> is the bounded per-agent log (50 each side, restart-surviving) enough, or do you
+      want a fuller durable transcript (bigger bound, export)? Lean: bounded — it's presence support, not a log system.</li>
   </ul>
 </div>
 
@@ -687,30 +714,43 @@
     buttons.forEach(b => b.classList.toggle('on', b === btn));
     const s = btn.dataset.s;
     deck.dataset.live = btn.dataset.live;
-    deck.dataset.scene = (s === 'picker' || s === 'history' || s === 'firstrun') ? s : 'normal';
+    deck.dataset.dock = btn.dataset.dock || 'review';
+    deck.dataset.scene = (s === 'picker' || s === 'settings' || s === 'firstrun') ? s : 'normal';
+    if (s === 'routed') document.getElementById('utter').classList.add('open');
     note.textContent = btn.dataset.note;
   }
   buttons.forEach(b => b.addEventListener('click', () => setScenario(b)));
 
-  // review picker open/close from inside the mockup
   document.querySelectorAll('[data-open-picker]').forEach(el =>
     el.addEventListener('click', e => { e.stopPropagation(); deck.dataset.scene = 'picker'; }));
-  document.querySelectorAll('[data-close-picker]').forEach(el =>
+  document.querySelectorAll('[data-close-modal]').forEach(el =>
     el.addEventListener('click', () => { deck.dataset.scene = 'normal'; }));
-  document.querySelector('.scrim').addEventListener('click', e => {
+  document.querySelectorAll('.scrim').forEach(sc => sc.addEventListener('click', e => {
     if (e.target === e.currentTarget) deck.dataset.scene = 'normal';
-  });
-  document.getElementById('history-btn').addEventListener('click', () => {
-    deck.dataset.scene = deck.dataset.scene === 'history' ? 'normal' : 'history';
+  }));
+  document.getElementById('gear-btn').addEventListener('click', () => {
+    deck.dataset.scene = deck.dataset.scene === 'settings' ? 'normal' : 'settings';
   });
 
-  // one-input story demo: Enter routes typed text like speech
+  // dock tabs
+  document.querySelectorAll('[data-docktab]').forEach(t =>
+    t.addEventListener('click', () => { deck.dataset.dock = t.dataset.docktab; }));
+
+  // long-utterance card toggle
+  document.getElementById('cap-more').addEventListener('click', () =>
+    document.getElementById('utter').classList.toggle('open'));
+
+  // one-input demo: Enter routes typed text like speech
   const input = document.getElementById('deck-input');
   input.addEventListener('keydown', e => {
     if (e.key !== 'Enter' || !input.value.trim()) return;
-    document.getElementById('final-text').textContent = '“' + input.value.trim() + '”';
+    const t = input.value.trim();
+    document.getElementById('final-text').textContent =
+      '“' + (t.length > 80 ? t.slice(0, 80) + '…' : t) + '”';
     document.getElementById('route-chip').textContent = '→ Freya (typed)';
+    document.querySelector('#utter .utext').textContent = '“' + t + '”';
     deck.dataset.live = 'routed';
+    document.getElementById('utter').classList.toggle('open', t.length > 80);
     input.value = '';
   });
 
@@ -724,7 +764,7 @@
       modes[mi] === 'muted' ? 'var(--m-bad)' : modes[mi] === 'always' ? 'var(--m-voice)' : '';
   });
 
-  // live panel resizing — the table-stakes fix, proven here
+  // live panel resizing
   function grip(el, varName, min, max, fromRight) {
     el.addEventListener('pointerdown', down => {
       down.preventDefault();
@@ -732,8 +772,7 @@
       el.classList.add('dragging');
       const body = document.getElementById('deck-body');
       const start = down.clientX;
-      const startW = parseFloat(getComputedStyle(body).getPropertyValue(varName)) ||
-        (fromRight ? 324 : 236);
+      const startW = parseFloat(getComputedStyle(body).getPropertyValue(varName)) || (fromRight ? 340 : 236);
       const move = mv => {
         const d = fromRight ? start - mv.clientX : mv.clientX - start;
         body.style.setProperty(varName, Math.min(max, Math.max(min, startW + d)) + 'px');
@@ -748,5 +787,5 @@
     });
   }
   grip(document.getElementById('grip-rail'), '--railw', 170, 360, false);
-  grip(document.getElementById('grip-dock'), '--dockw', 230, 460, true);
+  grip(document.getElementById('grip-dock'), '--dockw', 240, 480, true);
 </script>

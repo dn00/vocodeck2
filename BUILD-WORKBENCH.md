@@ -211,14 +211,16 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
 ## RESUME HERE (updated 2026-07-06 night — PROPOSAL OUT, AWAITING THE YES)
 
 **State: the protocol-reliability fix is SHIPPED (`5a43f29`); the UI/UX
-re-architecture PROPOSAL is written and awaiting user approval.** Read
-`DESIGN-DECK.md` (+ its interactive mockup `DESIGN-DECK.mockup.html` /
-the artifact link inside) — it holds the IA, the signal map, the three
-protocol additions (page.publish, workspace.open, speech payload
-enrichment), the U0–U3 build order, and three open forks the user must
-answer. **Do not build any UI until the user approves** (and answers the
-forks); U0 (protocol commands, tested at the command seam) is the first
-build slice after the yes. The mandate text below stands.
+re-architecture proposal is at REV 2 (user's six redlines applied) and
+awaiting approval.** Read `DESIGN-DECK.md` (+ its interactive mockup
+`DESIGN-DECK.mockup.html` / the artifact link inside) — it holds the
+scoping model (one agent → one surface; dock tabs Review|Chat scoped to
+the selection), the signal map, the four daemon additions (page.publish,
+workspace.open, speech payload enrichment, per-session user-input log),
+the U0–U3 build order, and three open forks the user must answer (orb
+interaction, input placement, chat depth). **Do not build any UI until
+the user approves**; U0 (protocol, tested at the command seam) is the
+first build slice after the yes. The mandate text below stands.
 
 ## Previous RESUME (2026-07-06 EOD — UI/UX RE-ARCHITECTURE MANDATE)
 
@@ -360,6 +362,30 @@ Fix class for next session:
 
 ## Journal
 
+- **2026-07-06 (design rev 2 — user redlines applied; still awaiting the
+  yes)** — User verdict on rev 1: "good start, 40% there", six
+  redlines. All addressed in DESIGN-DECK.md rev 2 + reworked mockup:
+  (1) long routed prompts → one-line strip + "⌄ full" expansion card,
+  full text in chat; (2) weak history popover → KILLED, history is now
+  the Chat tab in the right dock (user's suggestion), per-agent,
+  wrapped, restart-surviving; (3) review panel mixing agents/repos →
+  dock is scoped to the selection with a scope header (Freya ·
+  vocodeck2 · workbench); (4) right panel tabs → Review | Chat; (5)
+  annotation input → adopted VERBATIM from the diff-annotate reference
+  (diff-panel.mjs inline editor + finding-controls.mjs pills
+  Concern|Question|Nit + blocking + tip line); (6) no settings → gear →
+  settings modal over config.get/set, honest hot-apply vs RESTART
+  marks. Scoping semantics pinned per the user's "one agent → one
+  surface" direction (table in DESIGN-DECK.md); voice moments are the
+  single global exception. His "route and queued in chat — daemon
+  better support that" concern answered by keeping route/moment data
+  OUT of chat (strip-only, dies with the moment) and adding exactly one
+  daemon piece: a per-session user-input log symmetric to the existing
+  say_log (deque(50), persisted, recorded at dispatch()). U0 now also
+  carries that log. Artifact re-published (login invalidated the rev-1
+  URL): https://claude.ai/code/artifact/29d18572-3742-46d6-bb7f-4e3c6d9cc7d0
+  STILL NOTHING BUILT — awaiting yes + fork answers (orb interaction,
+  input placement, chat depth).
 - **2026-07-06 (design proposal delivered — DESIGN-DECK.md + interactive
   mockup)** — The design-first half of the mandate. Full client audit
   first (every field-report item traced to its code cause: no
