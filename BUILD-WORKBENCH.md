@@ -211,16 +211,19 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
 ## RESUME HERE (updated 2026-07-06 night — PROPOSAL OUT, AWAITING THE YES)
 
 **State: the protocol-reliability fix is SHIPPED (`5a43f29`); the UI/UX
-re-architecture proposal is at REV 2 (user's six redlines applied) and
-awaiting approval.** Read `DESIGN-DECK.md` (+ its interactive mockup
-`DESIGN-DECK.mockup.html` / the artifact link inside) — it holds the
-scoping model (one agent → one surface; dock tabs Review|Chat scoped to
-the selection), the signal map, the four daemon additions (page.publish,
-workspace.open, speech payload enrichment, per-session user-input log),
-the U0–U3 build order, and three open forks the user must answer (orb
-interaction, input placement, chat depth). **Do not build any UI until
-the user approves**; U0 (protocol, tested at the command seam) is the
-first build slice after the yes. The mandate text below stands.
+re-architecture proposal is at REV 3 (user progression: 40% → 50-60%,
+aiming 70-80%) and awaiting approval.** Read `DESIGN-DECK.md` (+ its
+interactive mockup `DESIGN-DECK.mockup.html` / the artifact link
+inside) — rev 3 pins: brutalist visual language (only curve = the mic
+orb), TRANSCRIPT (radio log, not chat), rail tree (repo groups → agents
+→ pages; center tabs dead), collapsed-by-default diff file index,
+workspace demoted to data-only, bottom status line, terminal page view,
+product first-run (spawn/review/open + connect modal). Daemon budget:
+page.publish, workspace.open, speech who+text, per-session user-input
+log. **Do not build any UI until the user approves** + answers four
+forks (orb interaction, input placement, transcript depth, collapse
+default); then U0 (protocol, tested at the command seam) starts. The
+mandate text below stands.
 
 ## Previous RESUME (2026-07-06 EOD — UI/UX RE-ARCHITECTURE MANDATE)
 
@@ -362,6 +365,28 @@ Fix class for next session:
 
 ## Journal
 
+- **2026-07-06 (design rev 3 — brutalism, transcript, rail tree; user at
+  "50-60%", aiming 70-80%)** — Next redline batch, all folded into
+  DESIGN-DECK.md rev 3 + mockup: tech-brutalist skin (zero
+  border-radius except the mic orb — "the only curve in the deck is the
+  voice"); "chat" renamed TRANSCRIPT and rebuilt as a radio log (no
+  bubbles/alternation — kills the messenger feel the user flagged);
+  diffs are a collapsed-by-default file index (per-file fold + EXPAND
+  ALL; finding/since-rev files auto-expand — new fork 4); center tabs
+  KILLED in favor of pages nested under agents in the rail (one
+  navigation axis; agent-name prefixes drop structurally — answered the
+  user's "is selected-agent-per-page right?" with yes); workspace
+  demoted to data-only, rail groups agents BY REPO via common_dir
+  (agentless groups render "review-only"; custom groups parked — SPEC
+  decision 20); bottom status line restored (ambient truth only;
+  presence strip keeps voice moments); terminal page view added (pty
+  stream, ring-replay, focus tag, kill; tmux mirror noted); first-run
+  de-CLI'd — Spawn an agent (surfaces existing session.spawn) / Review
+  a diff / Open a repo, commands demoted to a "connect →" modal. Daemon
+  budget unchanged from rev 2 (input log, page.publish, workspace.open,
+  speech who+text); spawn/connect need nothing new. Artifact
+  re-published same URL. STILL NOTHING BUILT — awaiting yes + four
+  forks (orb, input placement, transcript depth, collapse default).
 - **2026-07-06 (design rev 2 — user redlines applied; still awaiting the
   yes)** — User verdict on rev 1: "good start, 40% there", six
   redlines. All addressed in DESIGN-DECK.md rev 2 + reworked mockup:

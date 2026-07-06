@@ -1,130 +1,136 @@
-# DESIGN-DECK — UI/UX re-architecture proposal, rev 2 (STATUS: awaiting user approval)
+# DESIGN-DECK — UI/UX re-architecture proposal, rev 3 (STATUS: awaiting user approval)
 
-Rev 2, 2026-07-06 — reworked against the user's six redlines on rev 1
-("40% there"). **No UI from this document may be built until the user
-says yes** (open forks below need answers too). Interactive mockup:
-`DESIGN-DECK.mockup.html` in this repo (self-contained, open in any
-browser), also published at
+Rev 3, 2026-07-06 — rev 2 was "50-60%"; this revision answers the next
+batch of redlines (brutalism, transcript, rail tree, collapsed diffs,
+workspace-as-grouping, status line, terminal view, product first-run).
+**No UI from this document may be built until the user says yes** (open
+forks below need answers too). Interactive mockup:
+`DESIGN-DECK.mockup.html` in this repo (self-contained), published at
 https://claude.ai/code/artifact/29d18572-3742-46d6-bb7f-4e3c6d9cc7d0
 
 ## Thesis
 
 The center is the WORK. Voice is a permanent glanceable PRESENCE, not a
-chat log. **One selection — the agent — and every surface follows it:**
-pages, review ledger, chat history, input routing. Voice moments are the
-single global exception (sound is unscopeable). Review is a place you go
-(agentless, diff-annotate parity). Exactly one free-text input exists,
-and it means "say this".
+chat log. **One selection — the agent — and every surface follows it.**
+Review is a place you go (agentless, diff-annotate parity). Exactly one
+free-text input exists and it means "say this". Visual language: tech
+brutalism — **the only curve in the deck is the voice** (the mic orb);
+everything else is hairline grid, square uppercase mono tags, flat
+bordered buttons, no washes, no soft shadows, no border-radius.
 
-## Rev-1 redlines → rev-2 answers
+## Rev-2 redlines → rev-3 answers
 
-1. **Long prompts unreadable in the routed caption** → strip stays
-   one-line (it is the moment, not the record) + a "⌄ full" expansion
-   card with the complete utterance; the full text also lands in the
-   Chat tab, which has room and wraps.
-2. **History popover weak** → KILLED. History = the **Chat tab** in the
-   right dock (user's suggestion), scoped per agent, full-width wrapped
-   messages, timestamps, queued markers, survives restarts.
-3. **Review panel mixed all agents/repos** → the dock is **scoped to
-   the selection** and its header names the scope ("Freya · vocodeck2 ·
-   workbench"). Nothing global in the dock, ever.
-4. **Right panel could use tabs** → it has them: **Review | Chat**,
-   both following the same selection.
-5. **Annotation input must match diff-annotate** → adopted verbatim
-   from the reference `diff-panel.mjs` + `finding-controls.mjs`:
-   inline editor row under the selected line, "Concern for file:line"
-   target label, textarea, pill row Concern|Question|Nit + blocking
-   checkbox, "Add annotation"/"Cancel" buttons, the shift-click-range +
-   Ctrl/Cmd+Enter tip line.
-6. **No settings surface** → gear in the strip → settings modal over
-   the existing `config.get`/`config.set`, honest about hot-apply vs
-   restart-required (daemon already reports which); client prefs
-   (theme, panel sizes) included.
+1. **Rounded message cards / "curve bracket" styling** → whole skin
+   rebuilt brutalist (rules above). Bubbles gone entirely.
+2. **"Chat" naming + messenger worry** → renamed **TRANSCRIPT** and
+   restructured as a radio log: flat hairline-separated entries
+   (timestamp · speaker tag · wrapped text), one shared column, no
+   alternation, no own input. Voice-native metaphor = captions history.
+3. **Diffs collapsed by default** → the diff is a file index: header
+   rows (path · +/− · finding count · since-rev chip), collapsed by
+   default, per-file toggle + EXPAND ALL/COLLAPSE ALL in the work
+   header. Files with open findings / changed-since-your-rev
+   auto-expand (fork 4 below).
+4. **Horizontal center tabs** → KILLED. Pages nest under the agent in
+   the rail — the tree IS the scoping model, one navigation axis. The
+   center gets a slim context header (crumb FREYA / page · rev +
+   page-level actions). Ctrl+P quick-switcher parked for later.
+5. **Agent name in page labels** → gone; nesting makes ownership
+   structural. Confirmed: selected-agent-per-surface is the model; the
+   speaking slot stays the sole global exception (sound is unscopeable).
+6. **Workspace concept — needed?** → workspace stays **data-only**
+   (findings/pages/manifests key on it; review must survive agents
+   detaching). As UI it dies: the rail groups agents **by repo**
+   (worktree siblings fold in via `common_dir`, zero-config). A repo
+   group with no agents renders "review-only" — the agentless
+   workspace, earning its place. Custom named groups parked until
+   dogfood demands them (SPEC decision 20: grouping is arrangement,
+   never identity).
+7. **Bottom status bar** → back, 24px, quiet: division of labor is
+   presence strip = voice moments, status line = ambient system truth
+   (● live · daemon addr · active agent · attention·duplex · live-git ·
+   agent/finding counts · last export). No controls in it.
+8. **No terminal UI** → fixed: terminal page view in the mockup — pty
+   stream (xterm, ring replay on attach, interactive-on-focus with a
+   visible focus tag, kill in the header, 80×24), tmux pages mirror
+   with a say-as-user row. Just another page in the agent's tree.
+9. **voco commands on first run** → gone from the landing. First run =
+   three product buttons: **Spawn an agent** (surfaces the existing
+   `session.spawn`: harness claude/codex/custom, repo, optional
+   worktree, tmux/pty backend), **Review a diff** (agentless), **Open a
+   repo**. CLI one-liners live behind a "connect →" modal for people
+   who already run sessions (voice_init / voco listen / mcp add).
 
-## The scoping model
+## Zones (rev 3)
 
-| You select… | Center | Dock·Review | Dock·Chat | Voice+input route |
-|---|---|---|---|---|
-| Agent | her workspace's pages (diffs vs HER branch/worktree, screen, terminal) | her workspace's ledger | your conversation with her | her (voice-active) |
-| Workspace (no agent) | its pages + review picker (agentless works fully) | its ledger | "no agent here" + attach affordance | unchanged |
+1. **Presence strip** (top): orb · captions (one-liner + FULL ⌄
+   expansion card for long utterances) · the ONE input · speaking slot
+   (who + sentence + ■ STOP, click jumps to speaker) · interrupt ·
+   gear · connection.
+2. **Rail** (left): repo groups → agents → pages (selected agent's
+   pages nest under them; the tree is the only navigation). Repo group
+   header carries REVIEW; "＋ agent in a new worktree" opens spawn.
+3. **Work** (center): slim context header (crumb + page actions:
+   expand-all for diffs, live/kill for terminals, ⊕ review) + the view.
+4. **Dock** (right): scope header ("FREYA · vocodeck2 · workbench") +
+   tabs **REVIEW | TRANSCRIPT** + export. Findings = flat rows, square
+   tags. Transcript = radio log.
+5. **Status line** (bottom): ambient truth, listed above.
+6. Modals: review picker (branch/PR/staged), spawn, connect, settings
+   (over config.get/set, honest hot-apply vs RESTART marks).
 
-Global exception: the presence strip always tells the truth about sound
-— if Orion speaks while Freya is selected, his name/words show in the
-speaking slot (click to jump to him); rail chips stay live for all
-agents.
-
-## Zones
-
-1. **Presence strip** (top): orb (attention = ring color; pulses on
-   `turn.state=capturing`; click cycles, hold = PTT) · caption slot
-   (listening → transcript one-liner + "⌄ full" card + route chip) ·
-   the ONE input · agent-speaking slot (who + sentence + ■ stop, click
-   to jump) · interrupt · gear · connection. Status bar and bottom
-   feed strip are REMOVED.
-2. **Rail** (left): agents (one-selection model; speaking halo), then
-   repos (each with a standing Review button; + new-worktree).
-3. **Work** (center): tabstrip + pages, unchanged in role; `⊕ review`
-   affordance; the reference annotation editor; product empty states
-   with working buttons.
-4. **Dock** (right): scope header + tabs **Review | Chat** + export.
-5. Modals: review picker (branch/PR/staged), settings.
-
-## Voice presence — signal map (no invented state)
+## Voice presence — signal map (unchanged from rev 2)
 
 | element | signal |
 |---|---|
 | orb ring color/label | `mic.state` |
 | orb pulse + listening bars | `turn.state = capturing` |
 | orb steady glow | `turn.state = holding/routing` |
-| caption + route chip + expansion card | `stt.final` + `route.decision` |
-| speaking slot + rail halo | `speech.started/finished` (needs who+text enrichment) |
-| chat "queued Ns" marker | `input.queued` |
-| live partial words | `stt.partial` — declared, UNEMITTED (batch whisper); UI subscribes now, lights up when streaming STT lands |
+| caption + route chip + FULL card | `stt.final` + `route.decision` |
+| speaking slot + rail halo | `speech.started/finished` (needs who+text) |
+| transcript "queued Ns" meta line | `input.queued` |
+| live partial words | `stt.partial` — declared, UNEMITTED (batch whisper); UI subscribes now |
 
-## Daemon support required (the whole complexity budget)
+## Daemon support required (the whole budget — unchanged from rev 2)
 
-1. **Per-session user-input log** — the chat tab's missing half. Agent
-   half exists (`say_log`, deque(50), persisted). Symmetric addition:
-   record dispatched transcripts on the session at `dispatch()` —
-   `{ts, text, origin: voice|typed, queued: bool}`, same bound, same
-   persistence. NOT stored: route decisions / moment data — the strip
-   shows those live and they die with the moment.
-2. **`page.publish` control command** — human-initiated publish
-   `{workspace, type: "diff", source: {branch|pr|staged}}`, daemon-side
-   resolution via the existing DiffResolver in the workspace root (the
-   §3.2 sentence that was speced and never built; the bridge verb can't
-   do it — it demands a session).
-3. **`workspace.open` control command** — mint a workspace from a real
-   directory on the daemon host (agentless first-run parity).
-4. **`speech.started/finished` payloads gain `who` + `text`** (today:
-   only source + turn_id).
+1. Per-session **user-input log** symmetric to `say_log` (deque(50),
+   persisted, recorded at `dispatch()`: `{ts, text, origin, queued}`).
+   Route/moment data never stored.
+2. **`page.publish`** control command (human diff publish, daemon-side
+   resolution in the workspace root).
+3. **`workspace.open`** control command (mint workspace from a real
+   path — agentless first-run parity).
+4. **`speech.started/finished` payloads gain `who` + `text`**.
 
-Everything else is client-only. Unchanged: store/bus seam, pages model,
-findings/asks convergence, diff renderer + interdiff chips, xterm
-terminal pages, agent card, worktree spawn, one-selection agent model.
+Spawn/connect modals need NOTHING new — `session.spawn` + adapters
+exist. Everything else is client-only. Unchanged machinery: store/bus
+seam, pages model, findings/asks convergence, diff renderer + interdiff,
+xterm terminal pages, agent card, worktree spawn.
 
-## Build order (each slice ends at a USER CLICK-THROUGH, not gates)
+## Build order (each slice ends at a USER CLICK-THROUGH)
 
 - **U0 — protocol:** page.publish, workspace.open, speech enrichment,
-  per-session input log. Tests at the command seam before any pixel.
-- **U1 — presence + scoping:** strip (orb/captions/expansion/one
-  input/speaking slot), dock tabs Review|Chat with scope header; feed
-  strip + status bar + old chat tab removed. Checkpoint: you talk — you
-  see it, long prompts readable; agent talks — you see it; Orion's
-  findings never appear under Freya.
-- **U2 — review as a place:** picker, repo Review buttons, ⊕ tab, the
-  reference annotation editor, empty states, agentless flow.
-  Checkpoint: diff-annotate parity with no agent running.
-- **U3 — polish:** settings modal, resizable persisted panels, type
-  split, focus states, reduced-motion, light theme. Checkpoint: the
-  "GitHub rando" walkthrough.
+  user-input log. Tests at the command seam first.
+- **U1 — presence + scoping:** strip, dock REVIEW|TRANSCRIPT + scope
+  header, rail tree (repo groups → agents → pages), status line; feed
+  strip + old status bar + chat tab + center tabs removed. Checkpoint:
+  you talk — you see it (long prompts readable); agent talks — you see
+  it; Orion's findings never under Freya.
+- **U2 — review as a place:** picker, repo REVIEW buttons, collapsed
+  file index + expand all, reference annotation editor, spawn/connect
+  modals, empty states, agentless flow. Checkpoint: diff-annotate
+  parity with no agent running.
+- **U3 — polish:** settings modal, resizable persisted panels, focus
+  states, reduced-motion, light theme. Checkpoint: "GitHub rando"
+  walkthrough.
 
 ## Open forks (user decides before U1)
 
-1. **Orb interaction:** click cycles attention + hold = PTT (proposed),
+1. **Orb interaction:** click cycles attention + hold = PTT (proposed)
    vs click = PTT toggle + attention via menu.
-2. **Input placement:** top strip (proposed/shown) vs a single bottom
-   bar — exactly one exists either way.
-3. **Chat depth:** bounded per-agent log (50/side, restart-surviving —
-   proposed) vs a fuller durable transcript (bigger bound, export).
-   Lean: bounded — it's presence support, not a log system.
+2. **Input placement:** top strip (shown) vs single bottom bar.
+3. **Transcript depth:** bounded per-agent log (50/side, proposed) vs
+   fuller durable transcript.
+4. **Collapsed-diff default:** collapse all EXCEPT files with open
+   findings / changed-since-your-rev (shown, proposed) vs strictly all
+   collapsed.
