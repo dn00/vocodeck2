@@ -524,6 +524,91 @@ class WorkspaceStore:
             out = [f for f in out if f["status"] == "open"]
         return out
 
+    # ---- persistence (SPEC-WORKBENCH §8; the manifest adapter drives fs) -----
+
+    MANIFEST_VERSION = 1
+
+    def dump_workspace(self, ws: Workspace) -> dict:
+        """Full persistable state for one workspace. Pages persist by
+        content (virtual docs, diffs) or by path (path-docs re-read fresh);
+        screen pages persist their markdown so a restart keeps the board."""
+        return {
+            "v": self.MANIFEST_VERSION,
+            "key": ws.key,
+            "host": ws.host,
+            "root": ws.root,
+            "name": ws.name,
+            "kind": ws.kind,
+            "repo": ws.repo,
+            "branch": ws.branch,
+            "common_dir": ws.common_dir,
+            "page_counter": self._page_counter,
+            "pages": [{**p.meta(), "data": p.data} for p in ws.pages.values()],
+            "findings": [f.to_dict() for f in ws.findings.values()],
+        }
+
+    def restore_workspace(self, data: dict) -> Workspace | None:
+        """Rebuild one workspace from a manifest. Defensive: a malformed
+        entry is skipped, never fatal (losing one workspace beats a boot
+        refusal)."""
+        if not isinstance(data, dict) or data.get("v") != self.MANIFEST_VERSION:
+            return None
+        try:
+            ws = Workspace(
+                key=str(data["key"]),
+                host=str(data["host"]),
+                root=str(data["root"]),
+                name=str(data["name"]),
+                kind=data["kind"],
+                repo=data.get("repo"),
+                branch=data.get("branch"),
+                common_dir=data.get("common_dir"),
+            )
+            for praw in data.get("pages", []):
+                page = Page(
+                    page_id=str(praw["page_id"]),
+                    type=str(praw["type"]),
+                    ref=str(praw["ref"]),
+                    title=str(praw["title"]),
+                    scope=praw["scope"],
+                    rev=int(praw.get("rev", 1)),
+                    pinned=bool(praw.get("pinned", False)),
+                    closed=bool(praw.get("closed", False)),
+                    session_id=praw.get("session_id"),
+                    call_name=praw.get("call_name"),
+                    data=dict(praw.get("data", {})),
+                    updated_ts=float(praw.get("updated_ts", 0.0)),
+                )
+                ws.pages[page.page_id] = page
+                self._pages_by_id[page.page_id] = page
+            for fraw in data.get("findings", []):
+                f = Finding(
+                    finding_id=str(fraw["finding_id"]),
+                    page_id=str(fraw["page_id"]),
+                    rev=int(fraw.get("rev", 1)),
+                    anchor=dict(fraw.get("anchor", {})),
+                    text=str(fraw.get("text", "")),
+                    kind=fraw.get("kind", "concern"),
+                    blocking=bool(fraw.get("blocking", False)),
+                    status=fraw.get("status", "open"),
+                    note=fraw.get("note"),
+                    commit=fraw.get("commit"),
+                    answer=fraw.get("answer"),
+                    created_ts=float(fraw.get("created_ts", 0.0)),
+                    updated_ts=float(fraw.get("updated_ts", 0.0)),
+                )
+                ws.findings[f.finding_id] = f
+        except (KeyError, TypeError, ValueError):
+            return None
+        self._spaces[ws.key] = ws
+        counter = data.get("page_counter", 0)
+        if isinstance(counter, int) and counter > self._page_counter:
+            self._page_counter = counter
+        return ws
+
+    def dirty_keys(self) -> list[str]:
+        return list(self._spaces.keys())
+
     # ---- snapshot (SPEC-WORKBENCH §9) ---------------------------------------
 
     def snapshot(self) -> list[dict[str, Any]]:

@@ -131,6 +131,13 @@ class Daemon:
         )
         self._state_save_task: asyncio.Task[None] | None = None
         self._watcher_task: asyncio.Task[None] | None = None
+        # Workbench manifests (SPEC-WORKBENCH §8): durable pages + findings.
+        from voco.adapters.manifest import WorkspaceManifest
+
+        self._manifest = WorkspaceManifest(self._workspace_data_dir())
+        self._manifest_locked = False
+        self._manifest_save_task: asyncio.Task[None] | None = None
+        self._dirty_workspaces: set[str] = set()
 
     def _tmux(self) -> TmuxManager:
         if self._tmux_mgr is None:
@@ -604,6 +611,64 @@ class Daemon:
 
         self.bus.subscribe(on_event)
 
+    # ---- workbench manifests (SPEC-WORKBENCH §8) ----------------------------
+
+    _MANIFEST_EVENTS = frozenset(
+        {"workspace.updated", "page.updated", "finding.added", "finding.updated"}
+    )
+
+    def _restore_manifests(self) -> None:
+        try:
+            self._manifest.acquire()
+            self._manifest_locked = True
+        except Exception as e:
+            # A live sibling daemon owns the data dir: run without durable
+            # workbench state rather than clobber it (fail-soft, named).
+            self.bus.emit("daemon.error", {"error": f"workspace lock: {e}"})
+            print(f"voco-d: workbench persistence off ({e})", file=sys.stderr)
+            return
+        manifests, errors = self._manifest.load_all()
+        for err in errors:
+            self.bus.emit("daemon.error", {"error": f"manifest: {err}"})
+        n = sum(1 for m in manifests if self.workspaces.restore_workspace(m))
+        if n:
+            print(f"voco-d: restored {n} workspace(s)")
+
+    def _wire_manifest_saver(self) -> None:
+        def on_event(env) -> None:
+            if env.type in self._MANIFEST_EVENTS:
+                key = env.payload.get("workspace") or env.payload.get("key")
+                if key:
+                    self._dirty_workspaces.add(key)
+                    self._schedule_manifest_save()
+
+        self.bus.subscribe(on_event)
+
+    def _schedule_manifest_save(self) -> None:
+        if not self._manifest_locked:
+            return
+        if self._manifest_save_task is not None and not self._manifest_save_task.done():
+            return
+
+        async def save_soon() -> None:
+            await asyncio.sleep(0.5)
+            self._flush_manifests()
+
+        self._manifest_save_task = asyncio.get_running_loop().create_task(save_soon())
+
+    def _flush_manifests(self) -> None:
+        if not self._manifest_locked:
+            return
+        keys, self._dirty_workspaces = self._dirty_workspaces, set()
+        for key in keys:
+            ws = self.workspaces.get(key)
+            if ws is None:
+                continue
+            try:
+                self._manifest.save(key, self.workspaces.dump_workspace(ws))
+            except Exception as e:
+                self.bus.emit("daemon.error", {"error": f"manifest save: {e}"})
+
     def _schedule_state_save(self) -> None:
         """Debounced: one pending save absorbs every change in its window
         (dump happens after the sleep, on the loop — always consistent)."""
@@ -683,6 +748,8 @@ class Daemon:
         self._wire_error_log()
         self._restore_state()
         self._wire_state_saver()
+        self._restore_manifests()
+        self._wire_manifest_saver()
         self._start_watcher(loop)
         try:
             runner = await run_server(self.bridge, host=host, port=port)
@@ -718,10 +785,17 @@ class Daemon:
                 self._watcher_task.cancel()
             if self._state_save_task is not None:
                 self._state_save_task.cancel()
+            if self._manifest_save_task is not None:
+                self._manifest_save_task.cancel()
             try:
                 self._state.save(self.registry.dump())  # final synchronous save
             except Exception as e:
                 print(f"voco-d: state save failed: {e}", file=sys.stderr)
+            if self._manifest_locked:
+                # Flush every workspace touched this run, then drop the lock.
+                self._dirty_workspaces.update(self.workspaces.dirty_keys())
+                self._flush_manifests()
+                self._manifest.release()
             print("voco-d: shut down cleanly")
 
 
