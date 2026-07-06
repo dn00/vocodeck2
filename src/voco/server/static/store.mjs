@@ -11,10 +11,11 @@
  *   scope:string, rev:number, pinned:boolean, closed:boolean,
  *   session_id:?string, call_name:?string}} PageMeta
  * @typedef {{session_id:string, name:string, display_name:string,
- *   state:string, display_state?:DisplayState, unread_digest:number}} Session
+ *   state:string, display_state?:DisplayState, unread_digest:number,
+ *   capabilities?:string[]}} Session
  */
 
-/** @typedef {"workspaces"|"sessions"|"selection"|"mic"|"conn"|"ticker"|"findings"} Kind */
+/** @typedef {"workspaces"|"sessions"|"selection"|"mic"|"conn"|"ticker"|"findings"|"asks"} Kind */
 
 export class Store {
   constructor() {
@@ -22,6 +23,8 @@ export class Store {
     /** @type {Map<string, Session>} */ this.sessions = new Map();
     // findings keyed by workspace key -> Map<finding_id, finding>
     /** @type {Map<string, Map<string, any>>} */ this.findings = new Map();
+    // asks keyed the same way (workspace key -> Map<ask_id, ask>)
+    /** @type {Map<string, Map<string, any>>} */ this.asks = new Map();
     this.activeSession = /** @type {?string} */ (null);
     this.selectedWorkspace = /** @type {?string} */ (null);
     this.selectedPage = /** @type {?string} */ (null);
@@ -35,6 +38,12 @@ export class Store {
   findingsFor(wsKey) {
     const m = this.findings.get(wsKey);
     return m ? [...m.values()] : [];
+  }
+
+  /** @param {string} wsKey @returns {any[]} oldest first */
+  asksFor(wsKey) {
+    const m = this.asks.get(wsKey);
+    return m ? [...m.values()].sort((a, b) => a.created_ts - b.created_ts) : [];
   }
 
   /** @param {Kind} kind @param {Function} fn @returns {() => void} */
@@ -94,6 +103,15 @@ export class Store {
         /** @type {Map<string, any>} */ (this.findings.get(key))
           .set(p.finding_id, p);
         this._notify("findings");
+        break;
+      }
+      case "ask.created":
+      case "ask.answered": {
+        // Same convergence model as findings: full state, last write wins.
+        const key = p.workspace;
+        if (!this.asks.has(key)) this.asks.set(key, new Map());
+        /** @type {Map<string, any>} */ (this.asks.get(key)).set(p.ask_id, p);
+        this._notify("asks");
         break;
       }
       case "screen.updated": break; // page.updated carries the same for us

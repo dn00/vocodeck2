@@ -5,6 +5,8 @@
  * a card to reveal its diff line; withdraw removes it (status → withdrawn).
  */
 
+import { renderMarkdown } from "./markdown.mjs";
+
 const el = (tag, attrs = {}, ...kids) => {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -51,8 +53,12 @@ export function renderFindings(body, findings, ctx) {
       el("div", { class: "finding-text", text: f.text }));
     if (f.note)
       card.append(el("div", { class: "finding-note", text: "note: " + f.note }));
-    if (f.answer)
-      card.append(el("div", { class: "finding-answer", text: f.answer }));
+    if (f.answer) {
+      // Agent replies are markdown (§4.3) — shared sanitizing renderer.
+      const answer = el("div", { class: "finding-answer" });
+      renderMarkdown(answer, f.answer);
+      card.append(answer);
+    }
     card.append(el("div", { class: "finding-actions" },
       el("button", { class: "btn ghost sm", text: "withdraw",
         onclick: () => ctx.onWithdraw(f.finding_id) })));

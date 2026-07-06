@@ -204,6 +204,22 @@ body {
 .finding-note, .finding-answer { font-size: 11px; color: var(--fg-dim);
   border-left: 2px solid var(--border-bright); padding-left: 6px; margin-top: 3px; }
 .finding-actions { display: flex; justify-content: flex-end; margin-top: 4px; }
+
+/* ---- chat/ask dock (W2) ---------------------------------------------------- */
+.dock-body { display: flex; flex-direction: column; }
+.chat-list { flex: 1; overflow-y: auto; min-height: 0; }
+.ask { border: 1px solid var(--border); border-radius: 5px;
+  padding: 7px 8px; margin-bottom: 8px; }
+.ask-text { font-weight: 500; }
+.ask-answer { font-size: 12px; color: var(--fg-dim); margin-top: 5px;
+  border-left: 2px solid var(--accent); padding-left: 7px; }
+.ask-pending { font-size: 11px; color: var(--fg-faint); margin-top: 5px;
+  font-style: italic; }
+.chat-note { font-size: 11px; color: var(--warn); padding: 4px 0; }
+.chat-input { width: 100%; resize: vertical; background: var(--bg-tab);
+  color: var(--fg); border: 1px solid var(--border); border-radius: 5px;
+  padding: 6px 8px; font: inherit; margin-top: 6px; }
+.chat-input:focus { outline: none; border-color: var(--accent); }
 .toast-msg { position: fixed; bottom: 34px; left: 50%; transform: translateX(-50%);
   background: var(--bg-panel); border: 1px solid var(--border-bright); color: var(--fg);
   padding: 8px 14px; border-radius: 6px; z-index: 100; max-width: 70vw; }

@@ -107,8 +107,7 @@ def handle_workbench_command(store, cmd: str, payload: dict, *, data_dir):
         )
         return {"ask": a.to_dict()}
     if cmd == "ask.list":
-        ws = store.get(str(payload.get("workspace", "")))
-        return {"asks": [a.to_dict() for a in ws.asks.values()] if ws else []}
+        return {"asks": store.asks_for(str(payload.get("workspace", "")))}
     if cmd == "review.export":
         from voco.core.review_export import export_workspace
 
@@ -308,6 +307,7 @@ class WorkbenchRoutes:
             {
                 "workspace": ws.key,
                 "findings": store.findings_for(ws.key, open_only=open_only),
+                "asks": store.asks_for(ws.key, open_only=open_only),
             }
         )
 

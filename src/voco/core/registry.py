@@ -263,7 +263,9 @@ class Registry:
             "text": text,
             "origin": origin,
             "age_s": 0,
-            "queued": self._queued_payload(s.queued),
+            # Pending review items ALWAYS ride along (§4.2) — on a live
+            # voice delivery too, not just on listen.
+            "queued": self._queued_payload(s.queued) + self.review_items(s.session_id),
         }
         if s.parked and self.try_deliver(s.session_id, payload):
             s.queued.clear()

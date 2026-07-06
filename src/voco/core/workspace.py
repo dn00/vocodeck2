@@ -153,7 +153,10 @@ class Workspace:
 
     def pending_review(self) -> list[dict[str, Any]]:
         """Items an agent must act on (SPEC-WORKBENCH §4.2): open findings
-        + unanswered asks. Stable ids → idempotent, at-least-once safe."""
+        + unanswered asks. Stable ids → idempotent, at-least-once safe.
+        Item shape is `{kind: finding|ask, id, workspace, finding|ask}` —
+        the payload nests under its kind so item keys can never collide
+        with domain keys (a finding has its own `kind`)."""
         items: list[dict[str, Any]] = []
         for f in self.findings.values():
             if f.status == "open":
@@ -162,7 +165,7 @@ class Workspace:
                         "kind": "finding",
                         "id": f.finding_id,
                         "workspace": self.key,
-                        **f.to_dict(),
+                        "finding": f.to_dict(),
                     }
                 )
         for a in self.asks.values():
@@ -172,7 +175,7 @@ class Workspace:
                         "kind": "ask",
                         "id": a.ask_id,
                         "workspace": self.key,
-                        **a.to_dict(),
+                        "ask": a.to_dict(),
                     }
                 )
         return items
@@ -249,6 +252,14 @@ class WorkspaceStore:
         return self._get_or_create(
             host, str(identity.get("cwd") or "?"), kind="sessionspace"
         )
+
+    def home_of(self, identity: dict[str, Any]) -> Workspace | None:
+        """Non-mutating resolve: the workspace this identity WOULD land in,
+        or None if it doesn't exist yet. Read paths (primary election,
+        review-item computation) must never create workspaces or emit."""
+        host = str(identity.get("host") or "?")
+        root = identity.get("worktree") or identity.get("cwd") or "?"
+        return self._spaces.get(_workspace_key(host, str(root)))
 
     def _get_or_create(
         self,
@@ -578,6 +589,16 @@ class WorkspaceStore:
             out = [f for f in out if f["status"] == "open"]
         return out
 
+    def asks_for(self, workspace_key: str, *, open_only: bool = False) -> list[dict]:
+        """Asks mirror findings_for: open ≡ unanswered."""
+        ws = self._spaces.get(workspace_key)
+        if ws is None:
+            return []
+        out = [a.to_dict() for a in ws.asks.values()]
+        if open_only:
+            out = [a for a in out if a["answer"] is None]
+        return out
+
     # ---- asks (SPEC-WORKBENCH §4.3) -----------------------------------------
 
     def add_ask(
@@ -605,9 +626,14 @@ class WorkspaceStore:
     def answer_finding(
         self, workspace_key: str, finding_id: str, markdown: str
     ) -> Finding:
-        """An agent answers a question-kind finding in place (§4.2)."""
+        """An agent answers a question-kind finding in place (§4.2). For a
+        question the reply IS the round-trip, so an open question flips to
+        addressed — at-least-once redelivery must converge without a
+        separate finding_status call. Other kinds keep their status."""
         ws, f = self._find(workspace_key, finding_id)
         f.answer = markdown
+        if f.kind == "question" and f.status == "open":
+            f.status = "addressed"
         f.updated_ts = self._now()
         self._emit_finding("updated", ws, f)
         return f
@@ -642,6 +668,9 @@ class WorkspaceStore:
         refusal)."""
         if not isinstance(data, dict) or data.get("v") != self.MANIFEST_VERSION:
             return None
+        # Build fully local first; register in _spaces/_pages_by_id only on
+        # success — a malformed entry mid-parse must not leave orphaned
+        # page ids pointing at a workspace that was never added.
         try:
             ws = Workspace(
                 key=str(data["key"]),
@@ -669,7 +698,6 @@ class WorkspaceStore:
                     updated_ts=float(praw.get("updated_ts", 0.0)),
                 )
                 ws.pages[page.page_id] = page
-                self._pages_by_id[page.page_id] = page
             for fraw in data.get("findings", []):
                 f = Finding(
                     finding_id=str(fraw["finding_id"]),
@@ -700,6 +728,7 @@ class WorkspaceStore:
         except (KeyError, TypeError, ValueError):
             return None
         self._spaces[ws.key] = ws
+        self._pages_by_id.update(ws.pages)
         counter = data.get("page_counter", 0)
         if isinstance(counter, int) and counter > self._page_counter:
             self._page_counter = counter

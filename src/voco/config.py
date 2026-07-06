@@ -69,7 +69,10 @@ SCHEMA: dict[str, dict[str, tuple[type, ...]]] = {
         "voice": (str,),
     },
     "bridge": {"token": (str,)},
+    "server": {"allowed_origins": (list,)},
     "state": {"dir": (str,)},
+    # Workbench persistence (SPEC-WORKBENCH §8): manifests + exports.
+    "workbench": {"data_dir": (str,)},
     "watcher": {
         "enabled": (bool,),
         "interval_s": (int, float),

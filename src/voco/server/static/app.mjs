@@ -10,6 +10,7 @@ import { connectBus } from "./bus.mjs";
 import { renderMarkdown } from "./markdown.mjs";
 import { renderDiff } from "./diff.mjs";
 import { renderFindings } from "./findings.mjs";
+import { renderChat } from "./chat.mjs";
 
 const store = new Store();
 const bus = connectBus(store);
@@ -192,15 +193,33 @@ async function closePage(p) {
   catch (e) { console.error(e); }
 }
 
-// ---- dock: findings list (chat lands in W2) ---------------------------------
+// ---- dock: findings + chat tabs (SPEC-WORKBENCH §4) --------------------------
+let dockTab = "findings";
+
 function renderDock() {
   dock.replaceChildren();
+  const wsKey = store.selectedWorkspace || "";
+  const tab = (name, label) => h("div",
+    { class: "dock-tab" + (dockTab === name ? " on" : ""),
+      onclick: () => { dockTab = name; renderDock(); } },
+    label);
+  const pendingAsks = store.asksFor(wsKey).filter((a) => a.answer == null).length;
   dock.append(h("div", { class: "dock-tabs" },
-    h("div", { class: "dock-tab on" }, "findings"),
-    h("div", { class: "dock-tab", onclick: () => exportReview() }, "export")));
+    tab("findings", "findings"),
+    tab("chat", pendingAsks ? `chat (${pendingAsks})` : "chat"),
+    h("div", { class: "dock-tab", onclick: () => exportReview() }, "export ↓")));
   const body = h("div", { class: "dock-body" });
   dock.append(body);
-  const wsKey = store.selectedWorkspace || "";
+  if (dockTab === "chat") {
+    renderChat(body, store.asksFor(wsKey), {
+      hasReviewAgent: hasReviewAgent(),
+      onAsk: async (text) => {
+        try { await bus.command("ask.create", { workspace: wsKey, text }); }
+        catch (e) { toast("ask failed: " + (e instanceof Error ? e.message : e)); }
+      },
+    });
+    return;
+  }
   renderFindings(body, store.findingsFor(wsKey), {
     onWithdraw: async (id) => {
       try { await bus.command("finding.withdraw", { workspace: wsKey, finding_id: id }); }
@@ -208,6 +227,15 @@ function renderDock() {
     },
     onReveal: (f) => revealFinding(f),
   });
+}
+
+function hasReviewAgent() {
+  // Honest only when we know: capability lists ride the snapshot; a
+  // session attached since then has none — do not claim its absence.
+  const sessions = [...store.sessions.values()];
+  if (!sessions.length) return false;
+  return sessions.some((s) => !Array.isArray(s.capabilities)
+    || s.capabilities.includes("review"));
 }
 
 function revealFinding(f) {
@@ -236,7 +264,8 @@ function toast(msg) {
   setTimeout(() => t.remove(), 4000);
 }
 
-// Fetch full findings when a workspace is selected (snapshot carries counts).
+// Fetch full findings + asks when a workspace is selected (the snapshot
+// carries counts only).
 async function loadFindings(wsKey) {
   if (!wsKey || store.findings.has(wsKey)) return;
   try {
@@ -245,6 +274,17 @@ async function loadFindings(wsKey) {
     for (const f of r.findings || []) m.set(f.finding_id, f);
     store.findings.set(wsKey, m);
     store._notify("findings");
+  } catch (e) { /* not connected yet; a later event fills it */ }
+}
+
+async function loadAsks(wsKey) {
+  if (!wsKey || store.asks.has(wsKey)) return;
+  try {
+    const r = await bus.command("ask.list", { workspace: wsKey });
+    const m = new Map();
+    for (const a of r.asks || []) m.set(a.ask_id, a);
+    store.asks.set(wsKey, m);
+    store._notify("asks");
   } catch (e) { /* not connected yet; a later event fills it */ }
 }
 
@@ -269,12 +309,17 @@ store.subscribe("sessions", renderRail);
 store.subscribe("selection", () => {
   renderRail(); renderEditor(); renderDock();
   loadFindings(store.selectedWorkspace || "");
+  loadAsks(store.selectedWorkspace || "");
 });
 store.subscribe("findings", () => { renderDock(); renderEditor(); });
+store.subscribe("asks", renderDock);
 store.subscribe("mic", renderStatus);
 store.subscribe("conn", () => {
   renderStatus();
-  if (store.connected) loadFindings(store.selectedWorkspace || "");
+  if (store.connected) {
+    loadFindings(store.selectedWorkspace || "");
+    loadAsks(store.selectedWorkspace || "");
+  }
 });
 store.subscribe("ticker", renderStatus);
 

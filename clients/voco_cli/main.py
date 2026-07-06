@@ -77,14 +77,57 @@ def format_transcript(result: dict) -> str:
     """Render a listen payload for an agent: the backlog is marked with
     age/origin so a slow agent sees WHAT is stale instead of an
     undifferentiated wall of text (live-test bug); the last line is
-    always the current instruction."""
+    always the current instruction. Review items riding `queued`
+    (SPEC-WORKBENCH §4.2) render with the review formatter."""
     lines = []
     for q in result.get("queued", []):
+        if q.get("kind") in ("finding", "ask"):
+            lines.append(format_review_item(q))
+            continue
         note = ", ".join(["queued while working", *_marks(q)])
         lines.append(f"[{note}] {q['text']}")
     marks = _marks(result)
     main = result.get("text", "")
     lines.append(f"[{', '.join(marks)}] {main}" if marks else main)
+    return "\n".join(lines)
+
+
+# ---- review items (SPEC-WORKBENCH §4.2) — the workbench wake ------------------
+
+REVIEW_FOOTER_CLI = (
+    "respond when done: `voco review status <f-id> "
+    "addressed|disputed|wont-fix [--note TEXT] [--commit SHA]` for findings, "
+    "`voco review reply <id> <markdown>` for questions and asks."
+)
+
+
+def format_review_item(item: dict) -> str:
+    """One agent-facing line per review item ({kind, id, finding|ask})."""
+    if item.get("kind") == "ask":
+        a = item.get("ask") or {}
+        return f"[review ask {item.get('id')}] {a.get('text', '')}"
+    f = item.get("finding") or {}
+    anchor = f.get("anchor") or {}
+    marks = [f.get("kind", "concern")]
+    if f.get("blocking"):
+        marks.append("blocking")
+    loc = ""
+    if anchor.get("file"):
+        loc = f" {anchor['file']}:{anchor.get('startLine', '?')}"
+        end = anchor.get("endLine")
+        if end and end != anchor.get("startLine"):
+            loc += f"-{end}"
+    head = f"[review finding {item.get('id')}, {', '.join(marks)}{loc}]"
+    return f"{head} {f.get('text', '')}"
+
+
+def format_review(result: dict, footer: str = REVIEW_FOOTER_CLI) -> str:
+    """Render a {status: review} wake: the human flagged items on the
+    workspace — they are the agent's next instruction (§4.2)."""
+    lines = ["[review] the user flagged items on your workspace:"]
+    lines += [format_review_item(i) for i in result.get("items", [])]
+    if footer:
+        lines.append(footer)
     return "\n".join(lines)
 
 
@@ -209,7 +252,9 @@ class Client:
         info = self._request(
             "POST",
             "/v1/bridge/register",
-            {**identity, "capabilities": ["say", "listen", "screen"]},
+            # `review` opts in to workbench wakes (SPEC-WORKBENCH §4.2) —
+            # this adapter ships the review verbs, so it declares them.
+            {**identity, "capabilities": ["say", "listen", "screen", "review"]},
             timeout=5,
         )
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -277,13 +322,70 @@ class Client:
             time.sleep(2)
             return {"status": "rearm", "_synthesized": True}
 
+    # ---- review verbs (SPEC-WORKBENCH §4.1/§4.2) ------------------------------
+    # These raise on failure (unlike say/listen): they run in an agent's
+    # deliberate tool call, where a clear error beats a silent no-op.
+
+    def findings(self, *, pending: bool = True) -> dict:
+        """This session's workspace ledger: {workspace, findings, asks}."""
+        q = "&pending=1" if pending else ""
+        return self._with_session(
+            lambda sid: self._request(
+                "GET",
+                f"/v1/bridge/findings?session_id={urllib.parse.quote(sid)}{q}",
+                timeout=10,
+            )
+        )
+
+    def finding_status(
+        self,
+        finding_id: str,
+        status: str,
+        *,
+        note: str | None = None,
+        commit: str | None = None,
+    ) -> dict:
+        body: dict = {"finding_id": finding_id, "status": status}
+        if note is not None:
+            body["note"] = note
+        if commit is not None:
+            body["commit"] = commit
+        return self._with_session(
+            lambda sid: self._request(
+                "POST",
+                "/v1/bridge/finding_status",
+                {**body, "session_id": sid},
+                timeout=10,
+            )
+        )
+
+    def reply(self, item_id: str, markdown: str) -> dict:
+        """Answer an ask (a-…) or a question-kind finding (f-…) in markdown."""
+        key = "ask_id" if item_id.startswith("a-") else "finding_id"
+        return self._with_session(
+            lambda sid: self._request(
+                "POST",
+                "/v1/bridge/ask_reply",
+                {key: item_id, "markdown": markdown, "session_id": sid},
+                timeout=10,
+            )
+        )
+
+    def page_push(self, body: dict) -> dict:
+        """Push a doc or diff page to this session's workspace (§3.2)."""
+        return self._with_session(
+            lambda sid: self._request(
+                "POST", "/v1/bridge/page", {**body, "session_id": sid}, timeout=35
+            )
+        )
+
     def listen(self) -> dict:
-        """Park until a transcript arrives; self-heals through daemon
-        restarts up to RETRY_WINDOW_S of sustained failure."""
+        """Park until a transcript or review wake arrives; self-heals
+        through daemon restarts up to RETRY_WINDOW_S of sustained failure."""
         failing_since: float | None = None
         while True:
             result = self.listen_once()
-            if result.get("status") in ("transcript", "detach", "superseded"):
+            if result.get("status") in ("transcript", "review", "detach", "superseded"):
                 return result
             # rearm: distinguish daemon-alive rearm from synthesized ones
             # by probing registration cheaply every loop is overkill; the
@@ -306,9 +408,99 @@ def listen_stream(client) -> int:
         result = client.listen()
         if result.get("status") == "transcript":
             print(format_transcript(result), flush=True)
+        elif result.get("status") == "review":
+            print(format_review(result), flush=True)
         else:
             print(terminal_message(result) or SOFT_FAIL, flush=True)
             return 0
+
+
+def _http_error(e: Exception) -> str:
+    """The server's plain-text error body when there is one (agent-facing
+    hints like 'finding not in this session's workspace'), else str(e)."""
+    if isinstance(e, urllib.error.HTTPError):
+        try:
+            body = e.read().decode(errors="replace").strip()
+            if body:
+                return body
+        except Exception:
+            pass
+    return str(e)
+
+
+def cmd_review(args, client: Client) -> int:
+    """`voco review …` — the agent's half of the findings round-trip."""
+    try:
+        if args.rcmd == "findings":
+            r = client.findings(pending=not args.all)
+            items = [
+                format_review_item(
+                    {"kind": "finding", "id": f.get("finding_id"), "finding": f}
+                )
+                for f in r.get("findings", [])
+            ] + [
+                format_review_item({"kind": "ask", "id": a.get("ask_id"), "ask": a})
+                for a in r.get("asks", [])
+            ]
+            if not items:
+                print("no pending review items" if not args.all else "no findings")
+                return 0
+            print("\n".join(items))
+            print(REVIEW_FOOTER_CLI)
+            return 0
+        if args.rcmd == "status":
+            r = client.finding_status(
+                args.finding_id, args.status, note=args.note, commit=args.commit
+            )
+            print(f"{args.finding_id} → {r.get('finding', {}).get('status')}")
+            return 0
+        if args.rcmd == "reply":
+            client.reply(args.id, args.markdown)
+            print("answered")
+            return 0
+        # export: resolve this session's workspace, then the control verb.
+        ws_key = client.findings().get("workspace")
+        return control(
+            client,
+            "review.export",
+            {"workspace": ws_key, "out": args.out},
+            timeout=15,
+            render=lambda r: print(
+                f"exported {r.get('count')} finding(s) → {r.get('out')}"
+            ),
+        )
+    except Exception as e:
+        print(f"error: {_http_error(e)}", file=sys.stderr)
+        return 1
+
+
+def cmd_page(args, client: Client) -> int:
+    """`voco page …` — push a doc or diff page (SPEC-WORKBENCH §3.2).
+    Paths resolve to absolute HERE (the agent's cwd may be a subdir of
+    the workspace root the daemon confines against)."""
+    if args.pcmd == "doc":
+        body: dict = {"type": "doc", "path": str(Path(args.path).resolve())}
+        if args.name:
+            body["name"] = args.name
+    else:
+        if args.pr is not None:
+            source: dict = {"pr": args.pr}
+        elif args.staged:
+            source = {"staged": True}
+        elif args.file:
+            source = {"diff_file": str(Path(args.file).resolve())}
+        else:
+            # --branch BASE, bare --branch, or no flag: branch vs BASE
+            # (empty ⇒ the repo's default branch, resolved server-side).
+            source = {"branch": args.branch or ""}
+        body = {"type": "diff", "source": source}
+    try:
+        r = client.page_push(body)
+        print(f"page {r.get('page_id')} rev {r.get('rev')}")
+        return 0
+    except Exception as e:
+        print(f"error: {_http_error(e)}", file=sys.stderr)
+        return 1
 
 
 def cmd_watch(client: Client) -> int:
@@ -559,6 +751,36 @@ def main() -> None:
         "name", help="session call name, or raw tmux target (voco-... / %%N)"
     )
     p_peek.add_argument("--host", default=None)
+    p_review = sub.add_parser("review", help="findings round-trip + export")
+    rsub = p_review.add_subparsers(dest="rcmd", required=True)
+    r_ls = rsub.add_parser("findings", help="list pending review items")
+    r_ls.add_argument("--all", action="store_true", help="include resolved")
+    r_st = rsub.add_parser("status", help="report a finding round-trip")
+    r_st.add_argument("finding_id")
+    r_st.add_argument("status", choices=["addressed", "disputed", "wont-fix"])
+    r_st.add_argument("--note", default=None)
+    r_st.add_argument("--commit", default=None)
+    r_re = rsub.add_parser("reply", help="answer an ask or question finding")
+    r_re.add_argument("id", help="a-… (ask) or f-… (question finding)")
+    r_re.add_argument("markdown")
+    r_ex = rsub.add_parser("export", help="write the review JSON + sidecar")
+    r_ex.add_argument("--out", default=None)
+    p_page = sub.add_parser("page", help="push a doc/diff page (workbench)")
+    psub = p_page.add_subparsers(dest="pcmd", required=True)
+    pg_doc = psub.add_parser("doc")
+    pg_doc.add_argument("path")
+    pg_doc.add_argument("--name", default=None)
+    pg_diff = psub.add_parser("diff")
+    pg_diff.add_argument("--pr", default=None, help="GitHub PR number (needs gh)")
+    pg_diff.add_argument(
+        "--branch",
+        nargs="?",
+        const="",
+        default=None,
+        help="diff vs BASE (default: the repo's default branch)",
+    )
+    pg_diff.add_argument("--staged", action="store_true")
+    pg_diff.add_argument("--file", default=None, help="a unified-diff file")
     sub.add_parser("watch")
     p_input = sub.add_parser("input")  # typed input path (say_as_user)
     p_input.add_argument("text")
@@ -579,6 +801,8 @@ def main() -> None:
         result = client.listen()
         if result.get("status") == "transcript":
             print(format_transcript(result))
+        elif result.get("status") == "review":
+            print(format_review(result))
         else:
             # Say WHY it ended: a user detach must not read as a crash.
             print(terminal_message(result) or SOFT_FAIL)
@@ -643,6 +867,10 @@ def main() -> None:
                 render=lambda r: print(r.get("text", ""), end=""),
             )
         )
+    elif args.cmd == "review":
+        sys.exit(cmd_review(args, client))
+    elif args.cmd == "page":
+        sys.exit(cmd_page(args, client))
     elif args.cmd == "watch":
         sys.exit(cmd_watch(client))
     elif args.cmd == "input":

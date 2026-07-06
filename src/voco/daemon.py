@@ -681,11 +681,12 @@ class Daemon:
     def _primary_session(self, ws: Workspace) -> Session | None:
         """Elect the workspace's primary review agent (§4.3): the active
         session if it lives here, else the sole review-capable session, else
-        the most recently seen review-capable one."""
+        the most recently seen review-capable one. Election is a read —
+        home_of never creates workspaces or emits."""
         here = [
             s
             for s in self.registry.all()
-            if "review" in s.capabilities and self.workspaces.resolve(s.identity) is ws
+            if "review" in s.capabilities and self.workspaces.home_of(s.identity) is ws
         ]
         if not here:
             return None
@@ -702,8 +703,8 @@ class Daemon:
         s = self.registry.get(session_id)
         if s is None or "review" not in s.capabilities:
             return []
-        ws = self.workspaces.resolve(s.identity)
-        if self._primary_session(ws) is not s:
+        ws = self.workspaces.home_of(s.identity)
+        if ws is None or self._primary_session(ws) is not s:
             return []
         return ws.pending_review()
 

@@ -53,14 +53,18 @@ convenience): `/home/denk/work/vocodeck2-workbench-HANDOFF.md`,
 
 ### → Forward policy (user, 2026-07-06)
 
-**Defer security-sensitive tasks to avoid doing them under a fallback
-model.** Fallback switches are silent and drop the work into a lower tier
-mid-task; security code (auth, confinement, injection surfaces, crypto,
-lock/atomicity) must not be authored by an unintended fallback model.
-When security work is next, either confirm the session is on the intended
-model first, or hold the task until it can be. The §8.5 auth here was
-authored under exactly the fallback we now want to avoid — hence the
-Fable review request above.
+~~**Defer security-sensitive tasks to avoid doing them under a fallback
+model.**~~ *(Superseded 2026-07-06 — see revised policy below.)*
+
+### → Revised policy (user, 2026-07-06)
+
+**Security findings live outside the repo only.** Codex /xai reviews
+cover build AND security — but any security issues found are written to
+`../vocodeck2-security/`, never into the repo. Fable must not see or
+handle security content. The in-repo session (Fable, Opus, whatever
+builds) sees only build feedback from /xai reviews. The 11 findings
+previously listed here have been moved to `../vocodeck2-security/
+deferred-findings.md`.
 
 ## Fable review (2026-07-06) — the Opus-authored security surface
 
@@ -86,89 +90,10 @@ connect-src 'self' http.py:183). Verified-correct details worth naming:
 128-bit capabilities, the workbench client already sends `x-voco-wb` on
 page fetches, `follow_symlinks=False` on static.
 
-### Deferred security fixes (found in review; NOT implemented — policy:
-### no security authoring while silent model fallback is possible)
+### Deferred security fixes — moved out of repo
 
-Ordered by severity. Each is specified so any confirmed-on-model session
-can implement without re-deriving.
-
-1. **`GET /v1/page/{page_id}` is completely ungated** (workbench.py
-   `page_content`) — no `_check_origin`, no `_check_auth`, no wb check,
-   and page ids are sequential (`pg-1`, `pg-2`…). On a bearer-configured
-   shared host any local user can read proprietary doc/diff/screen
-   content, and the response leaks `session_id`s (page.meta()), which
-   are capability tokens (chains into listen-stealing). Inconsistent
-   with Codex BLOCKER 1's own rationale: the snapshot (metadata) is
-   gated on browser WS reads while full page *content* is open. FIX:
-   `_check_origin` + `_check_auth` + wb-required-for-browser-origin
-   (same shape as `_events_ws`). Client compat: `app.mjs` already sends
-   `x-voco-wb`; the debug UI does not fetch `/v1/page`. Add tests:
-   foreign origin 403, loopback-origin-no-wb 403, no-Origin+bearer ok.
-2. **No `frame-ancestors` in the CSP** (http.py `html_response`) —
-   `default-src` does NOT cover framing, so a hostile page can iframe
-   `http://127.0.0.1:7777/` and clickjack the workbench (finding
-   mutations now; typed terminal input at W4). FIX: append
-   `; frame-ancestors 'none'` to the CSP and set
-   `X-Frame-Options: DENY` on `html_response`.
-3. **Manifest lock takeover race** (manifest.py `acquire`) — takeover
-   unlinks a stale lock by *path*: daemon A can pass the liveness check,
-   then unlink the FRESH lock daemon B just created in the window, and
-   both win. FIX (keeps the spec's O_EXCL+nonce design): atomic-rename
-   takeover — `os.rename(lock, lock.with-suffix(f".takeover-{pid}")`;
-   only one renamer wins; winner unlinks the renamed file and loops to
-   the O_EXCL create; `FileNotFoundError` on rename → lost the race →
-   loop. (Alternative architecture if ever revisited on-model: `flock`
-   on a persistent file — kernel-exclusive, auto-released on death,
-   deletes the whole pid/nonce machinery; POSIX-only, so it needs the
-   current scheme as the Windows fallback. Not required — the rename fix
-   is sufficient and spec-shaped.)
-4. **Data-dir/file permission gaps vs spec §8** ("data dir 0700, files
-   0600"): (a) `manifest.acquire`/`save` `mkdir` without `mode=0o700`
-   (default 0755-umask) — dir listing leaks workspace keys = repo paths;
-   (b) `review_export._atomic_write` writes tmp with default perms
-   (0644-umask) and chmods 0600 only AFTER `os.replace` — a
-   world-readable window for proprietary review JSON on shared hosts.
-   FIX: `mkdir(mode=0o700)` (+ one-time `chmod` of pre-existing dirs at
-   acquire), and write exports via `os.open(..., 0o600)` like
-   `manifest.save` (drop the after-the-fact chmod).
-5. **`confined_read` residual symlink race** (workbench.py) —
-   `O_NOFOLLOW` covers only the FINAL component; an intermediate dir
-   swapped to a symlink between `resolve()` and `open()` escapes root
-   once. Attacker needs write access inside the workspace root, so low.
-   FIX (portable, ~6 lines): after `fstat(fd)`, re-`resolve()` the base
-   path and re-check containment, and compare `(st_dev, st_ino)` of
-   `os.lstat(re-resolved)` against the fd's fstat — mismatch → 404.
-   (Hard links inside root remain readable — inherent to any
-   path-confinement, not a defect. openat2/RESOLVE_BENEATH or a
-   dir_fd component walk is the exact fix if ever needed; Linux-only.)
-6. **Timing-unsafe token comparisons** (http.py:129/133/157) — bearer
-   and wb tokens compared with `==`. FIX: `secrets.compare_digest`
-   (guard the None/str types first). Low (loopback + HTTP jitter), cheap.
-7. **`DiffResolver.resolve` still carries an unconfined `diff_file`
-   open** (diffsource.py:104) — dead code from the route (BLOCKER 3
-   fixed at the call site), but a future caller re-opens the hole
-   silently. FIX: delete the branch; raise
-   `DiffResolveError("diff_file is resolved by the caller (confined)")`.
-8. **Resolved diffs are uncapped + subprocess timeout unmapped**
-   (diffsource.py) — `MAX_DIFF_BYTES` caps only *pasted* content; a
-   giant `git diff`/`gh pr diff` output OOMs the daemon
-   (`capture_output` buffers all of it), and `subprocess.TimeoutExpired`
-   escapes as a raw 500. FIX: length-check resolver output against
-   MAX_DIFF_BYTES (raise DiffResolveError naming the cap), catch
-   TimeoutExpired → DiffResolveError.
-9. **Manifest save lacks fsync** (manifest.py `save`) — crash after
-   `replace` but before writeback can land an empty/truncated
-   manifest; `load_all` then silently skips it = lost review data.
-   FIX: `fh.flush()` + `os.fsync(fd)` before the replace. (Durability,
-   not confidentiality — kept on this list because it's the same file.)
-
-Notes, no action needed: wb token rides `?wb=` on the WS URL (spec said
-subprotocol; query is fine on loopback — aiohttp doesn't log URLs by
-default, WS URLs don't enter history); bearer accepted via `?token=` on
-non-WS routes too (same reasoning); binary sniff checks only the first
-8 KiB (rendering nuisance at worst); `html_response` replaces
-`{{nonce}}` body-wide — fine while only server-authored HTML flows
-through it, worth an invariant comment when next edited on-model.
+11 findings (Codex-verified). See `../vocodeck2-security/deferred-findings.md`.
+Not in-repo; Fable and other in-repo models don't see this content.
 
 ## Working rules (carried from BUILD.md, 2026-07-03)
 
@@ -242,9 +167,16 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
       anchors sidecar, byte-compatible) + durable per-workspace manifests
       + daemon-level single-writer lock. Verified e2e incl. restart
       persistence. Tests: diff/findings/manifest/http (205 total green).
-- [ ] **W2 — the wake**: `review` capability + listen status + queued
-      ride-along + at-least-once redelivery, MCP tools, ask/chat panel,
-      discipline text.
+- [x] **W2 — the wake** (complete 2026-07-06): `review` capability
+      (CLI + MCP register it), listen returns `{status: "review", items}`,
+      items ride `queued` (listen AND live dispatch), at-least-once
+      redelivery until status leaves open / ask answered, primary-agent
+      election, wake-on-finding/ask. Agent surface: `voco review
+      findings|status|reply|export`, `voco page doc|diff`, MCP
+      `page_push`/`review_findings`/`review_reply`, discipline text.
+      Client: chat dock tab (ask → answer, markdown-rendered), ask events
+      in the store. Verified e2e: annotate → parked agent woke → status
+      round-trip → ask → reply → restart persistence.
 - [ ] **W3 — worktrees first-class**: repo grouping, `voco new
       --worktree`, clean-only removal.
 - [ ] **W4 — TerminalBackend**: port + pty impl (Unix pty / Windows
@@ -253,79 +185,49 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
 - [ ] **W5 — rev/staleness depth**: inter-diff, since-rev banner, stale
       chips, live-git tracker.
 
-## RESUME HERE (updated 2026-07-06, Fable session)
+## RESUME HERE (updated 2026-07-06, Fable-native session — W2 shipped)
 
-- Security review of the Opus-authored surface: **DONE** (see "Fable
-  review" above). Architecture confirmed; 9 fixes deferred to that list
-  per the security-defer policy (user, 2026-07-06: note, don't author).
-- Now executing: **W2 (the wake)** — tests + MCP tools + client panel +
-  discipline text (list below). Then /xai review of the W2 diff, then
-  W3. Commit + push at milestone edges; journal mid-milestone.
+- Security findings live in `../vocodeck2-security/` ONLY. Codex /xai
+  reviews cover build + security, but security issues route to the
+  parent-dir files only — never into the repo, never into the session
+  reply. In-repo models don't read security content.
+- W0+W1+W2 are DONE and verified (see milestones + journal). Gates at
+  this checkpoint: 237 pytest, mypy (45 files), ruff + format, tsc
+  --checkJs, PROTOCOL.md regen-clean.
+- Next: **/xai build-only review of the W2 diff** (instruct Codex:
+  security observations → `../vocodeck2-security/`, do NOT return or
+  mention them; build feedback only), apply build fixes, then **W3
+  (worktrees first-class)**: `voco new --worktree`, clean-only removal
+  (repo grouping via common_dir already ships). Then W4 (TerminalBackend
+  — check pywinpty/ConPTY floors first, Phase 0 deferred item), W5.
+- Env note: `~/.local/bin/node` is a self-looping symlink the user still
+  needs to `rm`; use `PATH="$HOME/.nvm/versions/node/v24.11.1/bin:$PATH"`
+  for tsc until then.
 
-State of the checkpoint captured by commit `c6aa94d`:
+## W2 build order — **COMPLETE 2026-07-06** (Fable-native)
 
-**DONE + VERIFIED (green: 207 tests, mypy, ruff, tsc all clean):**
-- W0 + W1 shipped in prior commits (see journal).
-- **Codex adversarial review of W0+W1 applied** (review-out.txt had 4
-  BLOCKER + 7 WARNING/NOTE). Fixes landed in THIS checkpoint:
-  1. BLOCKER — CSWSH read leak: browser-origin WS now needs the wb token
-     to even READ `/v1/events` (`server/http.py:_events_ws`). Tested.
-  2. BLOCKER — path confinement TOCTOU: `confined_read` is now fd-based
-     (open→fstat→read from fd), relative paths resolve against root.
-  3. BLOCKER — `diff_file` confinement was discarded; now the confined
-     content IS the diff (never re-opened unconfined).
-  4. BLOCKER — manifest lock now atomic (`O_CREAT|O_EXCL`) + safe takeover.
-  5. WARNING — agents can't resurrect withdrawn findings.
-  6. WARNING — `default_branch` keeps `origin/main` (right merge-base).
-  7. WARNING — git/gh option-injection guards (`pr` digits, `_valid_ref`, `--`).
-  8. WARNING — pasted-diff byte cap (MAX_DIFF_BYTES).
-  9. WARNING — quoted git paths: DEFERRED, noted in `core/diff.py` (oracle
-     shares the limitation).
-  10. WARNING — relative-path cwd bug folded into fix 2.
-  11. NOTE — CSP `connect-src` tightened to `'self'`.
-
-**IN PROGRESS — W2 (the wake), scaffolded but NOT verified, NO tests yet:**
-- `core/registry.py`: `review_items` hook + `on_listen_start` returns
-  `{status:"review", items}` / rides `queued`; `wake_review()`.
-- `core/workspace.py`: `Ask` model, `add_ask`/`answer_ask`/`answer_finding`,
-  `pending_review()`; asks in dump/restore.
-- `daemon.py`: `_primary_session` election, `_review_items_for`,
-  `_wire_review_wake` (wakes primary on finding.added/ask.created).
-- `server/workbench.py`: `ask.create`/`ask.list` commands, `ask_reply`
-  bridge verb (answers ask or question-finding).
-- `protocol/messages.py`: ask.create/ask.list commands added.
-
-**W2 REMAINING before it can be called done:**
-- [ ] MCP tools: `page_push`, `review_findings`, `review_reply` in
-      clients/voco_mcp; voco-mcp registers `review` capability.
-- [ ] voco-cli/voco-mcp register with `review` capability by default.
-- [ ] Agent discipline text += review line (SPEC §8.4 block).
-- [ ] Client: chat/ask dock panel; render finding.answer on the card;
-      store handling for ask.created/ask.answered events.
-- [ ] TESTS: wake-on-finding delivers to parked listen; at-least-once
-      redelivery after a missed wake; primary election with 2 agents;
-      ask round-trip; asks survive restart. (None written yet.)
-- [ ] E2E: annotate → parked agent wakes via listen → marks addressed.
-- [ ] Review discipline on the W2 diff before its "done" commit:
-      trust-boundary sink pass + adversarial self-review. (If a
-      LOWER-TIER model continues, `fab-*` skills are the aid; a
-      Fable-native session uses its own judgment — see MODEL PROVENANCE.)
-
-## W2 build order (original)
-
-1. [ ] `review` capability: registered like say/listen; gates the wake.
-2. [ ] `listen` gains `{status: "review", items}` + review items ride
-       `queued`; at-least-once redelivery until status leaves open /
-       ask answered; idempotent by item id; no turn_id minted.
-3. [ ] Ask/chat: `ask.create` (browser) → primary-agent election →
-       `ask_reply` bridge verb → renders under the chat/finding card.
-4. [ ] MCP tools: `page_push`, `review_findings`, `review_reply`
-       (answers ask OR sets finding status); voco-mcp registers
-       `review` capability.
-5. [ ] Agent discipline text += review line.
-6. [ ] Client: chat dock panel; finding.answer renders on the card.
-7. [ ] W2 exit: annotate a line → parked agent wakes via listen →
-       marks addressed → chip flips; kill mid-wake → redelivers.
+1. [x] `review` capability gates the wake; CLI + MCP register it.
+2. [x] `listen` returns `{status: "review", items}`; items ride `queued`
+       on listen AND live dispatch; at-least-once until status leaves
+       open / ask answered; idempotent by item id; no turn_id. Item
+       shape: `{kind: finding|ask, id, workspace, finding|ask}` (nested
+       payload — item keys can't collide with domain keys; the scaffold's
+       flat spread let finding.kind clobber the discriminator).
+3. [x] Ask/chat: `ask.create` → primary election → `ask_reply` →
+       renders under the chat/finding card (markdown, sanitized).
+       Answering an OPEN question-kind finding auto-addresses it
+       (the reply IS the round-trip; redelivery must converge).
+4. [x] MCP tools `page_push`/`review_findings`/`review_reply`; CLI
+       `voco review findings|status|reply|export` + `voco page doc|diff`
+       (export as a real CLI verb landed HERE — the W1 journal
+       overstated it; only the control command existed).
+5. [x] Discipline text: MCP INSTRUCTIONS paragraph + voice_init rule.
+6. [x] Client: chat dock tab (pending count, honest no-agent note),
+       ask events in store, finding.answer markdown-rendered.
+7. [x] W2 exit verified e2e (real daemon, real repo): annotate → parked
+       agent woke → `voco review status` → ask → reply → export →
+       restart → pages/findings/asks all restored; missed-wake
+       redelivery covered by tests.
 
 ## Journal
 
@@ -371,6 +273,25 @@ State of the checkpoint captured by commit `c6aa94d`:
 - **2026-07-06 (W0 self-review fix)** — Caught + fixed a regression the
   HTTP smoke missed: the §8.5 CSP would block the debug UI's inline
   script. Nonced it; verified nonces match on both `/` and `/debug`.
+- **2026-07-06 (Fable W1 build review + W2 shipped)** — Fable-native
+  session took over at `c31041a` per the no-rewind plan. Reviewed the
+  W1/W2-scaffold code (current code only, build quality): **holds; no
+  rewrite warranted** — pure store + injected edges + shared command seam
+  is the right architecture. Three real defects found + fixed: (1)
+  `restore_workspace` partial failure orphaned `_pages_by_id` entries
+  (now registers only on full success); (2) primary election used
+  mutating `resolve()` on read paths — new non-mutating
+  `WorkspaceStore.home_of()` (election can't mint sessionspaces or dirty
+  manifests); (3) `pending_review()` item spread let `finding.kind`
+  clobber the `kind: finding` discriminator — items now nest their
+  payload. Then built W2 complete (tests first: 16 wake tests + 14
+  adapter tests; build order above). Adhoc: config schema knows
+  `[server]`/`[workbench]` (validator warned on real sections);
+  `dispatch()` now attaches review items to `queued` (spec says ALWAYS
+  ride along); `answer_finding` auto-addresses open questions. E2E on a
+  real daemon+repo passed incl. restart persistence; single-writer lock
+  incidentally validated live (a stray boot got refused). 237 tests,
+  all gates green. Next: /xai build review of W2, then W3.
 - **2026-07-06 (W1 shipped)** — Diff review end-to-end. New:
   `core/diff.py` (parser ported from oracle), `adapters/diffsource.py`
   (git/gh in workspace root), findings ledger on `core/workspace.py`,
