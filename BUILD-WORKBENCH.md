@@ -210,18 +210,19 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
 
 ## RESUME HERE (updated 2026-07-06 night — PROPOSAL OUT, AWAITING THE YES)
 
-**State: the protocol-reliability fix is SHIPPED (`5a43f29`); the UI/UX
-re-architecture is at REV 4 — FINAL (four review rounds: 40% → 50-60% →
-80% → agreed final scope) and awaits only the user's overall yes.**
-`DESIGN-DECK.md` is the pinned spec (design system rules, zones,
-policies, scoping, signal map, daemon budget, U0–U3); the interactive
-mockup is `DESIGN-DECK.mockup.html` / the artifact link inside. All
-four forks are user-decided; naming, workspace demotion, quiet-skin
-rules, disconnected state, destructive/toast/a11y/keyboard policies are
-all pinned. **On the yes: U0 starts** — `page.publish`,
-`workspace.open`, speech who+text + `speech.sentence`, per-session
-user-input log — tests at the command seam, no pixels until U0 is
-green. The mandate text below stands.
+**State: design APPROVED (rev 4.1) and U0 SHIPPED. Next session builds
+U1.** `DESIGN-DECK.md` is the pinned spec — read it fully before
+touching the client. U0 (protocol: workspace.open, page.publish, speech
+who+text + speech.sentence, per-session input_log + session.transcript)
+is committed and verified live; 330 tests green. U1 scope (from
+DESIGN-DECK.md): presence strip, dock annotations|transcript with the
+scope header, rail tree (repo groups → agents → pages), status line,
+the design-system tokens block atop styles.css, keyboard floor,
+disconnected state, toast policy; REMOVE the feed strip, old status
+bar, chat tab, and center tabs. U1 ends at a USER CLICK-THROUGH (you
+talk → you see it; she talks → you see it; long prompts readable in the
+transcript; pull the daemon's plug → the UI says so) — green gates
+prove nothing about usability. The mandate text below stands.
 
 ## Previous RESUME (2026-07-06 EOD — UI/UX RE-ARCHITECTURE MANDATE)
 
@@ -363,6 +364,31 @@ Fix class for next session:
 
 ## Journal
 
+- **2026-07-07 (U0 SHIPPED — the protocol slice under the redesign)** —
+  User approved the design (rev 4.1 + vanilla-substrate confirmation,
+  no Preact). Built U0 exactly per DESIGN-DECK.md, tests first at the
+  command seam: (1) `workspace.open` control command — mints a
+  workspace from a real checkout path (git facts probed daemon-side in
+  the executor; non-git dirs and missing paths get named errors); (2)
+  `page.publish` control command — human-initiated diff publish, same
+  DiffResolver/caps/upsert as the bridge verb, no session required;
+  re-publish bumps rev in place, so live-git tracks human pages too;
+  (3) speech who/text: PlaybackItem carries `who`+`text`,
+  started/finished payloads include them when known (additive; acks
+  stay lean), daemon resolves who from the say's session; (4) NEW
+  `speech.sentence` event emitted from `_sentence_synth`'s generator as
+  the player pulls into each sentence ({who, text, index, total,
+  turn_id}; agent speech only — mate speech feeds no karaoke); (5)
+  per-session `input_log` (InputLine ts/text/origin/queued, deque(50))
+  recorded on BOTH dispatch paths (live + queued), persisted in
+  dump/restore alongside say_log; (6) `session.transcript` read command
+  (by call name → both halves, oldest first) so the log isn't
+  write-only. PROTOCOL.md: 31 events, 27 commands. 14 new tests (330
+  total), mypy/ruff/format/tsc green. Live e2e on an isolated daemon:
+  open scratch repo → real branch diff vs master resolved + parsed →
+  re-publish rev 1→2 in place. Committed as the U0 milestone. NEXT: U1
+  (presence strip + scoping + quiet skin per DESIGN-DECK.md; ends at a
+  user click-through, not gates).
 - **2026-07-07 (design rev 4.1 — the quiet pass overshot; semantics
   restored)** — User verdict on rev 4: "reverted to a prototype looking
   interface, we didn't need to simplify THIS much" + "full doesn't

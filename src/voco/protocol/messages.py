@@ -32,6 +32,11 @@ EVENT_TYPES = {
     "speech.interrupted",
     "speech.finished",
     "speech.expired",
+    # Per-sentence playback progress (DESIGN-DECK U0): emitted as the
+    # player pulls into each sentence of an agent say — drives the
+    # transcript's karaoke highlight. Not turn-scoped: it is playback
+    # progress, not a turn lifecycle edge.
+    "speech.sentence",
     "agent.say",
     "screen.updated",
     "input.queued",
@@ -81,6 +86,10 @@ COMMAND_TYPES = {
     # the debug UI and tests reach them too.
     "workspace.list",
     "workspace.live",
+    # DESIGN-DECK U0: agentless review + the transcript read path.
+    "workspace.open",
+    "page.publish",
+    "session.transcript",
     "page.close",
     "page.reopen",
     "finding.list",

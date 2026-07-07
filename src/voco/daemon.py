@@ -676,6 +676,16 @@ class Daemon:
             live = bool(payload.get("live", True))
             self._live_workspaces[key] = live
             return {"workspace": key, "live": live}
+        if cmd == "workspace.open":
+            return await self._workspace_open(payload)
+        if cmd == "page.publish":
+            return await self._page_publish(payload)
+        if cmd == "session.transcript":
+            name = str(payload.get("name", "")).strip()
+            s = self.registry.by_call_name(name)
+            if s is None:
+                raise ValueError(f"no session named {name!r}")
+            return self.registry.transcript(s.session_id)
         try:
             return handle_workbench_command(
                 self.workspaces, cmd, payload, data_dir=self._workspace_data_dir()
@@ -683,6 +693,109 @@ class Daemon:
         except KeyError:
             pass  # not a workbench command; fall through
         raise ValueError(f"unknown command {cmd!r}")
+
+    async def _workspace_open(self, payload: dict) -> dict:
+        """DESIGN-DECK U0: mint a workspace from a checkout path on the
+        daemon host — agentless review parity (the first-run 'open a
+        repo' and the picker need a workspace before any agent exists)."""
+        raw = str(payload.get("path", "")).strip()
+        if not raw:
+            raise ValueError("path required")
+        path = Path(raw).expanduser()
+        if not path.is_dir():
+            raise ValueError(f"not a directory: {raw}")
+
+        def probe() -> dict:
+            import subprocess
+
+            def git(*args: str) -> str | None:
+                try:
+                    out = subprocess.run(
+                        ["git", "-C", str(path), *args],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    return None
+                return out.stdout.strip() or None if out.returncode == 0 else None
+
+            top = git("rev-parse", "--show-toplevel")
+            if top is None:
+                return {}
+            return {
+                "top": top,
+                "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+                "common_dir": git(
+                    "rev-parse", "--path-format=absolute", "--git-common-dir"
+                ),
+            }
+
+        facts = await self._run_blocking(probe)
+        if not facts:
+            raise ValueError(f"not a git checkout: {raw}")
+        import socket as _socket
+
+        ws = self.workspaces.resolve(
+            {
+                "host": _socket.gethostname().split(".")[0],
+                "cwd": facts["top"],
+                "worktree": facts["top"],
+                "repo": Path(facts["top"]).name,
+                "branch": facts.get("branch"),
+                "common_dir": facts.get("common_dir"),
+            }
+        )
+        return {
+            "workspace": ws.key,
+            "root": ws.root,
+            "repo": ws.repo,
+            "branch": ws.branch,
+        }
+
+    async def _page_publish(self, payload: dict) -> dict:
+        """DESIGN-DECK U0: human-initiated diff publish — the §3.2
+        sentence ('works with no agent attached') as a real command. Same
+        resolver, same caps, same upsert as the agent bridge verb; no
+        session required."""
+        from voco.adapters.diffsource import DiffResolveError, source_ref
+        from voco.core.diff import parse_diff
+        from voco.server.workbench import MAX_DIFF_BYTES, diff_fingerprint
+
+        key = str(payload.get("workspace", ""))
+        ws = self.workspaces.get(key)
+        if ws is None:
+            raise ValueError(f"unknown workspace: {key}")
+        if ws.kind == "sessionspace":
+            raise ValueError(f"{key} has no checkout; review needs a workspace")
+        source = payload.get("source")
+        if not isinstance(source, dict) or not (
+            {"pr", "branch", "staged"} & source.keys()
+        ):
+            raise ValueError("source must be one of {pr}|{branch}|{staged: true}")
+        try:
+            text = await self._run_blocking(
+                lambda: self.bridge.diff_resolver.resolve(source, ws.root)
+            )
+        except DiffResolveError as e:
+            raise ValueError(f"{e} (workspace root {ws.root!r})") from e
+        if len(text) > MAX_DIFF_BYTES:
+            raise ValueError(f"diff too large ({len(text)} bytes)")
+        page = self.workspaces.upsert_diff(
+            ws,
+            ref=source_ref(source),
+            title=source_ref(source),
+            files=parse_diff(text),
+            source=source,
+            diff_key=diff_fingerprint(text),
+        )
+        return {
+            "ok": True,
+            "page_id": page.page_id,
+            "rev": page.rev,
+            "workspace": ws.key,
+            "root": ws.root,
+        }
 
     def _workspace_data_dir(self) -> Path:
         base = self.cfg.get("workbench", {}).get("data_dir")
@@ -1174,7 +1287,12 @@ class Daemon:
             if env.type != "agent.say" or not env.payload.get("active"):
                 return
             if self.voice is not None:
-                self.voice.speak_agent(env.payload["text"], env.payload.get("turn_id"))
+                s = self.registry.get(str(env.payload.get("session_id") or ""))
+                self.voice.speak_agent(
+                    env.payload["text"],
+                    env.payload.get("turn_id"),
+                    who=s.call_name if s is not None else None,
+                )
 
         self.bus.subscribe(on_event)
 

@@ -341,16 +341,37 @@ class VoiceLoop:
     def open_mate_speech_channel(self) -> MateSpeechChannel:
         return MateSpeechChannel(self)
 
-    def _sentence_synth(self, text: str, voice: str | None):
+    def _sentence_synth(
+        self,
+        text: str,
+        voice: str | None,
+        *,
+        who: str | None = None,
+        turn_id: str | None = None,
+    ):
         """Synthesize sentence-by-sentence inside ONE playback item: the
         first sentence is audible at ~one-sentence TTFA instead of
-        scaling with message length (triage: sentence-chunked TTS)."""
+        scaling with message length (triage: sentence-chunked TTS).
+        With `who` set, each sentence boundary emits `speech.sentence` as
+        the player PULLS into it (DESIGN-DECK U0) — playback-aligned to
+        within the audio buffer; the transcript karaoke keys on it."""
         sentences = [
             s.strip() for s in _SENTENCE_BOUNDARY.split(text) if s.strip()
         ] or [text]
 
         async def gen():
-            for sentence in sentences:
+            for i, sentence in enumerate(sentences):
+                if who is not None:
+                    self._bus.emit(
+                        "speech.sentence",
+                        {
+                            "who": who,
+                            "text": sentence,
+                            "index": i,
+                            "total": len(sentences),
+                            "turn_id": turn_id,
+                        },
+                    )
                 async for chunk in self.tts.stream(sentence, voice=voice):
                     yield chunk
 
@@ -365,10 +386,16 @@ class VoiceLoop:
             )
         )
 
-    def speak_agent(self, text: str, turn_id: str | None) -> None:
+    def speak_agent(
+        self, text: str, turn_id: str | None, who: str | None = None
+    ) -> None:
         self.queue.enqueue(
             PlaybackItem(
-                Source.AGENT, self._sentence_synth(text, None), turn_id=turn_id
+                Source.AGENT,
+                self._sentence_synth(text, None, who=who, turn_id=turn_id),
+                turn_id=turn_id,
+                who=who,
+                text=text,
             )
         )
 

@@ -56,6 +56,7 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 - `speech.expired` *(turn-scoped: payload carries `turn_id`)*
 - `speech.finished` *(turn-scoped: payload carries `turn_id`)*
 - `speech.interrupted` *(turn-scoped: payload carries `turn_id`)*
+- `speech.sentence`
 - `speech.started` *(turn-scoped: payload carries `turn_id`)*
 - `stt.final`
 - `stt.partial`
@@ -78,6 +79,7 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 - `interrupt`
 - `mic.set`
 - `page.close`
+- `page.publish`
 - `page.reopen`
 - `review.export`
 - `review.primary`
@@ -87,7 +89,9 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 - `session.panes`
 - `session.peek`
 - `session.spawn`
+- `session.transcript`
 - `state.get`
 - `switch_session`
 - `workspace.list`
 - `workspace.live`
+- `workspace.open`

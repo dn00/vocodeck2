@@ -63,6 +63,18 @@ class QueuedInput:
 
 
 @dataclass
+class InputLine:
+    """One dispatched user utterance (DESIGN-DECK U0): the user half of
+    the transcript, symmetric to SayLine. `queued` records whether it
+    waited for the agent (the transcript renders that as a meta line)."""
+
+    ts: float
+    text: str
+    origin: str = "voice"  # voice | typed
+    queued: bool = False
+
+
+@dataclass
 class Session:
     session_id: str
     identity: dict[str, Any]  # host, user, cwd, repo, branch, harness, pid
@@ -76,6 +88,9 @@ class Session:
     reviewing: bool = False
     queued: list[QueuedInput] = field(default_factory=list)
     say_log: deque[SayLine] = field(default_factory=lambda: deque(maxlen=50))
+    # The user half of the transcript (DESIGN-DECK U0): same bound, same
+    # persistence as say_log; recorded at dispatch.
+    input_log: deque[InputLine] = field(default_factory=lambda: deque(maxlen=50))
     unread_digest: int = 0
     screen_title: str | None = None
     screen_markdown: str = ""
@@ -390,10 +405,16 @@ class Registry:
             s.queued.clear()
             s.parked = False
             s.outstanding_turn_id = turn_id
+            s.input_log.append(
+                InputLine(ts=self._now(), text=text, origin=origin, queued=False)
+            )
             self._emit_session_state(s)
             return "live"
         s.queued.append(
             QueuedInput(ts=self._now(), turn_id=turn_id, text=text, origin=origin)
+        )
+        s.input_log.append(
+            InputLine(ts=self._now(), text=text, origin=origin, queued=True)
         )
         self._emit(
             "input.queued",
@@ -574,6 +595,7 @@ class Registry:
                     "outstanding_turn_id": s.outstanding_turn_id,
                     "queued": [q.__dict__ for q in s.queued],
                     "say_log": [line.__dict__ for line in s.say_log],
+                    "input_log": [line.__dict__ for line in s.input_log],
                     "unread_digest": s.unread_digest,
                     "screen_title": s.screen_title,
                     "screen_markdown": s.screen_markdown,
@@ -608,6 +630,8 @@ class Registry:
                 )
                 for line in raw.get("say_log", []):
                     s.say_log.append(SayLine(**line))
+                for line in raw.get("input_log", []):
+                    s.input_log.append(InputLine(**line))
             except (KeyError, TypeError, ValueError):
                 continue
             self._sessions[s.session_id] = s
@@ -620,6 +644,20 @@ class Registry:
         if active in self._sessions:
             self._active_id = active
         return restored
+
+    def transcript(self, session_id: str) -> dict:
+        """Both halves of the conversation record (DESIGN-DECK U0),
+        oldest first — the transcript tab's data source. Bounded by the
+        two deques; the snapshot stays lean (say_tail only)."""
+        s = self._sessions.get(session_id)
+        if s is None:
+            raise KeyError(session_id)
+        return {
+            "session_id": s.session_id,
+            "name": s.call_name,
+            "inputs": [line.__dict__ for line in s.input_log],
+            "says": [line.__dict__ for line in s.say_log],
+        }
 
     # ---- snapshot (SPEC §10) ---------------------------------------------------
 

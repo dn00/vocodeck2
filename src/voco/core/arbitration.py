@@ -47,6 +47,10 @@ class PlaybackItem:
     turn_id: str | None = None  # mutable: mate items are stamped at dispatch
     duration_ms: int | None = None  # known for cached items only
     enqueued_at: float = 0.0  # stamped by the queue (TTL policing)
+    # Who is saying what (DESIGN-DECK U0): call name + the full text —
+    # the speaking slot and transcript can't correlate it client-side.
+    who: str | None = None
+    text: str | None = None
 
 
 class Player(Protocol):
@@ -55,6 +59,18 @@ class Player(Protocol):
 
 
 _PRIORITY = {Source.AGENT: 0, Source.FIRST_MATE: 1, Source.ACK: 2, Source.CHIME: 3}
+
+
+def _speech_payload(item: PlaybackItem) -> dict:
+    """started/finished payload: who says what rides along when known
+    (DESIGN-DECK U0) — additive fields, v1 consumers ignore them."""
+    payload: dict = {"source": item.source.value, "turn_id": item.turn_id}
+    if item.who is not None:
+        payload["who"] = item.who
+    if item.text is not None:
+        payload["text"] = item.text
+    return payload
+
 
 ACK_GATE_EXEMPT_MS = 400
 
@@ -135,10 +151,7 @@ class PlaybackQueue:
         if item is not None:
             if item.source is Source.AGENT and item.turn_id is not None:
                 self._agent_spoke_turns.add(item.turn_id)
-            self._emit(
-                "speech.finished",
-                {"source": item.source.value, "turn_id": item.turn_id},
-            )
+            self._emit("speech.finished", _speech_payload(item))
         self._pump()
 
     # ---- internals -------------------------------------------------------
@@ -201,9 +214,6 @@ class PlaybackQueue:
             if self._may_start(item):
                 self._queue.pop(i)
                 self._playing = item
-                self._emit(
-                    "speech.started",
-                    {"source": item.source.value, "turn_id": item.turn_id},
-                )
+                self._emit("speech.started", _speech_payload(item))
                 self._player.play(item)
                 return
