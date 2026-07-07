@@ -210,19 +210,18 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
 
 ## RESUME HERE (updated 2026-07-06 night — PROPOSAL OUT, AWAITING THE YES)
 
-**State: design APPROVED (rev 4.1) and U0 SHIPPED. Next session builds
-U1.** `DESIGN-DECK.md` is the pinned spec — read it fully before
-touching the client. U0 (protocol: workspace.open, page.publish, speech
-who+text + speech.sentence, per-session input_log + session.transcript)
-is committed and verified live; 330 tests green. U1 scope (from
-DESIGN-DECK.md): presence strip, dock annotations|transcript with the
-scope header, rail tree (repo groups → agents → pages), status line,
-the design-system tokens block atop styles.css, keyboard floor,
-disconnected state, toast policy; REMOVE the feed strip, old status
-bar, chat tab, and center tabs. U1 ends at a USER CLICK-THROUGH (you
-talk → you see it; she talks → you see it; long prompts readable in the
-transcript; pull the daemon's plug → the UI says so) — green gates
-prove nothing about usability. The mandate text below stands.
+**State: design APPROVED (rev 4.1); U0 SHIPPED; U1 BUILT and parked at
+the USER CLICK-THROUGH.** `DESIGN-DECK.md` is the pinned spec. Do NOT
+build more UI until the user has driven U1 live and given a verdict
+(the checkpoint: you talk → you see it; she talks → you see it; long
+prompts readable in the transcript; pull the daemon's plug → the UI
+says so). After the verdict: fix what the click-through surfaces, then
+U2 (review picker, repo review buttons, collapsed diff file index +
+rail file sub-tree, reference annotation editor, spawn/connect modals,
+empty states, withdraw-with-undo), then U3 (settings modal, light-theme
+polish, contrast audit). Known deferrals: orb hold-PTT needs a
+ptt.press/release command; rail worktree-spawn returns with the U2
+spawn modal. The mandate text below stands.
 
 ## Previous RESUME (2026-07-06 EOD — UI/UX RE-ARCHITECTURE MANDATE)
 
@@ -364,6 +363,40 @@ Fix class for next session:
 
 ## Journal
 
+- **2026-07-07 (U1 BUILT — presence + scoping + the quiet skin; AWAITING
+  USER CLICK-THROUGH)** — The client shell rebuilt per DESIGN-DECK rev
+  4.1. New modules: `presence.mjs` (orb with attention ring + click-
+  cycle via mic.set, hearing pulse off turn.state, caption slot with the
+  routed one-liner + "full" + route chip, the ONE input routing
+  say_as_user, agent-speaking slot with who + current sentence + stop
+  off speech.started/sentence, aria-live) and `transcript.mjs` (radio
+  log scoped to the selected agent, merged from session.transcript,
+  queued meta lines, karaoke split on the speaking entry, flashEntry
+  for the "full" jump). `app.mjs` rewritten: rail = repo groups (by
+  common_dir) → agents (blocked-first herdr ordering, ⚡, speaking eq,
+  flagged chips, hover ✕ detach) → pages tree with type icons (◈▦±¶❯,
+  hover ✕ close); center = crumb header + view (NO tabs); dock = scope
+  header + annotations|transcript + export; status line = conn/host,
+  active, attention·duplex, state counts, open count; toasts follow the
+  policy (errors sticky with ✕, successes fade); disconnected state
+  dims the body read-only with strip + status truth; panel grips
+  persist to localStorage; Esc closes annotation editors. `store.mjs`
+  gained voice slices (turnState, lastRouted, speaking incl.
+  speech.sentence) + transcript cache with staleness on
+  stt.final/agent.say/input.queued. `styles.css` rewritten as the
+  codified token sheet (rules block at top; layers-not-lines, three
+  type slots, color budget with semantic color kept, only curve = orb)
+  while keeping every class diff.mjs/findings.mjs/term.mjs depend on.
+  REMOVED: chat.mjs, the feed strip, the old status bar, center tabs.
+  DEFERRED (named, not faked): orb hold-PTT (no ptt.press/release
+  command exists — lands with one); rail "+ new worktree" action
+  (prompt() is banned; the spawn modal is U2 — `voco new --worktree`
+  covers the gap). Gates: 330 pytest, mypy, ruff+format, tsc, HTTP
+  smoke (shell + all modules serve, imports resolve). **STOPPED at the
+  U1 checkpoint per the verification discipline: the user click-through
+  (you talk → you see it; she talks → you see it; long prompts readable
+  in the transcript; pull the daemon's plug → the UI says so). No
+  further UI work until that verdict.**
 - **2026-07-07 (U0 SHIPPED — the protocol slice under the redesign)** —
   User approved the design (rev 4.1 + vanilla-substrate confirmation,
   no Preact). Built U0 exactly per DESIGN-DECK.md, tests first at the

@@ -1,13 +1,13 @@
 // @ts-check
 /**
- * Workbench entry (SPEC-WORKBENCH §7) — agent-centric.
+ * Workbench entry (SPEC-WORKBENCH §7; DESIGN-DECK U1) — agent-centric.
  *
- * ONE selection: the agent. Clicking an agent makes it voice-active,
- * opens its workspace's pages (its own screen/terminal first), and pins
- * chat to it (review.primary). Workspaces are a secondary browse list.
- * The bottom strip is the deck's heartbeat: transcripts, routing, agent
- * says, plus a type-as-user box. Operator controls (duplex, attention,
- * interrupt, detach) are ported from the proven debug UI.
+ * ONE selection: the agent. The rail is the only navigation — repo
+ * groups → agents → their pages (the tree IS the scoping model; no
+ * center tabs). The presence strip owns voice moments; the dock
+ * (annotations | transcript) follows the selection and says so; the
+ * status line carries ambient truth. Disconnected is a designed state:
+ * surfaces dim read-only, the strip and status line say why.
  */
 
 import { Store } from "./store.mjs";
@@ -15,7 +15,8 @@ import { connectBus } from "./bus.mjs";
 import { renderMarkdown } from "./markdown.mjs";
 import { renderDiff } from "./diff.mjs";
 import { renderFindings } from "./findings.mjs";
-import { renderChat } from "./chat.mjs";
+import { renderTranscript, flashEntry } from "./transcript.mjs";
+import { renderPresence } from "./presence.mjs";
 import { renderTerminal } from "./term.mjs";
 
 const store = new Store();
@@ -26,24 +27,38 @@ const h = (tag, attrs = {}, ...kids) => {
   for (const [k, v] of Object.entries(attrs)) {
     if (k === "class") el.className = v;
     else if (k === "onclick") el.addEventListener("click", v);
-    else if (k === "onchange") el.addEventListener("change", v);
     else if (k === "html") el.innerHTML = v;
     else if (v != null) el.setAttribute(k, v);
   }
   for (const kid of kids)
-    el.append(kid instanceof Node ? kid : document.createTextNode(kid));
+    if (kid) el.append(kid instanceof Node ? kid : document.createTextNode(kid));
   return el;
 };
 
 // ---- shell ------------------------------------------------------------------
 const app = /** @type {HTMLElement} */ (document.getElementById("app"));
+const presence = h("div", { class: "presence" });
 const rail = h("div", { class: "rail" });
-const editor = h("div", { class: "editor" });
+const gripRail = h("div", { class: "grip", role: "separator", tabindex: "0",
+  "aria-label": "resize rail" });
+const work = h("div", { class: "work" });
+const gripDock = h("div", { class: "grip", role: "separator", tabindex: "0",
+  "aria-label": "resize dock" });
 const dock = h("div", { class: "dock" });
-const feed = h("div", { class: "voicefeed" });
-const statusbar = h("div", { class: "statusbar" });
-const workbench = h("div", { class: "workbench" }, rail, editor, dock);
-app.append(workbench, feed, statusbar);
+const statusline = h("div", { class: "statusline" });
+const body = h("div", { class: "deck-body" }, rail, gripRail, work, gripDock, dock);
+app.append(presence, body, statusline);
+
+// ---- toasts (policy: errors persist w/ dismiss; successes fade) ---------------
+function toast(msg, sticky = false) {
+  const t = h("div", { class: "toast-msg" + (sticky ? " sticky" : "") }, msg);
+  if (sticky)
+    t.append(h("span", { class: "toast-x", title: "dismiss",
+      onclick: () => t.remove() }, "✕"));
+  document.body.append(t);
+  if (!sticky) setTimeout(() => t.remove(), 4000);
+}
+const errMsg = (e) => (e instanceof Error ? e.message : String(e));
 
 // ---- content cache (page_id -> {rev, content}) ------------------------------
 const contentCache = new Map();
@@ -62,9 +77,6 @@ async function fetchContent(pageId, rev) {
 // ---- identity helpers ---------------------------------------------------------
 const stripSlash = (p) => String(p || "").replace(/\/+$/, "");
 
-// A session is "in" a workspace when its home identity (host/root, rides
-// the snapshot + session.attached) matches; owning an agent-scoped page
-// there also counts (pre-identity sessions).
 function sessionInWs(s, ws) {
   if (s.host != null && s.root != null)
     return s.host === ws.host && stripSlash(s.root) === stripSlash(ws.root);
@@ -79,8 +91,12 @@ function selectedAgent() {
   return store.selectedAgent ? store.sessions.get(store.selectedAgent) : null;
 }
 
+// herdr borrow: blocked is loud — attention-first ordering.
+const STATE_ORDER = { blocked: 0, working: 1, listening: 2, idle: 3, stale: 4, gone: 5 };
+const stateOf = (s) => s.display_state || s.state || "idle";
+
 function dot(s) {
-  const state = s.display_state || s.state || "idle";
+  const state = stateOf(s);
   return h("span", { class: "dot " + state, title: state });
 }
 
@@ -89,142 +105,159 @@ async function selectAgent(s) {
   store.selectedAgent = s.session_id;
   const ws = wsOf(s);
   store.selectedWorkspace = ws ? ws.key : null;
-  // Land on the agent's own board (screen, then terminal); with no own
-  // pages, the agent card (null) is home — never a random page.
   const open = ws ? ws.pages.filter((p) => !p.closed) : [];
   const own = open.find((p) => p.call_name === s.name && p.type === "screen")
     || open.find((p) => p.call_name === s.name);
   store.selectedPage = own ? own.page_id : null;
   store._notify("selection");
+  loadTranscript(s);
   try { await bus.command("switch_session", { name: s.name }); }
-  catch (e) { toast("activate failed: " + errMsg(e)); }
+  catch (e) { toast("activate failed: " + errMsg(e), true); }
   if (ws && (!Array.isArray(s.capabilities) || s.capabilities.includes("review"))) {
     try { await bus.command("review.primary", { workspace: ws.key, agent: s.name }); }
-    catch (e) { /* agent may lack review capability; chat panel says so */ }
+    catch (e) { /* agent may lack review capability; the dock says so */ }
   }
 }
 
 async function detachAgent(s) {
   if (!confirm(`forget ${s.name}? (the agent process is not touched)`)) return;
   try { await bus.command("session.detach", { name: s.name }); }
-  catch (e) { toast("detach failed: " + errMsg(e)); }
+  catch (e) { toast("detach failed: " + errMsg(e), true); }
 }
 
-const errMsg = (e) => (e instanceof Error ? e.message : String(e));
+// ---- rail: repo groups → agents → pages ---------------------------------------
+const PAGE_ICON = { screen: "▦", diff: "±", doc: "¶", terminal: "❯" };
 
-// ---- rail: agents first, workspaces to browse --------------------------------
+function groupKey(ws) { return ws.common_dir || ws.key; }
+
 function renderRail() {
   rail.replaceChildren();
-
-  const agents = h("div", { class: "rail-section" },
-    h("div", { class: "rail-head" }, h("span", {}, "agents")));
-  for (const s of store.sessions.values()) {
-    const ws = wsOf(s);
-    const sel = store.selectedAgent === s.session_id ? " sel" : "";
-    const row = h("div", { class: "rail-agent" + sel, onclick: () => selectAgent(s) },
-      h("div", { class: "rail-agent-top" },
-        dot(s),
-        h("span", { class: "rail-agent-name" },
-          (store.activeSession === s.session_id ? "⚡ " : "") + s.name),
-        h("span", { class: "rail-state" }, s.display_state || s.state || ""),
-        h("span", {
-          class: "rail-x", title: "forget this session",
-          onclick: (e) => { e.stopPropagation(); detachAgent(s); },
-        }, "✕")),
-      h("div", { class: "rail-agent-sub" },
-        h("span", {}, ws ? ws.name + (ws.branch ? " · " + ws.branch : "") : "—"),
-        s.unread_digest
-          ? h("span", { class: "count-chip" }, String(s.unread_digest)) : "",
-        s.queued ? h("span", { class: "count-chip hot" }, s.queued + " queued") : ""));
-    agents.append(row);
-  }
-  if (!store.sessions.size)
-    agents.append(h("div", { class: "empty-note" },
-      "no agents — run `voco init` (MCP: voice_init) in an agent session"));
-  rail.append(agents);
-
-  // Secondary: browse ALL workspaces (incl. restored review state).
-  const spaces = h("div", { class: "rail-section" },
-    h("div", { class: "rail-head" }, h("span", {}, "workspaces")));
+  // Group workspaces by repo (common_dir folds worktree siblings).
+  /** @type {Map<string, {name:string, spaces:any[]}>} */
+  const groups = new Map();
   for (const ws of store.workspaces.values()) {
-    const sel = !store.selectedAgent && ws.key === store.selectedWorkspace ? " sel" : "";
-    const nPages = ws.pages.filter((p) => !p.closed).length;
-    const row = h("div", {
-      class: "rail-item" + sel,
-      onclick: () => {
-        store.selectedAgent = null;
-        store.selectWorkspace(ws.key);
-      },
-    },
-      h("span", {}, ws.name),
-      ws.branch ? h("span", { class: "rail-branch" }, ws.branch) : "");
-    if (nPages) row.append(h("span", { class: "count-chip" }, String(nPages)));
-    if (ws.kind === "workspace")
-      row.append(h("span", {
-        class: "rail-add", title: "spawn an agent in a new worktree",
-        onclick: (e) => { e.stopPropagation(); spawnWorktree(ws); },
-      }, "+"));
-    spaces.append(row);
+    const key = groupKey(ws);
+    if (!groups.has(key))
+      groups.set(key, { name: ws.repo || ws.name, spaces: [] });
+    const g = /** @type {{name:string, spaces:any[]}} */ (groups.get(key));
+    g.spaces.push(ws);
+    if (ws.repo) g.name = ws.repo;
   }
-  rail.append(spaces);
+  const placed = new Set();
+  for (const [key, g] of groups) {
+    rail.append(h("div", { class: "repo-group" },
+      h("span", { class: "rname" }, g.name)));
+    // Agents whose home is any workspace in this group, blocked first.
+    const agents = [...store.sessions.values()]
+      .filter((s) => g.spaces.some((ws) => sessionInWs(s, ws)))
+      .sort((a, b) =>
+        (STATE_ORDER[stateOf(a)] ?? 9) - (STATE_ORDER[stateOf(b)] ?? 9)
+        || a.name.localeCompare(b.name));
+    for (const s of agents) { placed.add(s.session_id); rail.append(agentRow(s)); }
+    if (!agents.length)
+      rail.append(h("div", { class: "rail-note" }, "no agents"));
+  }
+  // Sessions with no known workspace yet (pre-identity registrations).
+  const stray = [...store.sessions.values()].filter((s) => !placed.has(s.session_id));
+  if (stray.length) {
+    rail.append(h("div", { class: "repo-group" },
+      h("span", { class: "rname" }, "elsewhere")));
+    for (const s of stray) rail.append(agentRow(s));
+  }
+  if (!store.sessions.size && !store.workspaces.size)
+    rail.append(h("div", { class: "empty-note" },
+      "no agents — run voice_init (MCP) or `voco listen` in a repo"));
 }
 
-// W3: spawn an agent in a fresh sibling worktree of this repo.
-async function spawnWorktree(ws) {
-  const branch = prompt("new worktree branch:");
-  if (!branch) return;
-  const harness = prompt("harness command:", "claude");
-  if (!harness) return;
-  try {
-    const r = await bus.command("session.spawn",
-      { harness, cwd: ws.root, worktree: { branch } });
-    toast(`spawned ${r.tmux_session || r.term} in ${r.worktree || ws.root}`);
-  } catch (e) { toast("spawn failed: " + errMsg(e)); }
+function agentRow(s) {
+  const ws = wsOf(s);
+  const sel = store.selectedAgent === s.session_id;
+  const row = h("div", { class: "agent-row" + (sel ? " sel" : ""),
+    onclick: () => selectAgent(s) },
+    h("div", { class: "ar-top" },
+      dot(s),
+      h("span", { class: "ar-name" }, s.name),
+      store.activeSession === s.session_id
+        ? h("span", { class: "bolt", title: "voice-active" }, "⚡") : "",
+      store.speaking && store.speaking.who === s.name ? speakingEq() : "",
+      h("span", { class: "ar-state " + stateOf(s) }, stateOf(s)),
+      h("span", { class: "rail-x", title: "forget this session",
+        onclick: (e) => { e.stopPropagation(); detachAgent(s); } }, "✕")),
+    h("div", { class: "ar-sub" },
+      h("span", {}, ws ? (ws.branch || ws.name) : "—"),
+      flaggedChip(ws),
+      s.queued ? h("span", { class: "chip hot" }, s.queued + " queued") : ""));
+  if (sel) return h("div", {}, row, pagesTree(s, ws));
+  return row;
 }
 
-// ---- editor: tabstrip + active view ----------------------------------------
-function renderEditor() {
-  editor.replaceChildren();
-  const ws = store.selectedWs();
-  const agent = selectedAgent();
-  if (!ws && !agent) {
-    editor.append(welcomeView());
-    return;
-  }
+function speakingEq() {
+  const eq = h("span", { class: "eq", title: "speaking aloud" });
+  for (let i = 0; i < 3; i++) eq.append(h("i"));
+  return eq;
+}
+
+function flaggedChip(ws) {
+  if (!ws) return "";
+  const open = store.findingsFor(ws.key)
+    .filter((f) => f.status === "open").length
+    + store.asksFor(ws.key).filter((a) => a.answer == null).length;
+  return open ? h("span", { class: "chip amber" }, open + " flagged") : "";
+}
+
+function pagesTree(s, ws) {
+  const tree = h("div", { class: "pages" });
+  tree.append(h("div", {
+    class: "page-row" + (store.selectedPage == null ? " sel" : ""),
+    onclick: (e) => { e.stopPropagation(); store.selectPage(null); } },
+    h("span", { class: "picon" }, "◈"), h("span", {}, "overview")));
   const pages = ws
     ? ws.pages.filter((p) => !p.closed)
       .sort((a, b) => (a.pinned ? 0 : 1) - (b.pinned ? 0 : 1)
         || a.page_id.localeCompare(b.page_id))
     : [];
-  const strip = h("div", { class: "tabstrip" });
-  if (agent)
-    strip.append(h("div", {
-      class: "tab" + (store.selectedPage == null ? " on" : ""),
-      onclick: () => store.selectPage(null),
-    }, h("span", {}, "◈ " + agent.name)));
   for (const p of pages) {
-    const on = p.page_id === store.selectedPage ? " on" : "";
-    const tab = h("div", { class: "tab" + on, onclick: () => store.selectPage(p.page_id) },
-      p.pinned ? h("span", { class: "pin" }, "◆") : "",
-      h("span", {}, p.title),
+    const row = h("div", {
+      class: "page-row" + (p.page_id === store.selectedPage ? " sel" : ""),
+      onclick: (e) => { e.stopPropagation(); store.selectPage(p.page_id); } },
+      h("span", { class: "picon" }, PAGE_ICON[p.type] || "·"),
+      h("span", { class: "page-title" }, p.title),
       p.rev > 1 ? h("span", { class: "rev" }, "r" + p.rev) : "");
     if (!p.pinned)
-      tab.append(h("span", { class: "x", onclick: (e) => { e.stopPropagation(); closePage(p); } }, "✕"));
-    strip.append(tab);
+      row.append(h("span", { class: "rail-x", title: "close page",
+        onclick: (e) => { e.stopPropagation(); closePage(p); } }, "✕"));
+    tree.append(row);
   }
-  editor.append(strip);
+  return tree;
+}
 
-  const view = h("div", { class: "view" });
-  editor.append(view);
+// ---- work: crumb header + view -------------------------------------------------
+function renderWork() {
+  work.replaceChildren();
+  const agent = selectedAgent();
+  const ws = store.selectedWs();
+  if (!agent && !ws) {
+    work.append(h("div", { class: "view" }, welcomeView()));
+    return;
+  }
+  const pages = ws ? ws.pages.filter((p) => !p.closed) : [];
   const page = pages.find((p) => p.page_id === store.selectedPage);
+  const crumb = h("div", { class: "crumb" });
+  if (agent) crumb.append(h("span", { class: "crumb-who" }, agent.name),
+    h("span", { class: "sep" }, " / "));
+  crumb.append(h("span", {}, page ? page.title : "overview"));
+  if (page && page.rev > 1)
+    crumb.append(h("span", { class: "sep" }, " · "),
+      h("span", { class: "micro rev" }, "r" + page.rev));
+  work.append(h("div", { class: "work-head" }, crumb));
+  const view = h("div", { class: "view" });
+  work.append(view);
   if (page) { renderPage(view, page); return; }
   if (agent) { renderAgentCard(view, agent, ws); return; }
   view.classList.add("empty");
-  view.append(wsHelp(ws));
+  view.append(h("div", { class: "empty-note" }, "no pages here yet"));
 }
 
-// The agent card — the home view for a selected agent (replaces the old
-// dead "no page open"): who it is, what it last said, how to feed it.
 function renderAgentCard(view, s, ws) {
   const card = h("div", { class: "agent-card" });
   card.append(h("div", { class: "agent-card-head" },
@@ -233,62 +266,30 @@ function renderAgentCard(view, s, ws) {
     store.activeSession === s.session_id
       ? h("span", { class: "agent-card-active" }, "⚡ voice-active") : ""));
   card.append(h("div", { class: "agent-card-meta" },
-    kv("state", s.display_state || s.state || "?"),
+    kv("state", stateOf(s)),
     kv("queued", String(s.queued || 0)),
-    kv("unread", String(s.unread_digest || 0)),
     kv("capabilities", (s.capabilities || []).join(" ") || "?")));
-  const tail = s.say_tail || [];
-  const says = h("div", { class: "agent-card-says" },
-    h("div", { class: "rail-head" }, h("span", {}, "last said")));
-  if (!tail.length)
-    says.append(h("div", { class: "empty-note" }, "nothing said yet"));
-  for (const line of tail.slice(-6))
-    says.append(h("div", { class: "say-line" },
-      h("span", { class: "say-ts" }, fmtTime(line.ts)),
-      h("span", {}, line.text)));
-  card.append(says);
   if (s.screen_markdown && s.screen_markdown.trim()) {
     const scr = h("div", { class: "agent-card-screen" });
     renderMarkdown(scr, s.screen_markdown);
-    card.append(h("div", { class: "rail-head" }, h("span", {}, "screen")), scr);
+    card.append(scr);
+  } else {
+    card.append(h("div", { class: "empty-note" },
+      "nothing on this agent's screen yet — its pages appear in the rail as it publishes"));
   }
-  card.append(hintBlock(ws));
   view.append(card);
 }
 
 function welcomeView() {
-  return h("div", { class: "view" }, h("div", { class: "agent-card" },
+  return h("div", { class: "agent-card" },
     h("div", { class: "agent-card-name" }, "voco deck"),
     h("p", {}, "No agents attached yet. In an agent session (Claude Code, "
-      + "Codex…) run the voco MCP `voice_init` tool, or `voco listen` from "
-      + "a shell in your repo — the agent appears here."),
-    hintBlock(null)));
+      + "Codex…) call the voice_init MCP tool, or run `voco listen` from "
+      + "a shell in your repo — the agent appears in the rail."));
 }
-
-function wsHelp(ws) {
-  return h("div", { class: "agent-card" },
-    h("div", { class: "agent-card-name" }, ws ? ws.name : ""),
-    h("p", {}, "No pages in this workspace yet."),
-    hintBlock(ws));
-}
-
-function hintBlock(_ws) {
-  return h("div", { class: "hint-block" },
-    h("div", { class: "rail-head" }, h("span", {}, "feed this surface")),
-    hint("voco page diff --branch", "publish the branch diff to review"),
-    hint("voco page doc NOTES.md", "publish a markdown doc"),
-    hint("voice_screen (MCP) / voco screen", "the agent posts its board"),
-    hint("click a diff line", "flag a finding — the agent wakes with it"));
-}
-
-const hint = (cmd, why) => h("div", { class: "hint-row" },
-  h("code", {}, cmd), h("span", {}, " — " + why));
 
 const kv = (k, v) => h("span", { class: "st-item" },
   h("span", { class: "k" }, k), h("span", {}, v));
-
-const fmtTime = (ts) =>
-  new Date((ts || 0) * 1000).toLocaleTimeString([], { hour12: false });
 
 async function renderPage(view, page) {
   if (page.type === "screen" || page.type === "doc") {
@@ -334,75 +335,84 @@ async function addFinding(page, anchor, text, kind) {
       workspace: store.selectedWorkspace, page_id: page.page_id,
       anchor, text, kind,
     });
-  } catch (e) { toast("finding failed: " + errMsg(e)); }
+  } catch (e) { toast("annotation failed: " + errMsg(e), true); }
 }
 
 async function closePage(p) {
   try { await bus.command("page.close", { page_id: p.page_id }); }
-  catch (e) { console.error(e); }
+  catch (e) { toast("close failed: " + errMsg(e), true); }
 }
 
-// ---- dock: findings + chat --------------------------------------------------
-let dockTab = "findings";
+// ---- dock: scope header + annotations | transcript ------------------------------
+let dockTab = "annotations";
+
+function setDockTab(name) { dockTab = name; renderDock(); }
 
 function renderDock() {
   dock.replaceChildren();
   const wsKey = store.selectedWorkspace || "";
+  const ws = store.selectedWs();
   const agent = selectedAgent();
+
+  const scope = h("div", { class: "dock-scope" });
+  if (agent) scope.append(h("span", { class: "who" }, agent.name));
+  if (ws) scope.append(h("span", { class: "where" },
+    (agent ? " · " : "") + ws.name + (ws.branch ? " · " + ws.branch : "")));
+  if (!agent && !ws) scope.append(h("span", { class: "where" }, "nothing selected"));
+  dock.append(scope);
+
+  const openCount = store.findingsFor(wsKey)
+    .filter((f) => f.status === "open").length;
   const tab = (name, label) => h("div",
     { class: "dock-tab" + (dockTab === name ? " on" : ""),
-      onclick: () => { dockTab = name; renderDock(); } },
-    label);
-  const pendingAsks = store.asksFor(wsKey).filter((a) => a.answer == null).length;
-  dock.append(h("div", { class: "dock-tabs" },
-    tab("findings", "findings"),
-    tab("chat", pendingAsks ? `chat (${pendingAsks})` : "chat"),
-    h("div", { class: "dock-tab", onclick: () => exportReview() }, "export ↓")));
+      onclick: () => setDockTab(name) }, label);
+  const tabs = h("div", { class: "dock-tabs" },
+    tab("annotations", openCount ? `annotations (${openCount})` : "annotations"),
+    tab("transcript", "transcript"),
+    h("button", { class: "dock-export", onclick: () => exportReview() }, "export ↓"));
+  dock.append(tabs);
+
   const body = h("div", { class: "dock-body" });
   dock.append(body);
-  if (dockTab === "chat") {
-    renderChat(body, store.asksFor(wsKey), {
-      agentName: agent ? agent.name : null,
-      hasReviewAgent: hasReviewAgent(store.selectedWs()),
-      onAsk: async (text) => {
-        try { await bus.command("ask.create", { workspace: wsKey, text }); }
-        catch (e) { toast("ask failed: " + errMsg(e)); }
-      },
-    });
+  if (dockTab === "transcript") {
+    renderTranscript(body,
+      agent ? store.transcriptFor(agent.session_id) : null,
+      { agentName: agent ? agent.name : null, speaking: store.speaking });
+    if (agent) loadTranscript(agent); // refetch if stale
     return;
   }
-  const diffOpen = (store.selectedWs()?.pages || [])
-    .some((p) => p.type === "diff" && !p.closed);
-  renderFindings(body, store.findingsFor(wsKey), {
+  const diffOpen = (ws?.pages || []).some((p) => p.type === "diff" && !p.closed);
+  const items = [
+    ...store.findingsFor(wsKey),
+    // asks render in the same ledger: a question is an annotation
+    // without a line (findings.mjs shows them via the answer field).
+  ];
+  renderFindings(body, items, {
     emptyText: diffOpen
-      ? "no findings — click a diff line to flag one"
-      : "no findings — publish a diff first (voco page diff --branch), "
-        + "then click a line to flag one",
+      ? "no annotations — click a diff line to flag one"
+      : "no annotations — publish a diff first, then click a line to flag one",
     onWithdraw: async (id) => {
-      try { await bus.command("finding.withdraw", { workspace: wsKey, finding_id: id }); }
-      catch (e) { console.error(e); }
+      try {
+        await bus.command("finding.withdraw", { workspace: wsKey, finding_id: id });
+        toast("withdrawn");
+      } catch (e) { toast("withdraw failed: " + errMsg(e), true); }
     },
     onReveal: (f) => revealFinding(f),
     pageRev: (pageId) => {
-      const ws = store.workspaces.get(wsKey);
-      const p = ws && ws.pages.find((x) => x.page_id === pageId);
+      const w = store.workspaces.get(wsKey);
+      const p = w && w.pages.find((x) => x.page_id === pageId);
       return p ? p.rev : null;
     },
   });
 }
 
-// Is a review-capable agent attached to THIS workspace (§4.3)? Unknowable
-// facts count in the agent's favor.
-function hasReviewAgent(ws) {
-  if (!ws) return false;
-  return [...store.sessions.values()].some((s) => {
-    const capOk = !Array.isArray(s.capabilities)
-      || s.capabilities.includes("review");
-    const placeKnown = s.host != null && s.root != null;
-    const placeOk = !placeKnown
-      || (s.host === ws.host && stripSlash(s.root) === stripSlash(ws.root));
-    return capOk && placeOk;
-  });
+async function loadTranscript(agent) {
+  const t = store.transcriptFor(agent.session_id);
+  if (t && !t.stale) return;
+  try {
+    const data = await bus.command("session.transcript", { name: agent.name });
+    store.setTranscript(agent.session_id, data);
+  } catch (e) { /* offline or old daemon; the tab shows the empty note */ }
 }
 
 function revealFinding(f) {
@@ -411,7 +421,7 @@ function revealFinding(f) {
   requestAnimationFrame(() => {
     const a = f.anchor || {};
     const sel = `.drow[data-file="${cssEscape(a.file)}"][data-side="${a.side}"][data-line="${a.startLine}"]`;
-    const row = editor.querySelector(sel);
+    const row = work.querySelector(sel);
     if (row) { row.scrollIntoView({ block: "center" }); row.classList.add("blink"); }
   });
 }
@@ -420,14 +430,8 @@ const cssEscape = (s) => String(s).replace(/["\\]/g, "\\$&");
 async function exportReview() {
   try {
     const r = await bus.command("review.export", { workspace: store.selectedWorkspace });
-    toast(`exported ${r.count} finding(s) → ${r.out}`);
-  } catch (e) { toast("export failed: " + errMsg(e)); }
-}
-
-function toast(msg) {
-  const t = h("div", { class: "toast-msg" }, msg);
-  document.body.append(t);
-  setTimeout(() => t.remove(), 4000);
+    toast(`exported ${r.count} annotation(s) → ${r.out}`);
+  } catch (e) { toast("export failed: " + errMsg(e), true); }
 }
 
 // Fetch full findings + asks when a workspace is selected (the snapshot
@@ -454,99 +458,106 @@ async function loadAsks(wsKey) {
   } catch (e) { /* not connected yet; a later event fills it */ }
 }
 
-// ---- voice feed strip (the deck's heartbeat) ---------------------------------
-let feedCollapsed = false;
-const FEED_LABEL = { you: "you", say: "agent", queued: "queued", route: "route" };
-
-function renderFeed() {
-  feed.replaceChildren();
-  feed.classList.toggle("collapsed", feedCollapsed);
-  const input = /** @type {HTMLInputElement} */ (h("input", {
-    class: "feed-input", type: "text",
-    placeholder: "type as user — routed like speech…",
-  }));
-  input.addEventListener("keydown", async (e) => {
-    if (e.key !== "Enter") return;
-    const text = input.value.trim();
-    if (!text) return;
-    input.value = "";
-    try { await bus.command("say_as_user", { text }); }
-    catch (err) { toast("send failed: " + errMsg(err)); }
-  });
-  feed.append(h("div", { class: "feed-bar" },
-    h("span", {
-      class: "feed-toggle",
-      onclick: () => { feedCollapsed = !feedCollapsed; renderFeed(); },
-    }, feedCollapsed ? "▸ voice" : "▾ voice"),
-    input));
-  if (feedCollapsed) return;
-  const body = h("div", { class: "feed-body" });
-  for (const line of store.voiceFeed) {
-    body.append(h("div", { class: "feed-line kind-" + line.kind },
-      h("span", { class: "say-ts" }, fmtTime(line.ts)),
-      h("span", { class: "feed-kind" }, FEED_LABEL[line.kind] || line.kind),
-      line.who ? h("span", { class: "feed-who" }, line.who) : "",
-      h("span", { class: "feed-text" }, line.text)));
-  }
-  if (!store.voiceFeed.length)
-    body.append(h("div", { class: "empty-note" },
-      "voice activity lands here — transcripts, routing, agent replies"));
-  feed.append(body);
-  body.scrollTop = body.scrollHeight;
+// ---- "full": the transcript IS the expansion ----------------------------------
+function jumpToTranscript(target) {
+  setDockTab("transcript");
+  requestAnimationFrame(() => flashEntry(dock, target));
 }
 
-// ---- status bar: live state + the debug UI's controls -------------------------
+// ---- presence strip -------------------------------------------------------------
+function renderStrip() {
+  renderPresence(presence, store, {
+    command: (cmd, payload) => bus.command(cmd, payload),
+    onFull: jumpToTranscript,
+    toast,
+  });
+}
+
+// ---- status line: ambient truth ---------------------------------------------
 function renderStatus() {
   const mic = store.mic || {};
   const active = store.activeSession && store.sessions.get(store.activeSession);
-  statusbar.replaceChildren(
-    micSelect("mic", ["full_duplex", "half_duplex"], mic.duplex,
-      (v) => bus.command("mic.set", { duplex: v })),
-    micSelect("attn", ["always", "wake", "ptt_only", "muted"], mic.attention,
-      (v) => bus.command("mic.set", { attention: v })),
-    h("button", {
-      class: "st-btn", title: "barge-in + Escape to the active agent",
-      onclick: () => bus.command("interrupt", {}).catch((e) => toast(errMsg(e))),
-    }, "■ interrupt"),
-    kv("active", active ? active.name : "none"),
-    h("span", { class: "ticker" }, store.ticker || ""),
-    h("span", { class: "st-conn " + (store.connected ? "on" : "off") },
-      store.connected ? "● live" : "○ offline"));
+  const counts = { blocked: 0, working: 0, listening: 0 };
+  for (const s of store.sessions.values()) {
+    const st = stateOf(s);
+    if (st in counts) counts[st]++;
+  }
+  const openCount = store.findingsFor(store.selectedWorkspace || "")
+    .filter((f) => f.status === "open").length;
+  statusline.replaceChildren(
+    h("span", { class: "conn-cell " + (store.connected ? "on" : "off") },
+      store.connected ? "● " + location.host : "○ reconnecting"),
+    active ? h("span", {}, active.name + " active") : h("span", {}, "no agent"),
+    h("span", {}, [mic.attention, mic.duplex].filter(Boolean).join(" · ") || "headless"),
+    h("span", { class: "spacer" }),
+    h("span", {},
+      counts.blocked ? h("span", { class: "bad" }, counts.blocked + " blocked · ") : "",
+      h("span", { class: "warn" }, counts.working + " working"),
+      " · " + counts.listening + " listening"),
+    openCount ? h("span", { class: "amber" }, openCount + " open") : "");
 }
 
-function micSelect(label, options, current, apply) {
-  const sel = /** @type {HTMLSelectElement} */ (h("select", { class: "st-select" }));
-  sel.append(h("option", { value: "" }, label + (current ? ": " + current : ": —")));
-  for (const o of options)
-    if (o !== current) sel.append(h("option", { value: o }, o));
-  sel.addEventListener("change", async () => {
-    const v = sel.value;
-    if (!v) return;
-    try { await apply(v); }
-    catch (e) { toast(`${label} failed: ` + errMsg(e)); renderStatus(); }
-  });
-  return sel;
-}
-
-// ---- wire subscriptions -----------------------------------------------------
-store.subscribe("workspaces", () => { renderRail(); renderEditor(); });
-store.subscribe("sessions", () => { renderRail(); renderEditor(); renderStatus(); });
-store.subscribe("selection", () => {
-  renderRail(); renderEditor(); renderDock();
-  loadFindings(store.selectedWorkspace || "");
-  loadAsks(store.selectedWorkspace || "");
-});
-store.subscribe("findings", () => { renderDock(); renderEditor(); });
-store.subscribe("asks", renderDock);
-store.subscribe("voice", renderFeed);
-store.subscribe("mic", renderStatus);
-store.subscribe("conn", () => {
-  renderStatus();
+// ---- disconnected: a designed state -------------------------------------------
+function renderConn() {
+  body.classList.toggle("offline", !store.connected);
+  renderStrip(); renderStatus();
   if (store.connected) {
     loadFindings(store.selectedWorkspace || "");
     loadAsks(store.selectedWorkspace || "");
+    const agent = selectedAgent();
+    if (agent) loadTranscript(agent);
   }
-});
-store.subscribe("ticker", renderStatus);
+}
 
-renderRail(); renderEditor(); renderDock(); renderFeed(); renderStatus();
+// ---- keyboard floor -------------------------------------------------------------
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape")
+    document.querySelectorAll(".annot-editor").forEach((n) => n.remove());
+});
+
+// ---- panel resize (persisted) ----------------------------------------------------
+function grip(el, cssVar, min, max, fromRight, storeKey) {
+  const saved = localStorage.getItem(storeKey);
+  if (saved) body.style.setProperty(cssVar, saved + "px");
+  el.addEventListener("pointerdown", (down) => {
+    down.preventDefault();
+    el.setPointerCapture(down.pointerId);
+    el.classList.add("dragging");
+    const start = down.clientX;
+    const startW = parseFloat(getComputedStyle(body).getPropertyValue(cssVar));
+    const move = (mv) => {
+      const d = fromRight ? start - mv.clientX : mv.clientX - start;
+      const w = Math.min(max, Math.max(min, startW + d));
+      body.style.setProperty(cssVar, w + "px");
+      localStorage.setItem(storeKey, String(w));
+    };
+    const up = () => {
+      el.classList.remove("dragging");
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+  });
+}
+grip(gripRail, "--railw", 180, 400, false, "voco.railw");
+grip(gripDock, "--dockw", 240, 520, true, "voco.dockw");
+
+// ---- wire subscriptions -----------------------------------------------------
+store.subscribe("workspaces", () => { renderRail(); renderWork(); });
+store.subscribe("sessions", () => { renderRail(); renderWork(); renderStrip(); renderStatus(); });
+store.subscribe("selection", () => {
+  renderRail(); renderWork(); renderDock();
+  loadFindings(store.selectedWorkspace || "");
+  loadAsks(store.selectedWorkspace || "");
+});
+store.subscribe("findings", () => { renderDock(); renderWork(); renderRail(); renderStatus(); });
+store.subscribe("asks", () => { renderDock(); renderRail(); });
+store.subscribe("voice", renderStrip);
+store.subscribe("speaking", () => { renderStrip(); renderRail(); renderDock(); });
+store.subscribe("transcript", () => { if (dockTab === "transcript") renderDock(); });
+store.subscribe("mic", () => { renderStrip(); renderStatus(); });
+store.subscribe("conn", renderConn);
+store.subscribe("ticker", renderStrip);
+
+renderStrip(); renderRail(); renderWork(); renderDock(); renderStatus();

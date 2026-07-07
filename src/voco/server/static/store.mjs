@@ -4,6 +4,10 @@
  * and subscribe by kind; they never reach into each other. The WS bus and
  * user actions mutate it; mutations notify subscribers of that kind.
  *
+ * U1 additions (DESIGN-DECK): voice presence slices (turn state, the last
+ * routed utterance, the speaking agent + karaoke sentence) and per-session
+ * transcripts (fetched via session.transcript, marked stale by live events).
+ *
  * @typedef {"gone"|"blocked"|"working"|"listening"|"stale"|"idle"} DisplayState
  * @typedef {{key:string, host:string, root:string, name:string, kind:string,
  *   repo:?string, branch:?string, common_dir:?string, pages:PageMeta[]}} Workspace
@@ -17,7 +21,7 @@
  *   screen_title?:?string, screen_markdown?:string}} Session
  */
 
-/** @typedef {"workspaces"|"sessions"|"selection"|"mic"|"conn"|"ticker"|"findings"|"asks"|"voice"} Kind */
+/** @typedef {"workspaces"|"sessions"|"selection"|"mic"|"conn"|"ticker"|"findings"|"asks"|"voice"|"speaking"|"transcript"} Kind */
 
 export class Store {
   constructor() {
@@ -27,10 +31,6 @@ export class Store {
     /** @type {Map<string, Map<string, any>>} */ this.findings = new Map();
     // asks keyed the same way (workspace key -> Map<ask_id, ask>)
     /** @type {Map<string, Map<string, any>>} */ this.asks = new Map();
-    // Voice feed: the deck's heartbeat (transcripts, routing, says),
-    // newest last, bounded ring.
-    /** @type {{ts:number, kind:string, text:string, who:?string}[]} */
-    this.voiceFeed = [];
     this.selectedAgent = /** @type {?string} */ (null); // session_id
     this.activeSession = /** @type {?string} */ (null);
     this.selectedWorkspace = /** @type {?string} */ (null);
@@ -38,6 +38,18 @@ export class Store {
     this.mic = /** @type {any} */ ({});
     this.connected = false;
     this.ticker = "";
+    // ---- voice presence (U1) ------------------------------------------------
+    // The turn machine's public state: idle|capturing|holding|routing|reopenable.
+    this.turnState = "idle";
+    // The last routed utterance — the strip's cap-final + the full jump.
+    /** @type {?{text:string, origin:string, route:?string, ts:number}} */
+    this.lastRouted = null;
+    // Who is speaking aloud right now (+ the sentence being voiced).
+    /** @type {?{who:?string, text:?string, sentence:?string, index:?number}} */
+    this.speaking = null;
+    // ---- transcripts (U1): session_id -> {inputs:[], says:[], stale:bool} ---
+    /** @type {Map<string, {inputs:any[], says:any[], stale:boolean}>} */
+    this.transcripts = new Map();
     /** @type {Map<Kind, Set<Function>>} */ this._subs = new Map();
   }
 
@@ -81,10 +93,11 @@ export class Store {
     // the lazy caches must refetch (the selection notify triggers it).
     this.findings.clear();
     this.asks.clear();
+    for (const t of this.transcripts.values()) t.stale = true;
     this.mic = snap.mic || {};
     if (!this.selectedWorkspace && this.workspaces.size)
       this.selectWorkspace([...this.workspaces.keys()][0]);
-    this._notify("workspaces", "sessions", "mic", "selection");
+    this._notify("workspaces", "sessions", "mic", "selection", "transcript");
   }
 
   /** Route a bus event to the right slice. Unknown types are ignored. */
@@ -147,23 +160,49 @@ export class Store {
         this.mic = { ...this.mic, ...p };
         this._notify("mic");
         break;
+      // ---- voice presence (U1) ---------------------------------------------
+      case "turn.state":
+        this.turnState = p.state || "idle";
+        this._notify("voice");
+        break;
       case "stt.final":
-        this._feed("you", p.text, null);
+        this.lastRouted = { text: p.text || "", origin: "voice",
+          route: this._nameOf(this.activeSession), ts: Date.now() / 1000 };
         this.ticker = "";
-        this._notify("ticker");
-        return; // feed + ticker both handled
+        this._staleTranscript(this.activeSession);
+        this._notify("voice", "ticker", "transcript");
+        break;
       case "route.decision":
-        if (p.kind && p.kind !== "forward")
-          this._feed("route", `${p.kind}${p.late_reroute ? " (rerouted)" : ""}`, null);
+        if (this.lastRouted && p.kind === "answer")
+          this.lastRouted.route = "first mate";
+        this._notify("voice");
         break;
       case "input.queued":
-        this._feed("queued", p.text, this._nameOf(p.session_id));
+        this._staleTranscript(p.session_id);
+        this._notify("transcript", "sessions");
         break;
       case "agent.say":
-        this._feed("say", p.text, this._nameOf(p.session_id));
+        this._staleTranscript(p.session_id);
+        this._notify("transcript");
         break;
-      case "stt.partial":
-        this.ticker = p.text || "";
+      case "speech.started":
+        if (p.source === "agent")
+          this.speaking = { who: p.who ?? null, text: p.text ?? null,
+            sentence: null, index: null };
+        this._notify("speaking");
+        break;
+      case "speech.sentence":
+        this.speaking = { ...(this.speaking || { who: p.who, text: null }),
+          who: p.who, sentence: p.text, index: p.index };
+        this._notify("speaking");
+        break;
+      case "speech.finished":
+      case "speech.interrupted":
+        if (p.source === "agent") this.speaking = null;
+        this._notify("speaking");
+        break;
+      case "stt.partial": // declared-but-unemitted today; lights up when
+        this.ticker = p.text || ""; // a streaming STT lands
         this._notify("ticker");
         break;
     }
@@ -189,16 +228,27 @@ export class Store {
     return s ? s.name : null;
   }
 
-  _feed(kind, text, who) {
-    if (!text) return;
-    this.voiceFeed.push({ ts: Date.now() / 1000, kind, text: String(text), who });
-    if (this.voiceFeed.length > 200) this.voiceFeed.shift();
-    this._notify("voice");
+  _staleTranscript(sessionId) {
+    const t = sessionId && this.transcripts.get(sessionId);
+    if (t) t.stale = true;
+  }
+
+  /** @param {string} sessionId */
+  transcriptFor(sessionId) {
+    return this.transcripts.get(sessionId) || null;
+  }
+
+  setTranscript(sessionId, data) {
+    this.transcripts.set(sessionId, {
+      inputs: data.inputs || [], says: data.says || [], stale: false,
+    });
+    this._notify("transcript");
   }
 
   _applySessionEvent(type, p) {
     if (type === "session.detached") {
       this.sessions.delete(p.session_id);
+      this.transcripts.delete(p.session_id);
       if (this.selectedAgent === p.session_id) this.selectedAgent = null;
       return;
     }
