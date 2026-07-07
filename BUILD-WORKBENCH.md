@@ -363,6 +363,24 @@ Fix class for next session:
 
 ## Journal
 
+- **2026-07-07 (design rev 4.1 — the quiet pass overshot; semantics
+  restored)** — User verdict on rev 4: "reverted to a prototype looking
+  interface, we didn't need to simplify THIS much" + "full doesn't
+  actually expand anything". Root cause: the quiet pass stripped
+  MEANING along with decoration. Two rules amended in the design
+  system: (1) semantic color is never stripped — diff +/− green/red
+  everywhere (file heads, rail sub-tree, header totals), agent state
+  words tint like their dots, needs-you counts amber; (2) controls
+  carry a 1px edge — buttons/inputs get borders back (stop/interrupt
+  read as danger controls), only layout/list separation stays
+  borderless. Demo fix: routed scenario now starts the dock on
+  annotations so pressing "full" VISIBLY switches to the transcript and
+  flashes the entry (flash animation, restartable). Substrate question
+  answered and recorded in DESIGN-DECK.md: vanilla .mjs, no framework
+  (SPEC decision 3 reaffirmed) — Tauri is a webview shell so the client
+  ports unchanged; native bits (global PTT, tray, notifications) are
+  framework-independent; htm+Preact stays the per-panel escape hatch.
+  Artifact re-published, same URL. Awaiting the yes.
 - **2026-07-07 (design rev 4 — FINAL: the quiet pass)** — Scope agreed
   in discussion, then built in one pass. User's diagnosis ("very busy,
   nothing like Zed") answered with countable fixes: borders → four

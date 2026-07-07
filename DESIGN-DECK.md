@@ -18,17 +18,20 @@ free-text input exists and it means "say this".
 
 ## The design system (codified — this block lands atop styles.css in U1)
 
-- **Layers, not lines.** Separation by background tier (l0 work, l1
-  chrome, l2 hover/inputs, l3 active). Borders exist ONLY at the four
-  structural edges (strip bottom, rail right, dock left, status top)
-  and around modals/toasts.
+- **Layers, not lines.** Layout/lists separate by background tier (l0
+  work, l1 chrome, l2 hover/inputs, l3 active), never by hairline.
+  Borders belong to STRUCTURE (four edges: strip bottom, rail right,
+  dock left, status top; modals/toasts) and to CONTROLS (buttons and
+  inputs carry a 1px edge — affordance is not noise; rev 4.1).
 - **Three type slots.** 13px sans (chrome) · 12.5px mono (content:
   code, paths, transcripts) · 11px sans (micro/meta). Lowercase chrome;
   no letterspaced uppercase.
-- **Color budget: monochrome at rest.** Amber = voice-live or needs-you
-  (the ⚡ voice-active mark, flagged counts). Blue = current selection
-  only. Red = blocked/destructive only. Green/yellow = live state dots.
-  Nothing else is colored, ever.
+- **Color budget: chrome is monochrome; MEANING always keeps its
+  color** (rev 4.1 — the first quiet pass overstripped). Diff +/− stats
+  are always green/red everywhere (file heads, rail sub-tree, totals);
+  agent state words tint like their dots; amber = voice-live or
+  needs-you; blue = current selection; red = blocked/destructive.
+  Decoration — labels, separators, meta — is what gets no color.
 - **Mono = content.** If it's mono you could read it aloud to the
   agent; chrome is sans.
 - **The only curve is the orb.**
@@ -151,6 +154,21 @@ one-selection agent model, export contract.
   notifications on state change.
 - Parked: Ctrl+P switcher, custom groups, transcript search, voice
   phrase discoverability surface, streaming STT captions (UI ready).
+
+## Implementation substrate (user question, resolved 2026-07-07)
+
+Vanilla ES modules, no framework — reaffirming SPEC decision 3:
+buildless `.mjs`, the store/bus/panel seam, JSDoc + `tsc --checkJs`,
+vendored pinned deps (marked, DOMPurify, xterm). This is also the
+LOW-friction path to Tauri: Tauri is a webview shell that loads these
+exact files unchanged; its native work (global PTT plugin, tray, OS
+notifications, window chrome) is framework-independent. The portable
+assets are the store/bus seam, the panel contract, and this design
+system — all framework-free. Escape hatch if a panel outgrows vanilla:
+buildless htm+Preact per panel, never app-wide. A React/Vite rewrite
+now would add a build step to the daemon-served client and buy nothing
+the eventual port needs (the vocodeck-p Tauri shell can either embed
+this client as-is or re-skin against the same protocol).
 
 ## Build order (each slice ends at a USER CLICK-THROUGH)
 
