@@ -192,6 +192,14 @@
   .page-row .rev { font: 700 9.5px var(--mono); color: var(--m-agent); }
   .picon { width: 13px; flex: none; text-align: center; font-size: 11px; color: var(--m-faint); }
   .page-row.sel .picon { color: var(--m-agent); }
+  /* the selected diff's files, as a sub-tree (fork 4 addendum) */
+  .dfiles { border-left: 1px solid var(--m-hair); margin-left: 18px; }
+  .dfile-row { display: flex; align-items: center; gap: 7px; padding: 2.5px 12px 2.5px 14px;
+    font-size: 11px; color: var(--m-faint); cursor: pointer; }
+  .dfile-row:hover { color: var(--m-fg); background: var(--m-alt); }
+  .dfile-row .fdot { width: 5px; height: 5px; background: var(--m-voice); flex: none; }
+  .dfile-row .dfm { margin-left: auto; font-size: 9px; }
+  .deck[data-scene="terminal"] .dfiles { display: none; }
 
   .review-btn { margin-left: auto; font: 700 9.5px var(--mono); letter-spacing: .08em; color: var(--m-agent);
     border: 1px solid var(--m-agent); background: none; padding: 2px 8px; cursor: pointer; flex: none;
@@ -568,6 +576,11 @@
           <div class="page-row"><span class="picon">◈</span><span>overview</span></div>
           <div class="page-row"><span class="picon">▦</span><span>screen</span></div>
           <div class="page-row" id="pr-diff"><span class="picon">±</span><span>diff · vs origin/main</span><span class="rev">r2</span></div>
+          <div class="dfiles">
+            <div class="dfile-row" data-goto="presence"><span class="fdot"></span><span>presence.mjs</span><span class="dfm">+96</span></div>
+            <div class="dfile-row" data-goto="app"><span>app.mjs</span><span class="dfm">+61 −38</span></div>
+            <div class="dfile-row" data-goto="tests"><span>test_presence.py</span><span class="dfm">+25 −2</span></div>
+          </div>
           <div class="page-row"><span class="picon">¶</span><span>plan.md</span></div>
           <div class="page-row" id="pr-term"><span class="picon">❯</span><span>terminal</span></div>
         </div>
@@ -948,16 +961,18 @@
     <li>Build order U0–U3, each slice ending at your click-through.</li>
   </ul>
 
-  <h2>Open forks — your call before U1</h2>
+  <h2>Forks — DECIDED (user, 2026-07-07)</h2>
   <ul class="tight">
-    <li><b>Orb interaction:</b> click cycles attention + hold = PTT (proposed), vs click = PTT toggle + menu.</li>
-    <li><b>Input placement:</b> top strip (shown) vs single bottom bar — one exists either way.</li>
-    <li><b>Transcript depth:</b> bounded per-agent log (50/side, restart-surviving — proposed) vs fuller durable
-      transcript. Lean: bounded.</li>
-    <li><b>New — collapsed-diff default scope:</b> collapse everything except files with open findings /
-      changed-since-your-rev (shown), or collapse strictly everything. Lean: the former — the reason you opened
-      the diff should already be visible.</li>
+    <li><b>Orb:</b> click cycles attention (muted → wake → always), hold = push-to-talk.</li>
+    <li><b>Input:</b> top presence strip.</li>
+    <li><b>Transcript:</b> bounded 50/side per agent, restart-surviving.</li>
+    <li><b>Diff folds:</b> smart auto-expand (open-annotation / changed-since files start open) <b>+ the
+      diff's file list nests in the rail tree under the diff page</b> — click a file to expand and jump to it
+      (added above; lands in U2).</li>
   </ul>
+  <div class="callout"><b>Design is pinned.</b> Remaining input before build: the overall yes.
+  U0 (protocol: page.publish, workspace.open, speech who+text + speech.sentence, user-input log) starts on
+  approval — tests at the command seam, no pixels until U0 is green.</div>
 </div>
 
 <script>
@@ -1011,6 +1026,12 @@
     h.addEventListener('click', () => {
       const df = h.parentElement;
       setFold(df, !df.classList.contains('open'));
+    }));
+  // rail file sub-tree → expand + scroll to that file in the diff
+  document.querySelectorAll('.dfile-row').forEach(r =>
+    r.addEventListener('click', () => {
+      const df = document.querySelector(`.dfile[data-file="${r.dataset.goto}"]`);
+      if (df) { setFold(df, true); df.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
     }));
   const expandBtn = document.getElementById('expand-all');
   expandBtn.addEventListener('click', () => {

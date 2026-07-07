@@ -183,13 +183,14 @@ xterm terminal pages, agent card, worktree spawn.
   states, reduced-motion, light theme. Checkpoint: "GitHub rando"
   walkthrough.
 
-## Open forks (user decides before U1)
+## Forks — DECIDED (user, 2026-07-07)
 
-1. **Orb interaction:** click cycles attention + hold = PTT (proposed)
-   vs click = PTT toggle + attention via menu.
-2. **Input placement:** top strip (shown) vs single bottom bar.
-3. **Transcript depth:** bounded per-agent log (50/side, proposed) vs
-   fuller durable transcript.
-4. **Collapsed-diff default:** collapse all EXCEPT files with open
-   findings / changed-since-your-rev (shown, proposed) vs strictly all
-   collapsed.
+1. **Orb:** click cycles attention (muted → wake → always); hold = PTT.
+2. **Input:** top presence strip.
+3. **Transcript:** bounded 50/side per agent, restart-surviving.
+4. **Diff folds:** smart auto-expand (open-annotation / changed-since
+   files start open) + **the diff's file list nests in the rail tree
+   under the diff page** (click a file → expand + jump; U2).
+
+Design pinned at rev 3.2. Remaining input before build: the overall
+yes; then U0 starts (tests at the command seam, no pixels until green).
