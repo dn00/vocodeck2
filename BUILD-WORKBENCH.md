@@ -211,19 +211,17 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
 ## RESUME HERE (updated 2026-07-06 night — PROPOSAL OUT, AWAITING THE YES)
 
 **State: the protocol-reliability fix is SHIPPED (`5a43f29`); the UI/UX
-re-architecture proposal is at REV 3 (user progression: 40% → 50-60%,
-aiming 70-80%) and awaiting approval.** Read `DESIGN-DECK.md` (+ its
-interactive mockup `DESIGN-DECK.mockup.html` / the artifact link
-inside) — rev 3 pins: brutalist visual language (only curve = the mic
-orb), TRANSCRIPT (radio log, not chat), rail tree (repo groups → agents
-→ pages; center tabs dead), collapsed-by-default diff file index,
-workspace demoted to data-only, bottom status line, terminal page view,
-product first-run (spawn/review/open + connect modal). Daemon budget:
-page.publish, workspace.open, speech who+text, per-session user-input
-log. **Do not build any UI until the user approves** + answers four
-forks (orb interaction, input placement, transcript depth, collapse
-default); then U0 (protocol, tested at the command seam) starts. The
-mandate text below stands.
+re-architecture is at REV 4 — FINAL (four review rounds: 40% → 50-60% →
+80% → agreed final scope) and awaits only the user's overall yes.**
+`DESIGN-DECK.md` is the pinned spec (design system rules, zones,
+policies, scoping, signal map, daemon budget, U0–U3); the interactive
+mockup is `DESIGN-DECK.mockup.html` / the artifact link inside. All
+four forks are user-decided; naming, workspace demotion, quiet-skin
+rules, disconnected state, destructive/toast/a11y/keyboard policies are
+all pinned. **On the yes: U0 starts** — `page.publish`,
+`workspace.open`, speech who+text + `speech.sentence`, per-session
+user-input log — tests at the command seam, no pixels until U0 is
+green. The mandate text below stands.
 
 ## Previous RESUME (2026-07-06 EOD — UI/UX RE-ARCHITECTURE MANDATE)
 
@@ -365,6 +363,28 @@ Fix class for next session:
 
 ## Journal
 
+- **2026-07-07 (design rev 4 — FINAL: the quiet pass)** — Scope agreed
+  in discussion, then built in one pass. User's diagnosis ("very busy,
+  nothing like Zed") answered with countable fixes: borders → four
+  structural edges + background tiers everywhere else; nine font sizes
+  → three type slots (13 sans chrome / 12.5 mono content / 11 micro);
+  lowercase chrome (uppercase shouting was the loudest single choice);
+  color budget = monochrome at rest (amber only voice-live/needs-you,
+  blue only selection, red only blocked/destructive). User's overlap
+  catch (both utterance cards colliding in Routed) fixed by KILLING the
+  floating-card pattern: "full" now jumps to the highlighted transcript
+  entry — symmetric for user/agent, enlargeable, zero floating layers;
+  agent karaoke lives in the entry. Best-practices gaps closed as
+  design: disconnected state (new scenario: reconnecting strip, dim
+  read-only surfaces, persistent error toast), destructive policy
+  (undo-over-confirm; confirm only for kill), toast policy (errors
+  persist, successes fade), a11y floor (aria-live captions/transcript,
+  no color-only state, ink3 never sets words, focus rings), keyboard
+  floor as named U1 tasks, and the design system CODIFIED as a rules
+  block that lands atop styles.css in U1. DESIGN-DECK.md rewritten as
+  the pinned spec (changelog stays in git). Mockup validated (tag
+  balance + JS id refs), synced, artifact re-published same URL.
+  AWAITING THE YES → U0.
 - **2026-07-07 (design rev 3.2 — no-MORE/no-LESS audit; user at 80%)** —
   User asked for a minimalism/completeness audit ("edging towards too
   many things"), the annotations rename, page-type icons, and a
