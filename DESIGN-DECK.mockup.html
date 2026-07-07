@@ -182,14 +182,16 @@
   .chip.hot { color: var(--m-voice); border-color: var(--m-voice); }
   .bolt { color: var(--m-voice); font-size: 11px; }
 
-  /* pages nested under the selected agent — the tree IS the scoping model */
-  .pages { border-left: 2px solid var(--m-voice); margin: 0 0 4px 18px; padding: 2px 0 4px; background: var(--m-panel); }
-  .page-row { display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 14px;
+  /* pages nested under the selected agent — the tree IS the scoping model;
+     page TYPE is carried by an icon, not color decoration */
+  .pages { border-left: 1px solid var(--m-hair); margin: 0 0 4px 19px; padding: 2px 0 4px; }
+  .page-row { display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 12px;
     font-size: 12px; color: var(--m-dim); cursor: pointer; }
   .page-row:hover { background: var(--m-alt); color: var(--m-fg); }
   .page-row.sel { color: var(--m-fg); background: var(--m-alt); box-shadow: inset 2px 0 0 var(--m-agent); }
   .page-row .rev { font: 700 9.5px var(--mono); color: var(--m-agent); }
-  .page-row .pin { color: var(--m-faint); font-size: 10px; }
+  .picon { width: 13px; flex: none; text-align: center; font-size: 11px; color: var(--m-faint); }
+  .page-row.sel .picon { color: var(--m-agent); }
 
   .review-btn { margin-left: auto; font: 700 9.5px var(--mono); letter-spacing: .08em; color: var(--m-agent);
     border: 1px solid var(--m-agent); background: none; padding: 2px 8px; cursor: pointer; flex: none;
@@ -197,7 +199,6 @@
   .review-btn:hover { background: var(--m-agent); color: #0b0d10; }
   .rail-action { padding: 4px 12px 4px 18px; font-size: 11px; color: var(--m-faint); cursor: pointer; }
   .rail-action:hover { color: var(--m-fg); }
-  .norun { padding: 4px 12px 4px 18px; font-size: 11px; color: var(--m-faint); font-style: normal; }
 
   /* ---- bottom status line: ambient system truth (quiet, dense) ---- */
   .statusline { height: 24px; flex: none; display: flex; align-items: center; gap: 0;
@@ -396,7 +397,7 @@
 
 <div class="page">
   <div class="prose">
-    <div class="eyebrow">Design proposal · rev 3 · needs your yes before any code</div>
+    <div class="eyebrow">Design proposal · rev 3.2 · needs your yes before any code</div>
     <h1>voco deck — from debugger to product</h1>
     <p class="sub">Rev 3: tech-brutalist visual language, the transcript replaces "chat", pages move into
     the rail (tabs are gone), diffs collapse by default. One rule now governs every pixel:
@@ -452,9 +453,13 @@
       you're greeted with.</td></tr>
     <tr><td>Live caption for the speaking agent, like the user gets</td>
       <td class="verdict">Symmetry restored: the speaking slot shows the sentence being voiced <b>now</b>, and
-      FULL ⌄ drops the whole response <b>karaoke-highlighted</b> — dim = already said, highlight = hearing now,
-      faint = still queued. ■ STOP cuts the queued rest. Drivable today: TTS already plays sentence-by-sentence
-      (<code>agent.say</code> carries the full text; enriched <code>speech.started</code> marks each sentence).</td></tr>
+      FULL ⌄ drops the whole response <b>karaoke-highlighted</b> — dim = said, highlight = hearing now,
+      faint = queued. ■ STOP cuts the rest. <b>Supportability, verified against the code:</b> a say is ONE
+      playback item — sentences are chunked <i>inside</i> it (<code>_sentence_synth</code>), so today's
+      <code>speech.started</code> fires per message, not per sentence. U0 therefore adds a
+      <code>speech.sentence</code> event emitted from that generator as the player pulls into each sentence
+      (playback-aligned to within the audio buffer). Degrade path: whole-message highlight if the buffer
+      proves too deep. The caption card itself needs only <code>agent.say</code> — already there.</td></tr>
     <tr><td>Why a REVIEW button everywhere?</td>
       <td class="verdict">Over-affordance — fixed. Review is repo-scoped, so the button lives in exactly one
       place: the repo group header. The work-header ⊕ is gone; first-run's "Review a diff" stays (it IS the
@@ -501,7 +506,7 @@
     <div class="presence">
       <div class="orb-wrap">
         <div class="orb" id="orb" title="attention: wake — click cycles (muted → wake → always), hold = push-to-talk"></div>
-        <div class="orb-label"><b id="orb-mode">wake</b><span>full duplex</span></div>
+        <div class="orb-label"><b id="orb-mode">wake</b></div>
       </div>
       <div class="caption">
         <span class="cap-idle">say “deck …” or type — the deck is listening</span>
@@ -547,7 +552,7 @@
       <div class="m-rail">
         <!-- repo group = UI grouping only (common_dir); workspace identity stays data-side -->
         <div class="repo-group">
-          <span class="rname">vocodeck2</span><span class="rmeta">2 agents · 2 checkouts</span>
+          <span class="rname">vocodeck2</span>
           <button class="review-btn" data-open-picker>review</button>
         </div>
 
@@ -560,11 +565,11 @@
           <div class="ar-sub"><span>workbench</span><span class="chip hot">2 flagged</span></div>
         </div>
         <div class="pages">
-          <div class="page-row"><span>overview</span></div>
-          <div class="page-row"><span class="pin">◆</span><span>screen</span></div>
-          <div class="page-row" id="pr-diff"><span>diff · vs origin/main</span><span class="rev">r2</span></div>
-          <div class="page-row"><span>plan.md</span></div>
-          <div class="page-row" id="pr-term"><span>terminal</span></div>
+          <div class="page-row"><span class="picon">◈</span><span>overview</span></div>
+          <div class="page-row"><span class="picon">▦</span><span>screen</span></div>
+          <div class="page-row" id="pr-diff"><span class="picon">±</span><span>diff · vs origin/main</span><span class="rev">r2</span></div>
+          <div class="page-row"><span class="picon">¶</span><span>plan.md</span></div>
+          <div class="page-row" id="pr-term"><span class="picon">❯</span><span>terminal</span></div>
         </div>
 
         <div class="agent-row">
@@ -577,10 +582,9 @@
         <div class="rail-action">＋ agent in a new worktree…</div>
 
         <div class="repo-group">
-          <span class="rname">claude-setup</span><span class="rmeta">no agent</span>
+          <span class="rname">claude-setup</span><span class="rmeta">no agents</span>
           <button class="review-btn" data-open-picker>review</button>
         </div>
-        <div class="norun">review-only — findings persist; attach an agent any time</div>
       </div>
 
       <div class="grip" id="grip-rail" tabindex="0" role="separator" aria-label="resize rail"></div>
@@ -706,7 +710,7 @@
           <span class="who">FREYA</span> <span class="where">· vocodeck2 · workbench</span>
         </div>
         <div class="dock-tabs">
-          <div class="dock-tab t-review" data-docktab="review">review <span class="n">1</span></div>
+          <div class="dock-tab t-review" data-docktab="review">annotations <span class="n">1</span></div>
           <div class="dock-tab t-transcript" data-docktab="transcript">transcript</div>
           <button class="dock-export">export ↓</button>
         </div>
@@ -715,7 +719,8 @@
           <div class="dock-scroll">
             <div class="fitem">
               <div class="fhead"><span class="mtag open">open</span><span class="mtag blocking">blocking</span>
-                <span class="loc">presence.mjs:40</span></div>
+                <span class="loc">presence.mjs:40</span>
+                <button class="copybtn" title="withdraw this annotation" style="margin-left:6px">✕</button></div>
               <div class="ftext">orb must reflect attention mode, not just VAD — muted should read differently from idle</div>
             </div>
             <div class="fitem">
@@ -761,8 +766,7 @@
       <span class="st">live-git 5s</span>
       <span class="st spacer"></span>
       <span class="st"><b style="color:var(--m-warn)">1 working</b> · 1 listening · 0 blocked</span>
-      <span class="st">1 open finding</span>
-      <span class="st">exported 14:12</span>
+      <span class="st">1 open annotation</span>
     </div>
 
     <!-- spawn an agent (session.spawn — W3/W4 machinery, surfaced) -->
@@ -862,6 +866,58 @@
   typing in the input and pressing Enter routes it like speech; ＋ agent opens the spawn modal.
   The one curve on screen is the orb — everything else is the grid.</p>
 
+  <h2>The audit — no MORE, no LESS (rev 3.2)</h2>
+  <div class="prose"><p>Every element judged against one question: does a voice-first work tool need this
+  visible right now? herdr's discipline (four state colors, one sidebar, real terminals, nothing else)
+  is the calibration.</p></div>
+  <table class="audit">
+    <tr><th>Verdict</th><th>What</th><th>Why</th></tr>
+    <tr><td>CUT</td><td>"full duplex" under the orb</td><td>Ambient truth — it already lives in the status
+      line. The orb label is now one word: the attention mode.</td></tr>
+    <tr><td>CUT</td><td>Repo-group meta ("2 agents · 2 checkouts")</td><td>The list below it says exactly that.
+      Only the agentless group keeps a "no agents" note — there the absence IS the information.</td></tr>
+    <tr><td>CUT</td><td>"review-only — findings persist…" explainer row</td><td>Prose in a rail. The group +
+      REVIEW button is self-explaining.</td></tr>
+    <tr><td>CUT</td><td>"exported 14:12" in the status line</td><td>Transient event, not ambient truth — it's a
+      toast, not a status.</td></tr>
+    <tr><td>CUT</td><td>◆ pinned marker on screen page</td><td>Screens are always pinned — a marker that never
+      varies carries no information.</td></tr>
+    <tr><td>CUT (rev 3.1)</td><td>Work-header ⊕ REVIEW; orange agent-tree bar</td><td>One home per affordance;
+      the tree bar is now page-type icons (◈ ▦ ± ¶ ❯) — decoration replaced by information.</td></tr>
+    <tr><td>KEPT</td><td>Strip: orb · caption · input · speaking slot · ■ · ⚙ · conn</td><td>Each is a distinct
+      live signal or a control at the point where its state shows. ■ (interrupt work) vs STOP (cut speech) stay
+      separate — they do different things.</td></tr>
+    <tr><td>KEPT</td><td>Dock scope header</td><td>The one line that makes scoping legible — cutting it is how
+      rev 2's "whose findings are these?" bug comes back.</td></tr>
+    <tr><td>KEPT</td><td>Status line, 7 cells</td><td>All ambient, all glanceable, no controls. The state
+      counts are the herdr borrow.</td></tr>
+    <tr><td>ADDED</td><td>✕ withdraw on open annotations</td><td>The human half of the ledger loop had no UI —
+      display-only rows. (Command exists: <code>finding.withdraw</code>.)</td></tr>
+    <tr><td>ADDED (U1 note)</td><td>✕ close on page rows (hover)</td><td><code>page.close</code> exists;
+      the tree needs its affordance. Not drawn in the mockup to keep it quiet — hover-only.</td></tr>
+    <tr><td>PARKED</td><td>OS notifications on agent-blocked</td><td>herdr has them; we don't. Web Notification
+      API or the Tauri shell later — the attention-first rail sort + state counts cover the seated case.</td></tr>
+    <tr><td>PARKED</td><td>Ctrl+P quick-switcher, custom agent groups, transcript search</td><td>Real, but none
+      is needed to make the tool useful daily. Dogfood first.</td></tr>
+  </table>
+  <div class="callout"><b>Naming: "annotations", with one exception.</b> The dock tab is now
+  <b>ANNOTATIONS</b> — it lists things (concerns, questions, replies), and that's the diff-annotate lineage.
+  The repo-group button stays <b>REVIEW</b>: it starts an activity, not a list. You review; you leave
+  annotations. Export keeps emitting the same files.</div>
+
+  <h2>Agent status tracking (herdr comparison, verified)</h2>
+  <ul class="tight">
+    <li><b>herdr:</b> process-name matching + terminal-output heuristics, no hooks; four aggregate states
+      (blocked/working/done/idle) with sidebar color icons; notifications configurable.</li>
+    <li><b>deck:</b> strictly stronger ground truth — the bridge is a fact source heuristics can't beat: an
+      agent parked on <code>listen</code> is <i>provably</i> listening, a dispatch is <i>provably</i> working,
+      a pending ask is <i>provably</i> blocked-on-you. §6's <code>display_state()</code> derives from bridge
+      facts first and falls back to the same pane-watcher heuristics herdr uses (ANSI-stripped classify) only
+      for unmanaged terminals. What we adopt from herdr is the <i>presentation</i>: aggregate counts in the
+      status line, color-block state dots, blocked-first rail ordering. What we lack (parked): state-change
+      notifications.</li>
+  </ul>
+
   <h2>Why these calls (the two you asked about)</h2>
   <ul class="tight">
     <li><b>Tabs → rail tree.</b> Horizontal tabs were a second navigation axis duplicating the rail's
@@ -882,9 +938,11 @@
     <li>Scoping model: one selection (agent) drives pages, ledger, transcript, routing; voice moments are the
       single global exception; dock header names the scope.</li>
     <li>Daemon additions (the whole budget): <code>page.publish</code>, <code>workspace.open</code>,
-      speech payload enrichment (who + text), per-session user-input log symmetric to <code>say_log</code>
-      (deque(50), persisted, recorded at dispatch; route/moment data never stored). The spawn modal and
-      connect modal need <b>nothing new</b> — <code>session.spawn</code> and the adapters already exist.</li>
+      speech payload enrichment (who + text) <b>+ the per-sentence <code>speech.sentence</code> progress
+      event</b> (rev 3.2 — see the karaoke supportability row), per-session user-input log symmetric to
+      <code>say_log</code> (deque(50), persisted, recorded at dispatch; route/moment data never stored).
+      The spawn and connect modals need <b>nothing new</b> — <code>session.spawn</code> and the adapters
+      already exist.</li>
     <li>Annotation editor: diff-annotate reference structure verbatim (target label, textarea,
       Concern|Question|Nit + blocking, Add annotation/Cancel, tip line) — skin is now brutalist.</li>
     <li>Build order U0–U3, each slice ending at your click-through.</li>

@@ -365,6 +365,25 @@ Fix class for next session:
 
 ## Journal
 
+- **2026-07-07 (design rev 3.2 — no-MORE/no-LESS audit; user at 80%)** —
+  User asked for a minimalism/completeness audit ("edging towards too
+  many things"), the annotations rename, page-type icons, and a
+  supportability check on the karaoke captions. HONESTY FIX: verified
+  against code that a say is ONE PlaybackItem (sentences chunked inside
+  `_sentence_synth`) — `speech.started` fires per MESSAGE, so per-
+  sentence karaoke needs a new U0 item: `speech.sentence` emitted from
+  the generator at sentence pull (playback-aligned; degrade = whole-
+  message highlight). Corrected in both docs. Audit CUTS: orb "full
+  duplex" sub-label, repo-group counts, review-only explainer row,
+  "exported hh:mm" status cell, ◆ pinned marker. ADDS: ✕ withdraw on
+  open annotations (finding.withdraw had no UI), page-row ✕ close on
+  hover (U1 note). PARKED: OS notifications on blocked (herdr has
+  them), Ctrl+P, custom groups, transcript search. Naming resolved:
+  dock tab ANNOTATIONS (lists things), repo button stays REVIEW (starts
+  an activity). Orange tree bar → page-type icons (◈▦±¶❯). herdr status
+  tracking checked: process-name + output heuristics only — our bridge
+  facts are strictly stronger; borrowed their presentation (state
+  counts, blocked-first sort). Artifact re-published, same URL.
 - **2026-07-06 (design rev 3.1 — agent live captions, one REVIEW home,
   herdr borrows)** — Three more user notes folded in: (1) the speaking
   agent now gets the same live-caption treatment the user gets —

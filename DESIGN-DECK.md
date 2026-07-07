@@ -60,12 +60,17 @@ bordered buttons, no washes, no soft shadows, no border-radius.
    worktree, tmux/pty backend), **Review a diff** (agentless), **Open a
    repo**. CLI one-liners live behind a "connect →" modal for people
    who already run sessions (voice_init / voco listen / mcp add).
-10. **Live caption for the speaking agent** (rev 3.1) → symmetry with
-   the user's captions: the speaking slot shows the sentence being
-   voiced NOW; FULL ⌄ drops the whole response karaoke-highlighted
-   (dim = said, highlight = hearing, faint = queued); ■ STOP cuts the
-   rest. Drivable today: TTS plays sentence-by-sentence, `agent.say`
-   carries full text, enriched `speech.started` marks each sentence.
+10. **Live caption for the speaking agent** (rev 3.1; supportability
+   VERIFIED rev 3.2) → symmetry with the user's captions: the speaking
+   slot shows the sentence being voiced NOW; FULL ⌄ drops the whole
+   response karaoke-highlighted (dim = said, highlight = hearing,
+   faint = queued); ■ STOP cuts the rest. Code facts: a say is ONE
+   PlaybackItem; sentences are chunked INSIDE it (`_sentence_synth`,
+   voice_loop.py:344), so `speech.started` fires per MESSAGE. U0 adds a
+   `speech.sentence` event emitted from that generator as the player
+   pulls into each sentence (playback-aligned within the audio buffer;
+   degrade path = whole-message highlight). The card itself needs only
+   `agent.say`, which exists.
 11. **REVIEW button everywhere** (rev 3.1) → over-affordance fixed:
    review is repo-scoped, so the button lives ONLY on the repo group
    header (first-run's "Review a diff" stays — it is the landing).
@@ -79,6 +84,39 @@ bordered buttons, no washes, no soft shadows, no border-radius.
    workspace/tab/pane arrangement stays parked with custom grouping.
    Worktrees: confirmed supported since W3 (sibling worktree spawn,
    dirty trees never deleted, common_dir rail grouping).
+
+## Rev 3.2 — the no-MORE/no-LESS audit (user at 80%)
+
+Calibration: herdr's discipline (four state colors, one sidebar, real
+terminals, nothing else). CUT: "full duplex" under the orb (status line
+owns it); repo-group agent/checkout counts (the list says it); the
+"review-only" explainer row; "exported hh:mm" status cell (toast, not
+status); the ◆ pinned marker (never varies). KEPT deliberately: the
+whole presence strip (each element is a distinct live signal), the dock
+scope header (cutting it re-opens rev 2's whose-findings bug), the
+7-cell status line, ■ interrupt vs STOP (different verbs: kill work vs
+cut speech). ADDED (gaps): ✕ withdraw on open annotations
+(`finding.withdraw` existed with no UI); ✕ close on page-row hover (U1;
+`page.close` exists). PARKED: OS notifications on agent-blocked (herdr
+has them; Notification API or Tauri later), Ctrl+P switcher, custom
+groups, transcript search.
+
+**Naming (user call, resolved):** dock tab = **ANNOTATIONS** (it lists
+things; diff-annotate lineage). The repo-group button stays **REVIEW**
+(it starts an activity). You review; you leave annotations.
+
+**Visual:** the orange agent-tree bar is replaced by page-TYPE icons
+(◈ overview · ▦ screen · ± diff · ¶ doc · ❯ terminal) — decoration
+replaced by information.
+
+**Status tracking (herdr comparison):** herdr = process-name matching +
+terminal-output heuristics, no hooks; notifications configurable. Deck
+= strictly stronger ground truth — bridge facts first (parked listen =
+provably listening; dispatch = provably working; pending ask = provably
+blocked-on-you; §6 display_state), pane-watcher heuristics only as the
+fallback for unmanaged terminals. Adopted from herdr: the PRESENTATION
+(aggregate state counts in the status line, color-block dots,
+blocked-first rail ordering).
 
 ## Zones (rev 3)
 
@@ -119,7 +157,9 @@ bordered buttons, no washes, no soft shadows, no border-radius.
    resolution in the workspace root).
 3. **`workspace.open`** control command (mint workspace from a real
    path — agentless first-run parity).
-4. **`speech.started/finished` payloads gain `who` + `text`**.
+4. **`speech.started/finished` payloads gain `who` + `text`**, plus the
+   **`speech.sentence`** per-sentence progress event (rev 3.2 — emitted
+   from `_sentence_synth`'s generator at sentence pull; see redline 10).
 
 Spawn/connect modals need NOTHING new — `session.spawn` + adapters
 exist. Everything else is client-only. Unchanged machinery: store/bus
