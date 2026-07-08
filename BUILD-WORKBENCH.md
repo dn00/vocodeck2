@@ -208,7 +208,19 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
       command for per-workspace opt-out). Oracle re-review scenario
       ported as tests; verified live incl. manifest-restored pages.
 
-## RESUME HERE (updated 2026-07-07 — U1 PASSED ON MAC; U2 GRILLED, PINNED, BUILDING)
+## RESUME HERE FIRST: docs/BACKLOG.md (2026-07-08)
+
+The full audit (what's BROKEN with root causes, what's MISSING vs the
+diff-annotate reference, the product P0s) lives in **docs/BACKLOG.md**
+— work it top to bottom, B0 → B3. Headline: the center pane has been
+unscrollable since U1 (`.work` grid-child min-height — one line), a
+U2R scroll-memo keying bug lands new pages mid-document, diff rows are
+painted whole-line green/red by a leaked global class. Markdown
+machinery verified FINE (the "broken viewer" was the clipping). HTML
+pages: not possible yet — port list is in the backlog. Every UI fix
+now ends browser-verified, not gate-verified.
+
+## Previous RESUME (2026-07-07 — U1 PASSED ON MAC; U2 GRILLED, PINNED, BUILDING)
 
 **State: U1 click-through PASSED (user, on the Mac: "everything looks
 good"). U2 was re-grilled with the user (grill-with-docs session) and
