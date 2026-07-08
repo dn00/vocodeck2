@@ -154,6 +154,11 @@ class Daemon:
         self._manifest_locked = False
         self._manifest_save_task: asyncio.Task[None] | None = None
         self._dirty_workspaces: set[str] = set()
+        # U2a: gh link detection — optional edge, injectable for tests.
+        from voco.adapters.ghlink import detect as ghlink_detect
+
+        self._ghlink_detect = ghlink_detect
+        self._gh_checked: set[str] = set()
 
     def _tmux(self) -> TmuxManager:
         if self._tmux_mgr is None:
@@ -680,6 +685,10 @@ class Daemon:
             return await self._workspace_open(payload)
         if cmd == "page.publish":
             return await self._page_publish(payload)
+        if cmd == "workspace.link":
+            return await self._workspace_link(payload)
+        if cmd == "attach.snippet":
+            return self._attach_snippet(payload)
         if cmd == "session.transcript":
             name = str(payload.get("name", "")).strip()
             s = self.registry.by_call_name(name)
@@ -795,6 +804,57 @@ class Daemon:
             "rev": page.rev,
             "workspace": ws.key,
             "root": ws.root,
+        }
+
+    async def _workspace_link(self, payload: dict) -> dict:
+        """DESIGN-DECK rev 5 (U2a): GitHub links on a workspace. Manual
+        set/clear always wins; `detect` lazily asks gh — an OPTIONAL edge:
+        silence on every failure, and it only fills kinds manual didn't
+        set. Detection is cached per run; `force` re-asks."""
+        key = str(payload.get("workspace", ""))
+        ws = self.workspaces.get(key)
+        if ws is None:
+            raise ValueError(f"unknown workspace: {key}")
+        manual = {k: payload[k] for k in self.workspaces.LINK_KINDS if k in payload}
+        if manual:
+            self.workspaces.set_links(key, manual)
+        wants_detect = (
+            payload.get("detect")
+            and ws.kind == "workspace"
+            and ws.branch
+            and (payload.get("force") or key not in self._gh_checked)
+        )
+        if wants_detect:
+            self._gh_checked.add(key)
+            root, branch = ws.root, str(ws.branch)
+            found = await self._run_blocking(lambda: self._ghlink_detect(root, branch))
+            if found:
+                fill = {
+                    k: v
+                    for k, v in found.items()
+                    if k in self.workspaces.LINK_KINDS and k not in ws.links
+                }
+                if fill:
+                    self.workspaces.set_links(key, fill)
+        return {"workspace": key, "links": ws.links}
+
+    def _attach_snippet(self, payload: dict) -> dict:
+        """DESIGN-DECK rev 5 (U2d server half): the paste-ready attach
+        story for the connect modal — MCP config + CLI fallback + ssh
+        remote hint. Read-only; mirrors the CLI's attach-cmd output."""
+        url = f"http://127.0.0.1:{self._port}"
+        return {
+            "url": url,
+            "mcp": {
+                "mcpServers": {
+                    "voco": {"command": "voco-mcp", "env": {"VOCO_URL": url}}
+                }
+            },
+            "cli": 'fallback: agents run `voco say "..."` and `voco listen`',
+            "remote": (
+                f"~/.ssh/config on the agent host: RemoteForward {self._port} "
+                f"localhost:{self._port}"
+            ),
         }
 
     def _workspace_data_dir(self) -> Path:

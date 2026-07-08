@@ -51,6 +51,7 @@ def test_branch_change_emits_workspace_updated():
                 "repo": "proj",
                 "branch": "feature",
                 "common_dir": "/home/d/proj/.git",
+                "links": {},
                 "pages": 0,
             },
         )

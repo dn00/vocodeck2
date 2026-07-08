@@ -147,6 +147,9 @@ class Workspace:
     repo: str | None = None
     branch: str | None = None  # display state, refreshed from identity
     common_dir: str | None = None  # rail repo-grouping (worktree siblings)
+    # U2a: GitHub links {pr?: {number, url?, title?}, issue?: {...}} —
+    # context only (rev 5); gh is optional, absence is not an error.
+    links: dict[str, Any] = field(default_factory=dict)
     pages: dict[str, Page] = field(default_factory=dict)
     findings: dict[str, Finding] = field(default_factory=dict)
     asks: dict[str, Ask] = field(default_factory=dict)
@@ -207,6 +210,7 @@ class Workspace:
             "repo": self.repo,
             "branch": self.branch,
             "common_dir": self.common_dir,
+            "links": self.links,
             "pages": [p.meta() for p in self.pages.values()],
             "finding_counts": self.finding_counts(),
         }
@@ -302,9 +306,43 @@ class WorkspaceStore:
                 "repo": ws.repo,
                 "branch": ws.branch,
                 "common_dir": ws.common_dir,
+                "links": ws.links,
                 "pages": len(ws.pages),
             },
         )
+
+    # ---- links (DESIGN-DECK rev 5, U2a) --------------------------------------
+
+    LINK_KINDS = ("pr", "issue")
+
+    def set_links(self, key: str, updates: dict[str, Any]) -> Workspace:
+        """Set/clear GitHub links. `updates` maps kind (pr|issue) to a
+        {number, url?, title?} dict, or None to clear that kind. An exact
+        duplicate is a true no-op — no event (at-least-once house style)."""
+        ws = self._spaces.get(key)
+        if ws is None:
+            raise ValueError(f"unknown workspace: {key}")
+        changed = False
+        for kind, raw in updates.items():
+            if kind not in self.LINK_KINDS:
+                raise ValueError(f"bad link kind: {kind}")
+            if raw is None:
+                if kind in ws.links:
+                    del ws.links[kind]
+                    changed = True
+                continue
+            if not isinstance(raw, dict) or not isinstance(raw.get("number"), int):
+                raise ValueError(f"{kind} link needs an integer number")
+            link: dict[str, Any] = {"number": raw["number"]}
+            for k in ("url", "title"):
+                if isinstance(raw.get(k), str) and raw[k]:
+                    link[k] = raw[k]
+            if ws.links.get(kind) != link:
+                ws.links[kind] = link
+                changed = True
+        if changed:
+            self._emit_updated(ws)
+        return ws
 
     # ---- lookups ------------------------------------------------------------
 
@@ -726,6 +764,7 @@ class WorkspaceStore:
             "repo": ws.repo,
             "branch": ws.branch,
             "common_dir": ws.common_dir,
+            "links": ws.links,
             "page_counter": self._page_counter,
             "pages": [{**p.meta(), "data": p.data} for p in ws.pages.values()],
             "findings": [f.to_dict() for f in ws.findings.values()],
@@ -751,6 +790,7 @@ class WorkspaceStore:
                 repo=data.get("repo"),
                 branch=data.get("branch"),
                 common_dir=data.get("common_dir"),
+                links=dict(data.get("links") or {}),
             )
             for praw in data.get("pages", []):
                 page = Page(

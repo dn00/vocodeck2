@@ -375,6 +375,17 @@ Fix class for next session:
 
 ## Journal
 
+- **2026-07-07 (U2a SHIPPED — links, workspace.link, gh detect, attach
+  snippet)** — Daemon half of rev 5, tests first (15 new, 345 total).
+  New `adapters/ghlink.py` (injected Runner like diffsource; shape-gated
+  branch; rich→plain field fallback for old gh; EVERY failure → None —
+  the optional-gh decision as code). `Workspace.links` rides meta/
+  events/manifest (old manifests restore clean, version unchanged);
+  `WorkspaceStore.set_links` converges on duplicates like findings do.
+  `workspace.link` command: manual set/clear wins, `detect` fills only
+  missing kinds (cached per run, `force` re-asks), sessionspaces
+  skipped. `attach.snippet` read command for the U2d connect modal.
+  PROTOCOL.md 31 events / 29 commands. All gates green.
 - **2026-07-07 (U1 PASSED + U2 grill — workspace-first pivot decided)** —
   User drove U1 on the Mac: passed. Before U2, the user challenged
   scope (worktrees out of voco's lane? pty worth it vs attach-first?)

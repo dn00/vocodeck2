@@ -70,6 +70,7 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 
 - `ask.create`
 - `ask.list`
+- `attach.snippet`
 - `config.get`
 - `config.set`
 - `finding.add`
@@ -92,6 +93,7 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 - `session.transcript`
 - `state.get`
 - `switch_session`
+- `workspace.link`
 - `workspace.list`
 - `workspace.live`
 - `workspace.open`

@@ -90,6 +90,9 @@ COMMAND_TYPES = {
     "workspace.open",
     "page.publish",
     "session.transcript",
+    # DESIGN-DECK rev 5 (U2a): GitHub links + the connect modal's snippet.
+    "workspace.link",
+    "attach.snippet",
     "page.close",
     "page.reopen",
     "finding.list",
