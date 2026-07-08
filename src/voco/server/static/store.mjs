@@ -114,7 +114,10 @@ export class Store {
         const ex = this.workspaces.get(p.key);
         if (ex) Object.assign(ex, { repo: p.repo, branch: p.branch,
           common_dir: p.common_dir, name: p.name,
-          links: p.links ?? ex.links, git: p.git ?? ex.git });
+          links: p.links ?? ex.links,
+          // git: null is a LEGITIMATE value (status degraded/unknown) —
+          // `??` would pin stale dirty counts forever (xai B1c B2)
+          git: "git" in p ? p.git : ex.git });
         else this.workspaces.set(p.key,
           { ...p, pages: [] });
         if (!this.selectedWorkspace) this.selectWorkspace(p.key);

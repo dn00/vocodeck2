@@ -224,9 +224,26 @@ class WorkbenchRoutes:
             raise web.HTTPNotFound(
                 text=f"unknown workspace: {request.query.get('workspace')!r}"
             )
+        if ws.kind == "sessionspace":
+            raise web.HTTPBadRequest(text=f"{ws.key} has no checkout")
         path = str(request.query.get("path", ""))
-        if not path:
+        if not path or path.startswith("-"):
             raise web.HTTPBadRequest(text="path required")
+        # The viewer's contract is TRACKED files (xai B1c blocker): the
+        # list came from `git ls-files`, so reads verify the same way —
+        # confinement alone would still expose untracked secrets (.env,
+        # logs) and .git internals under the root.
+        from voco.adapters.diffsource import _default_runner
+
+        root = ws.root
+        tracked = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: _default_runner(
+                ["git", "ls-files", "--error-unmatch", "--", path], root
+            ),
+        )
+        if tracked.returncode != 0:
+            raise web.HTTPNotFound(text=f"not a tracked file: {path!r}")
         content = await asyncio.get_running_loop().run_in_executor(
             None, confined_read, ws.root, path
         )

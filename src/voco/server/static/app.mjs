@@ -544,8 +544,11 @@ function renderWork(force = false) {
 // ---- files (B1c): tracked-file browser + confined source view -----------------
 const filesState = new Map(); // wsKey -> {path, filter, list, truncated}
 function fstate(wsKey) {
-  if (!filesState.has(wsKey))
+  if (!filesState.has(wsKey)) {
+    if (filesState.size > 20) // bounded: drop the oldest browsed workspace
+      filesState.delete(filesState.keys().next().value);
     filesState.set(wsKey, { path: null, filter: "", list: null, truncated: 0 });
+  }
   return filesState.get(wsKey);
 }
 

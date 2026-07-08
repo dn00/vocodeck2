@@ -92,6 +92,10 @@ scroll.
    persistence OFF (bit twice on 2026-07-08). Boot should retry the
    acquire for a few seconds before giving up.
 
+21b. Accepted risks (named): `git ls-files` full output captured before
+    the 5000 cap (bounded by repo size); live-git tick runs one
+    `git status` per local workspace serially — stagger if fleets grow.
+
 22. Settings: curated per-key help copy, "this browser" section
     (theme, panel-size reset), read-only rows for derived values.
 23. Diff comforts: syntax highlighting, j/k + mark-reviewed,

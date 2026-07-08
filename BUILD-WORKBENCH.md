@@ -453,6 +453,17 @@ REMAINING GAPS (the honest list, by size):
 
 ## Journal
 
+- **2026-07-08 (Codex /xai review of B1c applied — 2 blockers fixed, 2
+  accepted, 1 note fixed)** — (B1) /v1/file now enforces the TRACKED-
+  file contract (`git ls-files --error-unmatch` per read + sessionspace
+  reject + leading-dash gate): confinement alone still exposed
+  untracked secrets (.env) and .git internals — verified live: tracked
+  read ok, .env → 404, .git/config → 404. (B2) client `git` merge uses
+  a key-presence check — `??` was pinning stale dirty counts forever
+  when the server legitimately degraded to null. (N) filesState bounded
+  at 20 workspaces. ACCEPTED (backlog-named): ls-files full capture
+  before the cap; serial per-workspace git status on the tick. Security
+  note routed to the side file. 368 tests, all gates, live e2e green.
 - **2026-07-08 (B1c SHIPPED — rail git status + file viewer; lock race
   KILLED at the root)** — (1) New `adapters/gitstatus.py` (concept from
   the reference's gitstatus.mjs, split on voco's seams: gh-side facts
