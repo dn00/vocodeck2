@@ -100,6 +100,16 @@ def handle_workbench_command(store, cmd: str, payload: dict, *, data_dir):
             str(payload.get("workspace", "")), str(payload.get("finding_id", ""))
         )
         return {"finding": f.to_dict()}
+    if cmd == "finding.status":
+        # The HUMAN status path (agent=False → open/withdrawn allowed too).
+        # Exists for undo-over-confirm: withdraw's undo re-opens (U2c).
+        f = store.set_finding_status(
+            str(payload.get("workspace", "")),
+            str(payload.get("finding_id", "")),
+            str(payload.get("status", "")),
+            note=payload.get("note"),
+        )
+        return {"finding": f.to_dict()}
     if cmd == "ask.create":
         a = store.add_ask(
             str(payload.get("workspace", "")),

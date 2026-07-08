@@ -356,6 +356,35 @@ async def test_workspace_link_detect_skips_sessionspaces(daemon):
     assert out["links"] == {}
 
 
+PATCH = "diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n@@ -1 +1 @@\n-a\n+b\n"
+
+
+async def test_finding_status_reopens_withdrawn(daemon, tmp_path):
+    # U2c undo-over-confirm: the withdraw toast's undo re-opens through
+    # the human status path (agents can never resurrect a withdrawal).
+    key = await opened_key(daemon, tmp_path)
+    daemon.bridge.diff_resolver.resolve = lambda source, root: PATCH
+    page = await daemon._control(
+        "page.publish", {"workspace": key, "source": {"staged": True}}
+    )
+    f = await daemon._control(
+        "finding.add",
+        {
+            "workspace": key,
+            "page_id": page["page_id"],
+            "anchor": {"file": "f.py", "side": "new", "startLine": 1, "endLine": 1},
+            "text": "hm",
+            "kind": "concern",
+        },
+    )
+    fid = f["finding"]["finding_id"]
+    await daemon._control("finding.withdraw", {"workspace": key, "finding_id": fid})
+    out = await daemon._control(
+        "finding.status", {"workspace": key, "finding_id": fid, "status": "open"}
+    )
+    assert out["finding"]["status"] == "open"
+
+
 async def test_attach_snippet_names_the_daemon(daemon):
     out = await daemon._control("attach.snippet", {})
     assert out["url"].startswith("http://127.0.0.1:")

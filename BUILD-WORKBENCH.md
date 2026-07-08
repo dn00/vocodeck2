@@ -375,6 +375,35 @@ Fix class for next session:
 
 ## Journal
 
+- **2026-07-07 (U2c+U2d SHIPPED — review as a place; create/connect;
+  mockup rev 4.1 look)** — The deck now matches the interactive mockup.
+  diff.mjs rewritten as the COLLAPSED FILE INDEX (dfile folds: tri +
+  path + ± stats + open-annotation tag + since-rev chip; fold Set owned
+  by app so re-renders keep the reader's place; smart seed = open
+  findings + changed-since files; expand/collapse-all in the work head
+  with live totals; since-rev note in the head replaces the old
+  rev-banner) and the REFERENCE annotation editor verbatim (target
+  line, textarea, concern|question|nit pills, blocking, tip line,
+  ctrl/cmd+enter, range highlight; Esc clears both editor and
+  highlight). findings.mjs → mockup fitem rows (status/kind/blocking/
+  stale tags, loc jump, ✕ withdraw). NEW modals.mjs: review picker
+  (branch/pr/staged → page.publish, agentless), open-repo
+  (workspace.open), spawn (harness seg + repo + optional worktree —
+  tmux only, pty entrypoint stays frozen), connect (the only CLI
+  one-liners in the deck + attach.snippet's remote line, quietly).
+  Rail: repo-group "review" button, "＋ agent in a new worktree…" per
+  group, "connect →" footer, and the selected diff's FILE SUB-TREE
+  (fdot + ± per file; click = fold open + jump). Empty state = the
+  mockup's card (spawn / review / open repo / connect). Withdraw is
+  UNDOABLE (undo-over-confirm): new `finding.status` command (human
+  path) re-opens; toast carries the undo. PROTOCOL 30 commands. Gates:
+  354 pytest, mypy, ruff+format, tsc. Live e2e on an isolated daemon:
+  open repo → staged diff published + parsed → blocking question added
+  → withdrawn → undone; modals module serves. Self-review fix: Esc
+  stranded .selected rows. NEXT: /xai review of U2c/U2d, then the U2
+  CLICK-THROUGH (checkpoint: PR review with no agent → annotate → row
+  persists with chip; agent restart leaves rail stable; mic never moves
+  without an agent click).
 - **2026-07-07 (Codex /xai review of U2a+U2b applied — 6 fixed, 1
   declined)** — Adversarial review per the new per-phase policy. Fixed
   with tests (8 new, 353 total): (B1) hung gh — TimeoutExpired is not

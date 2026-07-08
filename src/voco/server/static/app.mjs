@@ -16,11 +16,12 @@
 import { Store } from "./store.mjs";
 import { connectBus } from "./bus.mjs";
 import { renderMarkdown } from "./markdown.mjs";
-import { renderDiff } from "./diff.mjs";
+import { renderDiff, diffStats, seedFolds } from "./diff.mjs";
 import { renderFindings } from "./findings.mjs";
 import { renderTranscript, flashEntry } from "./transcript.mjs";
 import { renderPresence } from "./presence.mjs";
 import { renderTerminal } from "./term.mjs";
+import { openPicker, openRepo, openSpawn, openConnect } from "./modals.mjs";
 
 const store = new Store();
 const bus = connectBus(store);
@@ -61,7 +62,29 @@ function toast(msg, sticky = false) {
   document.body.append(t);
   if (!sticky) setTimeout(() => t.remove(), 4000);
 }
+
+/** Undo-over-confirm (design policy): success-style toast carrying the
+ * one-click undo; fades like a success, because it is one. */
+function toastUndo(msg, onUndo) {
+  const t = h("div", { class: "toast-msg" }, msg + " ",
+    h("button", { class: "toast-undo",
+      onclick: async () => { t.remove(); await onUndo(); } }, "undo"));
+  document.body.append(t);
+  setTimeout(() => t.remove(), 6000);
+}
 const errMsg = (e) => (e instanceof Error ? e.message : String(e));
+
+// ---- modal contexts -------------------------------------------------------------
+const mctx = () => ({ command: (c, p) => bus.command(c, p), toast });
+
+function openPickerFor(ws) {
+  openPicker({ ...mctx(), ws,
+    onOpened: (r, wsKey) => {
+      const w = store.workspaces.get(wsKey);
+      if (w) { selectWork(w); store.selectPage(r.page_id); }
+      toast(`diff opened · r${r.rev}`);
+    } });
+}
 
 // ---- content cache (page_id -> {rev, content}) ------------------------------
 const contentCache = new Map();
@@ -187,8 +210,12 @@ function renderRail() {
   }
   const placed = new Set();
   for (const [, g] of groups) {
+    const groupWs = () =>
+      g.works.find((w) => w.key === store.selectedWorkspace) || g.works[0];
     rail.append(h("div", { class: "repo-group" },
-      h("span", { class: "rname" }, g.name)));
+      h("span", { class: "rname" }, g.name),
+      h("button", { class: "review-btn", title: "review a diff here — no agent needed",
+        onclick: () => openPickerFor(groupWs()) }, "review")));
     const rows = g.works.map((ws) => ({ ws, agents: agentsIn(ws) }))
       .sort((a, b) => rowOrder(a) - rowOrder(b)
         || workLabel(a.ws).localeCompare(workLabel(b.ws)));
@@ -196,6 +223,9 @@ function renderRail() {
       for (const s of r.agents) placed.add(s.session_id);
       rail.append(workRow(r.ws, r.agents));
     }
+    rail.append(h("div", { class: "rail-action",
+      onclick: () => openSpawn({ ...mctx(), rootHint: groupWs().root }) },
+      "＋ agent in a new worktree…"));
   }
   // Agents outside any checkout (sessionspaces, pre-identity strays).
   const stray = [...store.sessions.values()].filter((s) => !placed.has(s.session_id));
@@ -207,6 +237,8 @@ function renderRail() {
   if (!store.sessions.size && !store.workspaces.size)
     rail.append(h("div", { class: "empty-note" },
       "no agents — run voice_init (MCP) or `voco listen` in a repo"));
+  rail.append(h("div", { class: "rail-action rail-foot",
+    onclick: () => openConnect(mctx()) }, "connect →"));
 }
 
 // Blocked work first; parked (agentless) work below live work, above gone.
@@ -335,9 +367,47 @@ function pagesTree(ws) {
       row.append(h("span", { class: "rail-x", title: "close page",
         onclick: (e) => { e.stopPropagation(); closePage(p); } }, "✕"));
     tree.append(row);
+    // The selected diff's file sub-tree (rev 4.1 rail): stats + finding
+    // dot per file; click = open that fold and jump to it.
+    if (p.type === "diff" && p.page_id === store.selectedPage) {
+      const sub = diffSubTree(ws, p);
+      if (sub) tree.append(sub);
+    }
   }
   return tree;
 }
+
+function diffSubTree(ws, p) {
+  const cached = contentCache.get(p.page_id);
+  if (!cached || cached.rev !== p.rev) return null;
+  const st = diffStats(cached.content.files || []);
+  if (!st.files) return null;
+  const flagged = new Set(store.findingsFor(ws.key)
+    .filter((f) => f.status === "open" && f.page_id === p.page_id)
+    .map((f) => (f.anchor || {}).file));
+  const box = h("div", { class: "dfiles" });
+  for (const [path, s] of st.perFile) {
+    box.append(h("div", { class: "dfile-row",
+      onclick: (e) => {
+        e.stopPropagation();
+        pendingReveal = { pageId: p.page_id, path };
+        store.selectPage(p.page_id);
+      } },
+      flagged.has(path) ? h("span", { class: "fdot", title: "open annotation" }) : "",
+      h("span", {}, path.split("/").pop()),
+      h("span", { class: "dfm" },
+        s.add ? h("span", { class: "add" }, "+" + s.add) : "",
+        s.add && s.del ? " " : "",
+        s.del ? h("span", { class: "del" }, "−" + s.del) : "")));
+  }
+  return box;
+}
+
+// Fold state per diff page — survives re-renders so the reader keeps
+// their place; reseeded when the page rev moves (new diff, new folds).
+const foldCache = new Map();
+/** @type {?{pageId:string, path:string}} */
+let pendingReveal = null;
 
 // ---- work: crumb header + view -------------------------------------------------
 function renderWork() {
@@ -358,10 +428,12 @@ function renderWork() {
   if (page && page.rev > 1)
     crumb.append(h("span", { class: "sep" }, " · "),
       h("span", { class: "micro rev" }, "r" + page.rev));
-  work.append(h("div", { class: "work-head" }, crumb));
+  const srnote = h("span", { class: "sr-note" });
+  const actions = h("div", { class: "work-actions" });
+  work.append(h("div", { class: "work-head" }, crumb, srnote, actions));
   const view = h("div", { class: "view" });
   work.append(view);
-  if (page) { renderPage(view, page); return; }
+  if (page) { renderPage(view, page, srnote, actions); return; }
   if (agent) { renderAgentCard(view, agent, ws); return; }
   if (ws) { renderWorkCard(view, ws); return; }
   view.classList.add("empty");
@@ -411,17 +483,36 @@ function renderWorkCard(view, ws) {
 }
 
 function welcomeView() {
-  return h("div", { class: "agent-card" },
-    h("div", { class: "agent-card-name" }, "voco deck"),
-    h("p", {}, "No agents attached yet. In an agent session (Claude Code, "
-      + "Codex…) call the voice_init MCP tool, or run `voco listen` from "
-      + "a shell in your repo — the agent appears in the rail."));
+  const reviewSomewhere = () => {
+    const anyWs = [...store.workspaces.values()].find((w) => w.kind === "workspace");
+    if (anyWs) openPickerFor(anyWs);
+    else openRepo({ ...mctx(), onOpened: (wsKey) => {
+      const w = store.workspaces.get(wsKey);
+      if (w) { selectWork(w); openPickerFor(w); }
+    } });
+  };
+  return h("div", { class: "empty-card" },
+    h("h4", {}, "Nothing on the deck yet"),
+    h("p", {}, "Pick any of these — no setup order, no terminal required."),
+    h("div", { class: "empty-actions" },
+      h("button", { class: "btn-primary", onclick: () => openSpawn(mctx()) },
+        "spawn an agent"),
+      h("button", { class: "btn-ghost", onclick: reviewSomewhere },
+        "review a diff"),
+      h("button", { class: "btn-ghost", onclick: () => openRepo({ ...mctx(),
+        onOpened: (wsKey) => {
+          const w = store.workspaces.get(wsKey);
+          if (w) selectWork(w);
+        } }) }, "open a repo…")),
+    h("div", { class: "empty-hints" },
+      h("span", {}, "already running Claude Code or Codex somewhere?"),
+      h("button", { onclick: () => openConnect(mctx()) }, "connect →")));
 }
 
 const kv = (k, v) => h("span", { class: "st-item" },
   h("span", { class: "k" }, k), h("span", {}, v));
 
-async function renderPage(view, page) {
+async function renderPage(view, page, srnote, actions) {
   if (page.type === "screen" || page.type === "doc") {
     view.textContent = "…";
     try {
@@ -434,14 +525,55 @@ async function renderPage(view, page) {
   if (page.type === "diff") {
     view.textContent = "…";
     try {
+      const cold = (contentCache.get(page.page_id) || {}).rev !== page.rev;
       const c = await fetchContent(page.page_id, page.rev);
+      // First load of this rev: the rail's file sub-tree can render now.
+      if (cold) requestAnimationFrame(renderRail);
+      const findings = store.findingsFor(store.selectedWorkspace || "")
+        .filter((f) => f.page_id === page.page_id);
+      let fc = foldCache.get(page.page_id);
+      if (!fc || fc.rev !== page.rev) {
+        fc = { rev: page.rev, fold: seedFolds(c, findings) };
+        foldCache.set(page.page_id, fc);
+      }
+      const reveal = pendingReveal && pendingReveal.pageId === page.page_id
+        ? pendingReveal.path : null;
+      pendingReveal = null;
       view.replaceChildren();
-      renderDiff(view, c, {
+      const api = renderDiff(view, c, {
         rev: page.rev,
-        findings: store.findingsFor(store.selectedWorkspace || "")
-          .filter((f) => f.page_id === page.page_id),
-        onAnnotate: (anchor, text, kind) => addFinding(page, anchor, text, kind),
+        findings,
+        fold: fc.fold,
+        reveal,
+        onAnnotate: (anchor, text, kind, blocking) =>
+          addFinding(page, anchor, text, kind, blocking),
+        onFoldChange: () => syncExpand(),
       });
+      // Head: totals + expand/collapse-all + the since-rev note.
+      if (actions) {
+        const st = diffStats(c.files || []);
+        const btn = h("button", { class: "whbtn",
+          onclick: () => { api.expandAll(!api.allOpen); } });
+        const syncLabel = () =>
+          (btn.textContent = api.allOpen ? "collapse all" : "expand all");
+        expandSync = syncLabel;
+        syncLabel();
+        actions.replaceChildren(
+          h("span", { class: "micro" },
+            `${st.files} file${st.files === 1 ? "" : "s"} · `,
+            h("span", { class: "add" }, "+" + st.add), " ",
+            h("span", { class: "del" }, "−" + st.del)),
+          btn);
+      }
+      if (srnote && c.interdiff) {
+        const inter = c.interdiff;
+        const moved = inter.changed.length + inter.added.length
+          + inter.removed.length;
+        srnote.textContent =
+          `${moved} file${moved === 1 ? "" : "s"} changed since r${inter.since_rev}`;
+        if (inter.removed.length)
+          srnote.title = "removed: " + inter.removed.join(", ");
+      }
     } catch (e) { view.textContent = "could not load: " + errMsg(e); }
     return;
   }
@@ -459,11 +591,15 @@ async function renderPage(view, page) {
   view.textContent = `${page.type} pages arrive in a later slice`;
 }
 
-async function addFinding(page, anchor, text, kind) {
+// The expand-all button's label lives across renders via this seam.
+let expandSync = () => {};
+function syncExpand() { expandSync(); }
+
+async function addFinding(page, anchor, text, kind, blocking) {
   try {
     await bus.command("finding.add", {
       workspace: store.selectedWorkspace, page_id: page.page_id,
-      anchor, text, kind,
+      anchor, text, kind, blocking: !!blocking,
     });
   } catch (e) { toast("annotation failed: " + errMsg(e), true); }
 }
@@ -536,7 +672,14 @@ function renderDock() {
     onWithdraw: async (id) => {
       try {
         await bus.command("finding.withdraw", { workspace: wsKey, finding_id: id });
-        toast("withdrawn");
+        // Undo-over-confirm: withdraw is reversible, so no dialog —
+        // the toast carries the way back (re-open via finding.status).
+        toastUndo("annotation withdrawn —", async () => {
+          try {
+            await bus.command("finding.status",
+              { workspace: wsKey, finding_id: id, status: "open" });
+          } catch (e) { toast("undo failed: " + errMsg(e), true); }
+        });
       } catch (e) { toast("withdraw failed: " + errMsg(e), true); }
     },
     onReveal: (f) => revealFinding(f),
@@ -558,14 +701,23 @@ async function loadTranscript(agent) {
 }
 
 function revealFinding(f) {
-  const ws = store.selectedWs();
-  if (ws && f.page_id !== store.selectedPage) store.selectPage(f.page_id);
-  requestAnimationFrame(() => {
-    const a = f.anchor || {};
-    const sel = `.drow[data-file="${cssEscape(a.file)}"][data-side="${a.side}"][data-line="${a.startLine}"]`;
-    const row = work.querySelector(sel);
-    if (row) { row.scrollIntoView({ block: "center" }); row.classList.add("blink"); }
-  });
+  const a = f.anchor || {};
+  // Route through the reveal seam so a collapsed fold opens first; the
+  // page re-render is async (content fetch), so the blink retries.
+  if (a.file) pendingReveal = { pageId: f.page_id, path: a.file };
+  store.selectPage(f.page_id);
+  blinkRow(a);
+}
+
+function blinkRow(a, tries = 16) {
+  const sel = `.drow[data-file="${cssEscape(a.file)}"][data-side="${a.side}"][data-line="${a.startLine}"]`;
+  const row = work.querySelector(sel);
+  if (row) {
+    row.scrollIntoView({ block: "center" });
+    row.classList.add("blink");
+    return;
+  }
+  if (tries > 0) requestAnimationFrame(() => blinkRow(a, tries - 1));
 }
 const cssEscape = (s) => String(s).replace(/["\\]/g, "\\$&");
 
@@ -653,8 +805,13 @@ function renderConn() {
 
 // ---- keyboard floor -------------------------------------------------------------
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape")
+  if (e.key === "Escape") {
     document.querySelectorAll(".annot-editor").forEach((n) => n.remove());
+    // the editor's range highlight dies with it (self-review: Esc used
+    // to strand .selected rows)
+    document.querySelectorAll(".drow.selected")
+      .forEach((n) => n.classList.remove("selected"));
+  }
 });
 
 // ---- panel resize (persisted) ----------------------------------------------------

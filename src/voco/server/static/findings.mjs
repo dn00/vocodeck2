@@ -1,8 +1,9 @@
 // @ts-check
 /**
- * Findings dock (SPEC-WORKBENCH §4). Lists the selected workspace's findings
- * with kind, status chip, blocking flag, anchor, and agent note/answer. Click
- * a card to reveal its diff line; withdraw removes it (status → withdrawn).
+ * Annotations dock (SPEC-WORKBENCH §4; DESIGN-DECK rev 4.1 fitem look).
+ * Flat rows: status/kind tags + location + ✕ withdraw (undoable via
+ * toast — the caller owns the undo), text, and the agent's reply as an
+ * inset quote. Click the location to reveal the diff line.
  */
 
 import { renderMarkdown } from "./markdown.mjs";
@@ -19,9 +20,11 @@ const el = (tag, attrs = {}, ...kids) => {
   return n;
 };
 
-const STATUS_LABEL = {
-  open: "open", addressed: "addressed", disputed: "disputed",
-  "wont-fix": "won't fix", withdrawn: "withdrawn",
+const STATUS_TAG = {
+  open: ["open", "open"],
+  addressed: ["done", "addressed"],
+  disputed: ["q", "disputed"],
+  "wont-fix": ["done", "won't fix"],
 };
 
 /**
@@ -35,39 +38,42 @@ export function renderFindings(body, findings, ctx) {
   const live = findings.filter((f) => f.status !== "withdrawn");
   if (!live.length) {
     body.append(el("div", { class: "empty-note",
-      text: ctx.emptyText || "no findings — click a diff line to flag one" }));
+      text: ctx.emptyText || "no annotations — click a diff line to flag one" }));
     return;
   }
+  const scroll = el("div", { class: "dock-scroll" });
   for (const f of live) {
     const a = f.anchor || {};
     const loc = a.file
-      ? `${a.file}:${a.startLine}${a.endLine > a.startLine ? "–" + a.endLine : ""}`
+      ? `${a.file.split("/").pop()}:${a.startLine}${a.endLine > a.startLine ? "–" + a.endLine : ""}`
       : "—";
-    const card = el("div", { class: "finding kind-" + f.kind });
-    // W5: flagged against an older rev of its page → say so.
+    const [tagCls, tagLabel] = STATUS_TAG[f.status] || ["open", f.status];
     const rev = ctx.pageRev ? ctx.pageRev(f.page_id) : null;
     const stale = rev != null && f.rev < rev;
-    card.append(
-      el("div", { class: "finding-head" },
-        el("span", { class: "finding-kind", text: f.kind }),
-        f.blocking ? el("span", { class: "finding-blocking", text: "blocking" }) : null,
-        stale ? el("span", { class: "finding-stale",
-          text: `stale (r${f.rev} of r${rev})` }) : null,
-        el("span", { class: "finding-status s-" + f.status,
-          text: STATUS_LABEL[f.status] || f.status })),
-      el("div", { class: "finding-loc", text: loc, onclick: () => ctx.onReveal(f) }),
-      el("div", { class: "finding-text", text: f.text }));
+    const head = el("div", { class: "fhead" },
+      el("span", { class: "tag " + tagCls, text: tagLabel }),
+      f.kind === "question" ? el("span", { class: "tag q", text: "question" }) : null,
+      f.kind === "nit" ? el("span", { class: "tag", text: "nit" }) : null,
+      f.blocking ? el("span", { class: "tag blocking", text: "blocking" }) : null,
+      stale ? el("span", { class: "tag stale", text: `stale r${f.rev}` }) : null,
+      el("span", { class: "loc", text: loc, onclick: () => ctx.onReveal(f) }),
+      el("button", { class: "fx", text: "✕", title: "withdraw — undoable via toast",
+        onclick: () => ctx.onWithdraw(f.finding_id) }));
+    const item = el("div", { class: "fitem" }, head,
+      el("div", { class: "ftext", text: f.text }));
     if (f.note)
-      card.append(el("div", { class: "finding-note", text: "note: " + f.note }));
+      item.append(el("div", { class: "freply" },
+        el("b", { text: "agent" }), " — " + f.note,
+        f.commit ? el("span", { class: "micro mono", text: " " + f.commit }) : null));
     if (f.answer) {
       // Agent replies are markdown (§4.3) — shared sanitizing renderer.
-      const answer = el("div", { class: "finding-answer" });
-      renderMarkdown(answer, f.answer);
-      card.append(answer);
+      const reply = el("div", { class: "freply" }, el("b", { text: "agent" }), " — ");
+      const md = el("span", {});
+      renderMarkdown(md, f.answer);
+      reply.append(md);
+      item.append(reply);
     }
-    card.append(el("div", { class: "finding-actions" },
-      el("button", { class: "btn ghost sm", text: "withdraw",
-        onclick: () => ctx.onWithdraw(f.finding_id) })));
-    body.append(card);
+    scroll.append(item);
   }
+  body.append(scroll);
 }

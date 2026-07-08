@@ -93,6 +93,8 @@ COMMAND_TYPES = {
     # DESIGN-DECK rev 5 (U2a): GitHub links + the connect modal's snippet.
     "workspace.link",
     "attach.snippet",
+    # U2c: human status path — undo-over-confirm needs re-open.
+    "finding.status",
     "page.close",
     "page.reopen",
     "finding.list",
