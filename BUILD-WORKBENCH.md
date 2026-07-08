@@ -375,6 +375,26 @@ Fix class for next session:
 
 ## Journal
 
+- **2026-07-07 (U2b SHIPPED — the workspace-first rail)** — ADR-0001 as
+  pixels. Rail = repo groups → WORK ROWS (branch + issue/PR chips +
+  flagged count; two-line rows; blocked work sorts first, parked
+  agentless work sits dimmed-but-visible above gone) → nested agents +
+  pages; sessionspace agents render as bare rows under "elsewhere".
+  VIEW/MIC split: `selectWork` (row click) changes the view only and
+  auto-focuses a lone worker's transcript; `selectAgent` is the ONLY
+  mic-mover (switch_session + review.primary, as before); the strip
+  gains a standing mic-holder cell ("→ Freya") and the status line says
+  "mic → X" (the ADR invariant: the mic holder is ALWAYS named).
+  Work-row click fires the lazy `workspace.link` detect (client-side
+  tried-set; silent). Overview view: agent card when a worker is
+  focused, else a work card (repo/root/agents/open + honest review-only
+  note). Self-review fixes applied: collapsed multi-agent rows carry a
+  state WORD (a11y: never color-only), flagged chips fall back to
+  snapshot finding_counts so parked rows are honest at boot. Gates:
+  tsc, 345 pytest, HTTP smoke (all modules 200 + imports resolve), live
+  e2e on an isolated daemon (open → link → silent detect → snapshot →
+  manifest survives shutdown). Next: /xai build review of U2a+U2b, then
+  U2c.
 - **2026-07-07 (U2a SHIPPED — links, workspace.link, gh detect, attach
   snippet)** — Daemon half of rev 5, tests first (15 new, 345 total).
   New `adapters/ghlink.py` (injected Runner like diffsource; shape-gated

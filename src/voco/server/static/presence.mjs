@@ -55,6 +55,12 @@ export function renderPresence(strip, store, ctx) {
   strip.append(el("div", { class: "orb-wrap" }, orb,
     el("span", { class: "orb-label", text: attention })));
 
+  // ---- mic holder: ALWAYS named (ADR-0001 invariant) — view and mic are
+  // separate state, so the strip is where "who hears me" lives, not the rail.
+  strip.append(el("span", { class: "mic-holder",
+    title: "who hears you — click an agent in the rail to move the mic",
+    text: "→ " + (activeName || "—") }));
+
   // ---- caption slot (aria-live: it IS the live region) -----------------------
   const cap = el("div", { class: "caption", "aria-live": "polite" });
   if (offline) {

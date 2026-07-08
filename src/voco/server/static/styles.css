@@ -93,6 +93,8 @@ input, select, textarea { background: var(--l2); border: 1px solid var(--edge);
   50% { box-shadow: 0 0 0 8px rgba(224, 164, 88, 0); }
 }
 .orb-label { font-size: 11px; color: var(--ink2); }
+.mic-holder { font-size: 11px; color: var(--ink2); flex: none;
+  padding: 0 4px; }
 
 .caption { flex: 1 1 44%; min-width: 0; display: flex; align-items: center;
   gap: 10px; }
@@ -149,14 +151,35 @@ input, select, textarea { background: var(--l2); border: 1px solid var(--edge);
   inset: 0 1.5px; background: var(--sel); opacity: .5; }
 .deck-body.offline { opacity: .55; pointer-events: none; }
 
-/* ---- rail: repo groups → agents → pages -------------------------------------- */
+/* ---- rail: repo groups → work rows → agents + pages (ADR-0001) ---------------- */
 .rail { background: var(--l1); border-right: 1px solid var(--edge);
   overflow-y: auto; padding: 8px 0; }
 .repo-group { display: flex; align-items: center; gap: 8px;
   padding: 8px 12px 4px; }
 .repo-group .rname { font-size: 12px; color: var(--ink2); }
 .rail-note { padding: 2px 12px 4px 16px; font-size: 11px; color: var(--ink3); }
+.work-row { padding: 6px 12px 4px 16px; cursor: pointer; }
+.work-row:hover { background: var(--l2); }
+.work-row.sel { background: var(--l2); box-shadow: inset 2px 0 0 var(--sel); }
+.work-row.parked .wr-label { color: var(--ink2); }
+.wr-top { display: flex; align-items: center; gap: 8px; }
+.wr-label { font-weight: 600; font-size: 13px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.wr-sub { display: flex; align-items: center; gap: 8px;
+  padding: 1px 0 0 15px; font-size: 11px; color: var(--ink2); min-height: 16px; }
+.wr-sub .ar-name { font-size: 12px; }
+.wr-agent { display: inline-flex; align-items: center; gap: 6px;
+  cursor: pointer; min-width: 0; flex: 1; }
+.wr-agent:hover .ar-name { text-decoration: underline; }
+.wr-agent .ar-state { margin-left: auto; }
+.work-row:hover .wr-agent .rail-x { visibility: visible; }
+.wr-note { color: var(--ink3); }
+.link-chip { font-size: 11px; padding: 0 6px; background: var(--l2);
+  color: var(--ink2); flex: none; }
+.link-chip.go { cursor: pointer; }
+.link-chip.go:hover { color: var(--ink); text-decoration: underline; }
 .agent-row { padding: 6px 12px 4px 16px; cursor: pointer; }
+.agent-row.nested { padding-left: 28px; }
 .agent-row:hover { background: var(--l2); }
 .agent-row.sel { background: var(--l2); box-shadow: inset 2px 0 0 var(--sel); }
 .ar-top { display: flex; align-items: center; gap: 8px; }
@@ -200,6 +223,7 @@ input, select, textarea { background: var(--l2); border: 1px solid var(--edge);
 .dot.idle { background: var(--ink3); }
 .dot.stale { background: var(--ink3); opacity: .5; }
 .dot.gone { background: transparent; border: 1px solid var(--ink3); }
+.dot.none { background: transparent; border: 1px solid var(--ink3); opacity: .6; }
 
 /* ---- work: crumb header + view ------------------------------------------------ */
 .work { display: flex; flex-direction: column; min-width: 0;

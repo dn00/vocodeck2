@@ -9,8 +9,11 @@
  * transcripts (fetched via session.transcript, marked stale by live events).
  *
  * @typedef {"gone"|"blocked"|"working"|"listening"|"stale"|"idle"} DisplayState
+ * @typedef {{number:number, url?:string, title?:string}} GhLink
  * @typedef {{key:string, host:string, root:string, name:string, kind:string,
- *   repo:?string, branch:?string, common_dir:?string, pages:PageMeta[]}} Workspace
+ *   repo:?string, branch:?string, common_dir:?string,
+ *   links?:{pr?:GhLink, issue?:GhLink},
+ *   finding_counts?:Record<string, number>, pages:PageMeta[]}} Workspace
  * @typedef {{page_id:string, type:string, ref:string, title:string,
  *   scope:string, rev:number, pinned:boolean, closed:boolean,
  *   session_id:?string, call_name:?string}} PageMeta
@@ -107,7 +110,8 @@ export class Store {
       case "workspace.updated": {
         const ex = this.workspaces.get(p.key);
         if (ex) Object.assign(ex, { repo: p.repo, branch: p.branch,
-          common_dir: p.common_dir, name: p.name });
+          common_dir: p.common_dir, name: p.name,
+          links: p.links ?? ex.links });
         else this.workspaces.set(p.key,
           { ...p, pages: [] });
         if (!this.selectedWorkspace) this.selectWorkspace(p.key);
