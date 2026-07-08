@@ -55,6 +55,16 @@ def add_workbench_routes(app: web.Application, server: BridgeServer) -> None:
     app.router.add_get("/", wb.index)
     if STATIC_DIR.is_dir():
         app.router.add_static("/static/", STATIC_DIR, follow_symlinks=False)
+
+        async def no_cache(request: web.Request, response: web.StreamResponse) -> None:
+            # Without this, browsers heuristic-cache the client modules and
+            # an open tab keeps running WEEKS-old UI after a rebuild (live
+            # report 2026-07-07). no-cache = always revalidate; the ETags
+            # aiohttp already sends make that a cheap 304.
+            if request.path.startswith("/static/") or request.path == "/":
+                response.headers["Cache-Control"] = "no-cache"
+
+        app.on_response_prepare.append(no_cache)
     app.router.add_get("/v1/page/{page_id}", wb.page_content)
     app.router.add_get("/v1/term/{session_id}", wb.term_ws)
     app.router.add_post("/v1/bridge/page", wb.bridge_page)
@@ -231,11 +241,14 @@ class WorkbenchRoutes:
             }
         if page.type == "terminal":
             # The page carries HOW to attach (SPEC-WORKBENCH §5): stream →
-            # /v1/term/{session_id} WS; mirror → poll session.peek.
+            # /v1/term/{session_id} WS; mirror → poll session.peek. `handle`
+            # (pty-N / tmux session) is the killable unit for the head
+            # action — only daemon-spawned terminals have one.
             return {
                 "mode": page.data.get("mode"),
                 "call_name": page.data.get("call_name"),
                 "session_id": page.session_id,
+                "handle": page.data.get("handle"),
             }
         raise web.HTTPNotImplemented(text=f"page type {page.type} lands later")
 

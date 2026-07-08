@@ -520,3 +520,14 @@ input, select, textarea { background: var(--l2); border: 1px solid var(--edge);
 
 /* undo toast */
 .toast-undo { font-size: 11px; margin-left: 6px; }
+
+/* settings modal (mockup rev 4.1) */
+.set-h { font-size: 11px; color: var(--voice); margin: 16px 0 2px; }
+.set-h:first-of-type { margin-top: 6px; }
+.set-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.set-row .sk { flex: 1; font-size: 12.5px; }
+.set-row .sk small { display: block; color: var(--ink3); font-size: 11px; }
+.set-row select, .set-row input[type=text] { font-size: 12px; padding: 4px 8px;
+  width: 130px; }
+.whbtn.danger { color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 45%, transparent); }

@@ -21,7 +21,8 @@ import { renderFindings } from "./findings.mjs";
 import { renderTranscript, flashEntry } from "./transcript.mjs";
 import { renderPresence } from "./presence.mjs";
 import { renderTerminal } from "./term.mjs";
-import { openPicker, openRepo, openSpawn, openConnect } from "./modals.mjs";
+import { openPicker, openRepo, openSpawn, openConnect, openSettings }
+  from "./modals.mjs";
 
 const store = new Store();
 const bus = connectBus(store);
@@ -591,6 +592,21 @@ async function renderPage(view, page, srnote, actions) {
   if (page.type === "terminal") {
     try {
       const c = await fetchContent(page.page_id, page.rev);
+      // Head actions (mockup): mode truth + kill for daemon-spawned ones.
+      if (actions) {
+        const mode = (c && c.mode) || "mirror";
+        actions.replaceChildren(
+          h("span", { class: "micro", style: "color:var(--ok)" },
+            mode === "stream" ? "live · ring replay" : "mirror · tmux"));
+        const handle = c && c.handle;
+        if (handle)
+          actions.append(h("button", { class: "whbtn danger",
+            onclick: async () => {
+              if (!confirm(`kill ${handle}? the process dies with it`)) return;
+              try { await bus.command("session.kill", { name: handle }); }
+              catch (e) { toast("kill failed: " + errMsg(e), true); }
+            } }, "kill"));
+      }
       await renderTerminal(view, page, c, {
         wb: (window.__VOCO__ || {}).wb || "",
         command: (cmd, payload) => bus.command(cmd, payload),
@@ -775,6 +791,7 @@ function renderStrip() {
     command: (cmd, payload) => bus.command(cmd, payload),
     onFull: jumpToTranscript,
     toast,
+    onSettings: () => openSettings(mctx()),
   });
 }
 

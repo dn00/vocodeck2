@@ -31,7 +31,8 @@ const HEARING = new Set(["capturing", "holding", "routing"]);
  * @param {HTMLElement} strip
  * @param {import("./store.mjs").Store} store
  * @param {{command:(cmd:string, payload?:object)=>Promise<any>,
- *   onFull:(target:"you"|"agent")=>void, toast:(msg:string, sticky?:boolean)=>void}} ctx
+ *   onFull:(target:"you"|"agent")=>void, toast:(msg:string, sticky?:boolean)=>void,
+ *   onSettings:()=>void}} ctx
  */
 export function renderPresence(strip, store, ctx) {
   strip.replaceChildren();
@@ -133,7 +134,9 @@ export function renderPresence(strip, store, ctx) {
       onclick: async () => {
         try { await ctx.command("interrupt", {}); }
         catch (e) { ctx.toast("interrupt: " + msg(e), true); }
-      } })));
+      } }),
+    el("button", { text: "⚙", title: "settings",
+      onclick: () => ctx.onSettings() })));
 }
 
 const msg = (e) => (e instanceof Error ? e.message : String(e));

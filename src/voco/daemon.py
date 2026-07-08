@@ -950,7 +950,9 @@ class Daemon:
         return str(target), host
 
     def _public_config(self) -> dict:
-        """Config snapshot minus secrets (tokens, api keys)."""
+        """Config snapshot minus secrets (tokens, api keys). `_hot` names
+        the keys that apply live — the settings modal marks the rest as
+        restart-required IN ADVANCE (honest hot-apply, U3-pulled-forward)."""
         out: dict[str, Any] = {}
         for section, values in self.cfg.items():
             if not isinstance(values, dict):
@@ -958,6 +960,7 @@ class Daemon:
             out[section] = {
                 k: v for k, v in values.items() if "token" not in k and "key" not in k
             }
+        out["_hot"] = sorted(self._HOT_APPLY)
         return out
 
     # ---- typed input path (UI text box / voco input) --------------------------------

@@ -170,6 +170,75 @@ export function openSpawn(ctx) {
       el("button", { class: "btn-primary", text: "spawn", onclick: spawn })]);
 }
 
+// ---- settings (mockup rev 4.1, pulled forward from U3) --------------------------
+// config.get/set are the whole backend. Honest hot-apply: keys in the
+// daemon's _hot list apply live; every other row is marked "restart" IN
+// ADVANCE, and the toast reports what actually happened.
+/** @param {Ctx} ctx */
+export async function openSettings(ctx) {
+  let cfg;
+  try { cfg = await ctx.command("config.get", {}); }
+  catch (e) { ctx.toast("settings unavailable: " + errMsg(e), true); return; }
+  const hot = new Set(cfg._hot || []);
+  const body = [];
+  const parse = (raw, old) => {
+    if (typeof old === "boolean") return raw === "true";
+    if (typeof old === "number") {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) throw new Error("needs a number");
+      return n;
+    }
+    return raw;
+  };
+  for (const section of Object.keys(cfg).sort()) {
+    const values = cfg[section];
+    if (section.startsWith("_") || typeof values !== "object" || values === null)
+      continue;
+    body.push(el("div", { class: "set-h", text: section }));
+    for (const key of Object.keys(values).sort()) {
+      const val = values[key];
+      if (typeof val === "object" && val !== null) continue; // scalars only
+      const full = `${section}.${key}`;
+      const live = hot.has(full);
+      let field;
+      if (typeof val === "boolean") {
+        field = el("select", {});
+        for (const o of ["true", "false"])
+          field.append(el("option", { value: o, text: o,
+            selected: String(val) === o ? "" : null }));
+      } else {
+        field = el("input", { type: "text", value: String(val) });
+      }
+      const apply = async () => {
+        let parsed;
+        try { parsed = parse(/** @type {any} */ (field).value, val); }
+        catch (e) { ctx.toast(`${full}: ${errMsg(e)}`, true); return; }
+        if (parsed === val) return;
+        try {
+          const r = await ctx.command("config.set", { key: full, value: parsed });
+          ctx.toast(r.applied ? `${full} applied live`
+            : `${full} saved — takes effect on restart`);
+        } catch (e) { ctx.toast(`${full}: ${errMsg(e)}`, true); }
+      };
+      field.addEventListener("change", apply);
+      field.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") apply();
+      });
+      body.push(el("div", { class: "set-row" },
+        el("span", { class: "sk", text: key },
+          el("small", { text: live ? "hot-applies" : "restart" })),
+        field));
+    }
+  }
+  if (!body.length)
+    body.push(el("div", { class: "hintline",
+      text: "no editable config — the daemon is running on defaults" }));
+  const close = openModal("Settings",
+    "written to the overrides file · unmarked keys need a daemon restart",
+    body,
+    [el("button", { class: "btn-primary", text: "done", onclick: () => close() })]);
+}
+
 // ---- connect (U2d): the paste-ready attach story --------------------------------
 /** @param {Ctx} ctx */
 export function openConnect(ctx) {
