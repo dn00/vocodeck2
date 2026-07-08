@@ -453,6 +453,26 @@ REMAINING GAPS (the honest list, by size):
 
 ## Journal
 
+- **2026-07-08 (Codex /xai review of B0+B2-16+B1a applied — 2 blockers
+  + 5 warnings fixed, 1 accepted risk)** — (B1) worktree diffs now
+  include UNTRACKED files (each vs /dev/null, bounded at 200, --no-index
+  rc=1 handled as success) — new files ARE the agent's work; picker
+  hint updated to say so honestly. (B2) an OPEN annotation editor now
+  pauses center rebuilds — a live-tracked worktree diff bumps rev every
+  few seconds while the agent works and was about to eat reviewer
+  drafts; lastWorkKey stays stale so the next event after close renders.
+  (W3) annotatable:false enforced SERVER-side in add_finding (a stale
+  tab or alt client can't annotate read-only pages). (W4) findByText
+  rewritten element-deepest so anchors spanning inline markup reveal;
+  (W5) min needle 2 chars + docview reveal falls back to flashing the
+  doc (a reveal click always lands somewhere). (W6) staged/worktree
+  sources are truthiness-checked and source_ref mirrors resolve's
+  precedence exactly ({worktree: false} can't mint a phantom ref).
+  (W7) manifest restore normalizes page params (a persisted "false"
+  STRING can't fake writability). ACCEPTED RISK (backlog): MAX_DIFF_
+  BYTES is post-capture — a giant dirty tree materializes in memory
+  before the 413. 363 tests, all gates green. 1 security note routed
+  to ../vocodeck2-security/ (unseen). Daemon restarted on this build.
 - **2026-07-08 (B2-16 + B1a SHIPPED — worktree diffs; doc annotation +
   shared reveal)** — Ports done CONCEPT-FIRST per the user's rule:
   kernels verbatim (anchor offset math, findByText/flash, CSS-escape),

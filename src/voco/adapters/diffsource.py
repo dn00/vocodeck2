@@ -43,6 +43,9 @@ def _default_runner(argv: list[str], cwd: str) -> RunResult:
     return RunResult(proc.returncode, proc.stdout, proc.stderr)
 
 
+MAX_UNTRACKED = 200  # /dev/null diffs per worktree resolve (bounded work)
+
+
 class DiffResolveError(Exception):
     """Soft, message-carrying failure — the route maps it to a 4xx hint."""
 
@@ -99,14 +102,33 @@ class DiffResolver:
                     + (r.stderr.strip() or "unknown error")
                 )
             return r.stdout
-        if "staged" in source:
+        if source.get("staged"):
             return self._git(["diff", "--cached"], root)
-        if "worktree" in source:
+        if source.get("worktree"):
             # B2-16: the working tree vs HEAD — staged AND unstaged, the
             # diff of an agent mid-task. Branch mode (merge-base..HEAD)
-            # shows only committed work; this is the "show me what she's
-            # done so far" source.
-            return self._git(["diff", "HEAD", "--"], root)
+            # shows only committed work. Untracked files ARE the agent's
+            # work too (xai B1): each is diffed against /dev/null so new
+            # files appear instead of silently vanishing.
+            out = [self._git(["diff", "HEAD", "--"], root)]
+            listed = self._git(
+                ["ls-files", "--others", "--exclude-standard"], root
+            ).splitlines()
+            for path in listed[:MAX_UNTRACKED]:
+                if not path or path.startswith("-"):
+                    continue  # shape gate: a filename must never read as a flag
+                # --no-index exits 1 when files differ — that IS success here.
+                r = self._run(
+                    ["git", "diff", "--no-index", "--", os.devnull, path], root
+                )
+                if r.returncode in (0, 1) and r.stdout:
+                    out.append(r.stdout)
+            if len(listed) > MAX_UNTRACKED:
+                out.append(
+                    f"\n# … {len(listed) - MAX_UNTRACKED} more untracked "
+                    "file(s) not shown\n"
+                )
+            return "".join(out)
         if "branch" in source:
             base = source.get("branch") or self.default_branch(root)
             if not valid_ref(base):
@@ -125,8 +147,17 @@ class DiffResolver:
 
 
 def source_ref(source: dict) -> str:
-    """Stable identity for a diff source — same ref re-resolves in place."""
-    for k in ("pr", "branch", "staged", "worktree", "diff_file"):
-        if k in source:
-            return f"{k}:{source[k]}"
+    """Stable identity for a diff source — same ref re-resolves in place.
+    MIRRORS resolve()'s precedence AND truthiness (xai W6: `{worktree:
+    false}` must not mint a ref that resolve() would refuse)."""
+    if "pr" in source:
+        return f"pr:{source['pr']}"
+    if source.get("staged"):
+        return "staged:True"
+    if source.get("worktree"):
+        return "worktree:True"
+    if "branch" in source:
+        return f"branch:{source['branch']}"
+    if "diff_file" in source:
+        return f"diff_file:{source['diff_file']}"
     return "diff:unknown"

@@ -461,6 +461,13 @@ function workFingerprint() {
 function renderWork(force = false) {
   const key = workFingerprint();
   if (!force && key === lastWorkKey && !pendingReveal) return;
+  // An OPEN annotation editor owns the center: a live-tracked worktree
+  // diff bumps rev every few seconds while the agent works, and a
+  // rebuild would eat the reviewer's half-written draft (xai B1a B2).
+  // lastWorkKey stays stale on purpose — the next event after the
+  // editor closes (the finding.added itself, or the live-git tick)
+  // triggers the deferred rebuild.
+  if (!force && work.querySelector(".annot-editor")) return;
   lastWorkKey = key;
   work.replaceChildren();
   const agent = selectedAgent();

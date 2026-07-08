@@ -651,6 +651,12 @@ class WorkspaceStore:
         page = ws.pages.get(page_id)
         if page is None:
             raise ValueError(f"finding references unknown page: {page_id}")
+        # annotatable:false is a SERVER contract, not a rendering hint —
+        # a stale tab or alternate client must not annotate a read-only
+        # page (xai B1a W3).
+        params = page.data.get("params") or {}
+        if params.get("annotatable") is False:
+            raise ValueError(f"page {page_id} is read-only (annotatable: false)")
         if kind not in ("concern", "question", "nit"):
             raise ValueError(f"bad finding kind: {kind}")
         fid = "f-" + secrets.token_hex(4)
@@ -853,6 +859,16 @@ class WorkspaceStore:
                 links=_clean_links(data.get("links")),
             )
             for praw in data.get("pages", []):
+                pdata = dict(praw.get("data", {}))
+                # Manifest-boundary hygiene mirrors the push whitelist
+                # (xai B1a W7): params restore as {annotatable: bool} or
+                # not at all — a persisted "false" STRING must not fake
+                # writability past the client's strict check.
+                rp = pdata.get("params")
+                if isinstance(rp, dict) and isinstance(rp.get("annotatable"), bool):
+                    pdata["params"] = {"annotatable": rp["annotatable"]}
+                elif "params" in pdata:
+                    del pdata["params"]
                 page = Page(
                     page_id=str(praw["page_id"]),
                     type=str(praw["type"]),
@@ -864,7 +880,7 @@ class WorkspaceStore:
                     closed=bool(praw.get("closed", False)),
                     session_id=praw.get("session_id"),
                     call_name=praw.get("call_name"),
-                    data=dict(praw.get("data", {})),
+                    data=pdata,
                     updated_ts=float(praw.get("updated_ts", 0.0)),
                 )
                 ws.pages[page.page_id] = page

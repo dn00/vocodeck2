@@ -61,8 +61,10 @@ export async function renderDocView(view, markdown, ctx) {
   if (!view.contains(prose)) return; // a newer render replaced us mid-await
 
   if (ctx.reveal) {
-    const hit = findByText(prose, ctx.reveal);
-    if (hit) requestAnimationFrame(() => flash(hit, view));
+    // Fall back to flashing the whole doc: a reveal click must always
+    // land SOMEWHERE visible, even when the quote has drifted away.
+    const hit = findByText(prose, ctx.reveal) || doc;
+    requestAnimationFrame(() => flash(hit, view));
   }
   if (ctx.readOnly) return;
 

@@ -117,20 +117,61 @@ def test_detect_silent_on_hung_gh():
 # ---- diff source: worktree (B2-16) ------------------------------------------
 
 
-def test_worktree_source_diffs_working_tree_vs_head():
+def test_worktree_source_includes_tracked_and_untracked():
     from voco.adapters.diffsource import DiffResolver, source_ref
 
-    calls: list[list[str]] = []
-
     def run(argv, cwd):
-        calls.append(argv)
-        return RunResult(0, "diff --git a/x b/x\n", "")
+        if argv[:3] == ["git", "diff", "HEAD"]:
+            return RunResult(0, "diff --git a/x b/x\n+tracked\n", "")
+        if argv[:2] == ["git", "ls-files"]:
+            return RunResult(0, "brand-new.py\n", "")
+        if argv[:3] == ["git", "diff", "--no-index"]:
+            # --no-index exits 1 when files differ: that IS the diff
+            return RunResult(1, "diff --git a/dev/null b/brand-new.py\n+new\n", "")
+        raise AssertionError(f"unexpected argv {argv}")
 
     out = DiffResolver(runner=run).resolve({"worktree": True}, "/repo")
-    assert out.startswith("diff --git")
-    assert calls == [["git", "diff", "HEAD", "--"]]
-    # stable identity: re-publish replaces in place
+    assert "+tracked" in out
+    assert "brand-new.py" in out and "+new" in out  # xai B1: new files visible
     assert source_ref({"worktree": True}) == "worktree:True"
+
+
+def test_falsy_staged_and_worktree_do_not_resolve():
+    from voco.adapters.diffsource import DiffResolveError, DiffResolver, source_ref
+
+    r = DiffResolver(runner=lambda a, c: RunResult(0, "", ""))
+    with pytest.raises(DiffResolveError, match="source must be"):
+        r.resolve({"worktree": False}, "/repo")
+    with pytest.raises(DiffResolveError, match="source must be"):
+        r.resolve({"staged": False}, "/repo")
+    # source_ref mirrors resolve's truthiness — no ref for a non-source
+    assert source_ref({"worktree": False}) == "diff:unknown"
+
+
+def test_read_only_page_rejects_findings_server_side():
+    store, ws, _ = make_store()
+    page = store.push_doc(
+        ws, name="final.md", content="done", params={"annotatable": False}
+    )
+    with pytest.raises(ValueError, match="read-only"):
+        store.add_finding(
+            ws.key,
+            page_id=page.page_id,
+            anchor={"kind": "text", "exact": "done", "start": 0, "end": 4},
+            text="but…",
+        )
+
+
+def test_restore_normalizes_page_params():
+    store, ws, _ = make_store()
+    store.push_doc(ws, name="a.md", content="x", params={"annotatable": False})
+    dumped = store.dump_workspace(ws)
+    for praw in dumped["pages"]:
+        praw["data"]["params"] = {"annotatable": "false"}  # legacy string
+    restored = WorkspaceStore().restore_workspace(dumped)
+    assert restored is not None
+    page = next(iter(restored.pages.values()))
+    assert "params" not in page.data  # junk dropped, never a fake bool
 
 
 async def test_page_publish_accepts_worktree_source(daemon, tmp_path):

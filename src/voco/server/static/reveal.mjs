@@ -43,17 +43,27 @@ function nearestScroller(el) {
   return null;
 }
 
-/** First element under `root` whose text contains `exact` (trimmed,
- * bounded) — best-effort prose reveal that survives offset drift.
+/** DEEPEST element under `root` whose textContent contains `exact` —
+ * element-level (not text-node) matching, so an anchor spanning inline
+ * markup (`foo <code>bar</code>`) still reveals (xai B1a W4). Short
+ * anchors down to 2 chars are allowed; ambiguity resolves to the
+ * smallest matching element (xai W5).
  * @param {?Element} root @param {?string} exact */
 export function findByText(root, exact) {
   const needle = String(exact == null ? "" : exact).trim().slice(0, 80);
-  if (!root || needle.length < 4) return null;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let node;
-  while ((node = walker.nextNode())) {
-    if (node.nodeValue && node.nodeValue.includes(needle))
-      return node.parentElement;
+  if (!root || needle.length < 2) return null;
+  let best = (root.textContent || "").includes(needle) ? root : null;
+  if (!best) return null;
+  let advanced = true;
+  while (advanced) {
+    advanced = false;
+    for (const child of best.children) {
+      if ((child.textContent || "").includes(needle)) {
+        best = child;
+        advanced = true;
+        break;
+      }
+    }
   }
-  return null;
+  return best;
 }

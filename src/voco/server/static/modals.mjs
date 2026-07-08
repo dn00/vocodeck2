@@ -110,7 +110,7 @@ export function openPicker(ctx) {
       hint.textContent = "needs gh + auth in the workspace root";
     } else if (mode.value === "working tree") {
       hint.textContent =
-        "everything uncommitted — staged + unstaged vs HEAD · live-tracks as the agent works";
+        "everything uncommitted — staged, unstaged, and new files — vs HEAD · live-tracks as the agent works";
     } else {
       hint.textContent = "the workspace's staged changes, as git sees them now";
     }
