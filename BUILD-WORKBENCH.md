@@ -373,6 +373,41 @@ Fix class for next session:
        restart → pages/findings/asks all restored; missed-wake
        redelivery covered by tests.
 
+## MOCKUP v4.1 GAP AUDIT (2026-07-07 night — systematic, element by element)
+
+User field report: "a LOT missing". TWO compounding causes found first:
+the user's daemon predated all of U2 (started 21:33, before every U2
+commit — new client, old commands) AND the browser heuristic-caches the
+client modules (no Cache-Control → an open tab keeps running old UI).
+Both fixed: daemon restarted on the current build; `/` + `/static/*`
+now send `no-cache` (commit 1fabe11 — one hard refresh needed, then
+never again). Gear + settings modal + terminal head actions also landed
+in 1fabe11 (settings pulled forward from U3).
+
+Full audit of every mockup element/scenario/policy vs the build.
+BUILT: strip (orb/captions/input/speaking/interrupt/gear + mic-holder),
+rail (groups + review btns, work rows, agents, pages, diff sub-tree,
+spawn/connect actions), diff index + editor + fmarks, dock (scope,
+tabs, fitems, transcript + karaoke + full-jump), status line, all four
+modals + settings, empty card, offline state, toasts, withdraw-undo,
+kill-confirm, grips, Esc/Enter floor, reduced-motion, aria-live.
+
+REMAINING GAPS (the honest list, by size):
+1. **Hold-PTT (orb + keyboard)** — the one FUNCTIONAL gap. Needs
+   daemon `ptt.press/release` (voice-loop work; hotkey adapter exists).
+   Deliberately deferred since U1; now the top named gap.
+2. **Theme select + light theme** — U3 (palette + tokens work).
+3. **Settings niceties** — curated per-key help copy (modal is
+   generic key list today), "panel sizes: reset" row, data-dir
+   read-only row. Small.
+4. **Detach = confirm() today; policy says undo-toast** — swap to
+   toast ("she reappears on her next call" — re-register makes true
+   undo unnecessary). Small.
+5. **Reconnect countdown** — strip/status say "reconnecting" but not
+   "retry in Ns" (bus must expose its backoff). Small.
+6. **Group-header "no agents" rmeta** — cosmetic. Tiny.
+7. **U3 checkpoint items** — contrast audit, GitHub-rando walkthrough.
+
 ## Journal
 
 - **2026-07-07 (Codex /xai review of U2c+U2d applied — 5 fixed, 0
