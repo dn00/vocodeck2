@@ -21,6 +21,7 @@ INVARIANTS:
 
 from __future__ import annotations
 
+import os
 import secrets
 import time
 from collections.abc import Callable
@@ -223,6 +224,22 @@ def _workspace_key(host: str, root: str) -> str:
     return f"{host}:{root.rstrip('/') or '/'}"
 
 
+def _canon_root(root: str) -> str:
+    """SPEC W0: workspace keys are realpath(root) — two spellings of ONE
+    checkout must not split its ledger (found live 2026-07-07: macOS
+    /tmp is a symlink to /private/tmp, so a bridge register by /tmp/x
+    and a workspace.open of the same dir minted two workspaces). Only
+    paths that exist on THIS host are canonicalized: remote agents'
+    paths pass through raw — host is part of the key, so they can't
+    collide with local ones anyway."""
+    try:
+        if os.path.exists(root):
+            return os.path.realpath(root)
+    except OSError:
+        pass
+    return root
+
+
 LINK_KINDS = ("pr", "issue")
 
 
@@ -271,7 +288,7 @@ class WorkspaceStore:
         if root:
             ws = self._get_or_create(
                 host,
-                str(root),
+                _canon_root(str(root)),
                 kind="workspace",
                 repo=identity.get("repo"),
                 common_dir=identity.get("common_dir"),
@@ -293,7 +310,7 @@ class WorkspaceStore:
                 ws.common_dir = str(identity["common_dir"])
             return ws
         return self._get_or_create(
-            host, str(identity.get("cwd") or "?"), kind="sessionspace"
+            host, _canon_root(str(identity.get("cwd") or "?")), kind="sessionspace"
         )
 
     def home_of(self, identity: dict[str, Any]) -> Workspace | None:
@@ -302,7 +319,7 @@ class WorkspaceStore:
         review-item computation) must never create workspaces or emit."""
         host = str(identity.get("host") or "?")
         root = identity.get("worktree") or identity.get("cwd") or "?"
-        return self._spaces.get(_workspace_key(host, str(root)))
+        return self._spaces.get(_workspace_key(host, _canon_root(str(root))))
 
     def _get_or_create(
         self,

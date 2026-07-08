@@ -183,6 +183,23 @@ def test_restore_cleans_malformed_links():
     assert restored is not None and restored.links == {}
 
 
+def test_symlinked_root_spellings_share_one_workspace(tmp_path):
+    # Found live (2026-07-07): macOS /tmp → /private/tmp split one
+    # checkout into two workspaces. Keys canonicalize local roots.
+    real = tmp_path / "real"
+    real.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(real)
+    store = WorkspaceStore()
+    a = store.resolve({"host": "h", "cwd": str(real), "worktree": str(real)})
+    b = store.resolve({"host": "h", "cwd": str(alias), "worktree": str(alias)})
+    assert a.key == b.key and len(store.all()) == 1
+    assert store.home_of({"host": "h", "worktree": str(alias)}) is a
+    # remote paths (don't exist here) pass through raw — host keys them
+    r = store.resolve({"host": "far", "cwd": "/nowhere/x", "worktree": "/nowhere/x"})
+    assert r.key == "far:/nowhere/x"
+
+
 def test_meta_counts_open_asks():
     # xai WARNING 6: unvisited rail rows must count unanswered asks too.
     store, ws, _ = make_store()

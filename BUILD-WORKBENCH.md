@@ -430,12 +430,39 @@ REMAINING GAPS (the honest list, by size):
   exists daemon-side; no edit affordance in the dock.
 - **P2 · Reviewer comforts** — syntax highlighting, j/k + mark-
   reviewed, reply-on-finding from the dock.
+- **P2 · Annotate DOC pages** — markdown docs render (sanitized) but
+  findings anchor to diff lines only; per-block annotation on docs
+  (anchor = heading/paragraph index) is a natural findings-model
+  extension the review surface doesn't have yet. The reserved `html`
+  page type (SPEC §3.1) sits behind it.
 - **P2 · Detach uses confirm(); policy says undo-toast.** Reconnect
   countdown missing. Group rmeta cosmetic.
 - **P3 · Theme/light, settings help copy, panel reset** (U3).
 
 ## Journal
 
+- **2026-07-07 (seed_demo + a real bug it caught — workspace splitting
+  on symlinked roots)** — User asked to SEE the deck with full data.
+  New `scripts/seed_demo.py`: builds a demo repo + sibling worktree in
+  /tmp, registers two fake agents through the real bridge (the daemon
+  named them Freya and Iris), publishes a two-rev branch diff
+  (interdiff live), files findings in every state (open+blocking /
+  addressed with note / question answered via bridge ask_reply), an
+  open ask, PR+issue links, a screen page, transcript says, a queued
+  input. Everything through the daemon's own HTTP — the browser shows
+  the REAL tool at full occupancy. FIRST RUN CAUGHT A REAL BUG: macOS
+  /tmp is a symlink to /private/tmp, and one checkout minted TWO
+  workspaces (workspace.open probed the canonical path; bridge register
+  trusted the raw spelling) — same split-state class as the two-
+  checkouts-one-basename dogfood bug. The W0 spec said realpath keys;
+  resolve() never did it. Fixed: `_canon_root` canonicalizes LOCAL
+  roots in resolve/home_of (remote paths pass raw — host keys them);
+  test with a real symlink. Demo manifests from the split run purged
+  from the data dir. 356 tests green. Settings-vs-mockup question
+  answered: the mockup's settings rows are curated copy + browser-local
+  items; the built modal renders raw config.get truth — help copy is
+  P3 on the audit. Markdown-doc per-line annotation: NOT built (diff
+  pages only) — added to the audit as a named feature.
 - **2026-07-07 (Codex /xai review of U2c+U2d applied — 5 fixed, 0
   security)** — No blockers this round. Fixed with tests where
   server-side: (W1) a stale async diff render can no longer steal a
