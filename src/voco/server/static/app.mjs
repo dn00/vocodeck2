@@ -461,8 +461,6 @@ function renderWork(force = false) {
   const key = workFingerprint();
   if (!force && key === lastWorkKey && !pendingReveal) return;
   lastWorkKey = key;
-  const oldView = work.querySelector(".view");
-  if (oldView) scrollMemo.set(pageKey(), oldView.scrollTop);
   work.replaceChildren();
   const agent = selectedAgent();
   const ws = store.selectedWs();
@@ -487,8 +485,13 @@ function renderWork(force = false) {
   const actions = h("div", { class: "work-actions" });
   work.append(h("div", { class: "work-head" }, crumb, srnote, actions));
   const view = h("div", { class: "view" });
+  // Capture the key this view was RENDERED for: saving under a live
+  // pageKey() re-keyed page A's offset onto page B when the selection
+  // had already moved — "opens at the bottom" (B0-2). The listener is
+  // also the ONLY writer; a pre-rebuild save is redundant with it.
+  const renderedKey = pageKey();
   view.addEventListener("scroll",
-    () => scrollMemo.set(pageKey(), view.scrollTop), { passive: true });
+    () => scrollMemo.set(renderedKey, view.scrollTop), { passive: true });
   work.append(view);
   if (page) { renderPage(view, page, srnote, actions); return; }
   if (agent) { renderAgentCard(view, agent, ws); return; }

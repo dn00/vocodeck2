@@ -453,6 +453,23 @@ REMAINING GAPS (the honest list, by size):
 
 ## Journal
 
+- **2026-07-08 (B0 SHIPPED — the three root-caused breaks)** — (1)
+  `.work` gets `min-height: 0; overflow: hidden` — grid children
+  default their minimum height to CONTENT height, so the center column
+  outgrew the viewport and `.view`'s overflow never engaged: the deck
+  could not scroll, since U1, through two "green" slices. (2) B0-2
+  scroll-memo keying: the pre-rebuild save ran AFTER selection moved,
+  re-keying page A's offset onto page B (opens at the bottom) — the
+  render now captures its OWN key and the passive listener is the only
+  writer. (3) global `.add/.del` scoped to spans — diff rows keep ink
+  text + colored sign instead of whole-line green/red. tsc + 356 green.
+  Browser verification: extension still disconnected — USER CHECKLIST
+  handed over (scroll a long diff, scroll a long doc, switch pages and
+  confirm position restores per page, watch diff line colors). B1 is
+  PLANNED but NOT STARTED — per-phase plans presented for approval,
+  with the MCP-first ingest mapping the user flagged (voco's sources
+  ride page_push/bridge + control commands, not the reference's
+  standalone HTTP ingest; findings stay server-authoritative).
 - **2026-07-07/08 (U2R — the render-discipline reset; user field report
   round 2)** — User verdict: glitchy markdown, unscrollable diff, UI
   stuck at bottom, strip controls jumping, native confirm(), jargon

@@ -65,7 +65,9 @@ button:hover { color: var(--ink); background: var(--l3); }
   outline: 2px solid var(--sel); outline-offset: 1px; }
 input, select, textarea { background: var(--l2); border: 1px solid var(--edge);
   color: var(--ink); font: inherit; }
-.add { color: var(--ok); } .del { color: var(--bad); }
+/* stat chips only — element-scoped so `.drow.add` diff ROWS keep ink
+   text (whole green/red lines were B0-3) */
+span.add { color: var(--ok); } span.del { color: var(--bad); }
 .amber { color: var(--voice); } .warn { color: var(--warn); }
 .bad { color: var(--bad); }
 .hidden { display: none !important; }
@@ -237,6 +239,10 @@ input, select, textarea { background: var(--l2); border: 1px solid var(--edge);
 
 /* ---- work: crumb header + view ------------------------------------------------ */
 .work { display: flex; flex-direction: column; min-width: 0;
+  /* grid children default min-height to CONTENT height — without these
+     two the center column outgrows the viewport and .view's overflow
+     never engages: the deck literally could not scroll (B0-1) */
+  min-height: 0; overflow: hidden;
   background: var(--l0); }
 .work-head { display: flex; align-items: center; gap: 12px;
   padding: 8px 16px; flex: none; }
