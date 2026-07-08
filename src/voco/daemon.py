@@ -1032,7 +1032,9 @@ class Daemon:
 
     def _restore_manifests(self) -> None:
         try:
-            self._manifest.acquire()
+            # 6s grace: a restart routinely races the dying daemon's
+            # shutdown flush; boot happens before the loop serves anything.
+            self._manifest.acquire(wait_s=6.0)
             self._manifest_locked = True
         except Exception as e:
             # A live sibling daemon owns the data dir: run without durable

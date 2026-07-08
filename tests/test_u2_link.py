@@ -183,6 +183,31 @@ async def test_page_publish_accepts_worktree_source(daemon, tmp_path):
     assert out["ok"] is True and out["rev"] == 1
 
 
+# ---- manifest lock: boot retry (restart race) --------------------------------
+
+
+def test_acquire_waits_out_a_releasing_holder(tmp_path):
+    import os
+    import threading
+
+    from voco.adapters.manifest import WorkspaceLockError, WorkspaceManifest
+
+    # A LIVE foreign holder: the parent process (alive, not us).
+    lock = tmp_path / "daemon.lock"
+    lock.write_text(json.dumps({"pid": os.getppid(), "start": None}))
+    b = WorkspaceManifest(tmp_path)
+    with pytest.raises(WorkspaceLockError):
+        b.acquire()  # no wait: the live holder wins immediately
+    # the holder "shuts down" mid-retry — acquire must win the second try
+    t = threading.Timer(0.4, lambda: lock.unlink(missing_ok=True))
+    t.start()
+    try:
+        b.acquire(wait_s=3.0)
+    finally:
+        t.cancel()
+        b.release()
+
+
 # ---- doc annotation (B1a): text anchors + params -----------------------------
 
 

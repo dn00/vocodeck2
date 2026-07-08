@@ -20,6 +20,7 @@ import contextlib
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 
@@ -77,10 +78,26 @@ class WorkspaceManifest:
 
     # ---- single-writer lock -------------------------------------------------
 
-    def acquire(self) -> None:
-        """Claim the data dir for this process, or raise WorkspaceLockError
-        naming the live holder. A dead/stale holder is taken over. The claim
-        is atomic (O_CREAT|O_EXCL) so two daemons racing at startup cannot
+    def acquire(self, wait_s: float = 0.0) -> None:
+        """Claim the data dir, retrying for up to `wait_s` seconds while a
+        LIVE holder still owns it — a restart routinely begins before the
+        dying daemon finishes its shutdown flush, and losing that race
+        silently ran the new daemon with persistence OFF (bit three times
+        on 2026-07-08). Raises WorkspaceLockError naming the holder once
+        the deadline passes."""
+        deadline = time.monotonic() + wait_s
+        while True:
+            try:
+                self._acquire_once()
+                return
+            except WorkspaceLockError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.25)
+
+    def _acquire_once(self) -> None:
+        """One atomic claim attempt. A dead/stale holder is taken over. The
+        claim is O_CREAT|O_EXCL so two daemons racing at startup cannot
         both win (review BLOCKER 4)."""
         self._dir.mkdir(parents=True, exist_ok=True)
         payload = json.dumps({"pid": os.getpid(), "start": _proc_start(os.getpid())})
