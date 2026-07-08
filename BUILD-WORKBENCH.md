@@ -208,20 +208,32 @@ Gates at W0 close: ruff clean, ruff format clean, mypy clean (39 files),
       command for per-workspace opt-out). Oracle re-review scenario
       ported as tests; verified live incl. manifest-restored pages.
 
-## RESUME HERE (updated 2026-07-06 night — PROPOSAL OUT, AWAITING THE YES)
+## RESUME HERE (updated 2026-07-07 — U1 PASSED ON MAC; U2 GRILLED, PINNED, BUILDING)
 
-**State: design APPROVED (rev 4.1); U0 SHIPPED; U1 BUILT and parked at
-the USER CLICK-THROUGH.** `DESIGN-DECK.md` is the pinned spec. Do NOT
-build more UI until the user has driven U1 live and given a verdict
-(the checkpoint: you talk → you see it; she talks → you see it; long
-prompts readable in the transcript; pull the daemon's plug → the UI
-says so). After the verdict: fix what the click-through surfaces, then
-U2 (review picker, repo review buttons, collapsed diff file index +
-rail file sub-tree, reference annotation editor, spawn/connect modals,
-empty states, withdraw-with-undo), then U3 (settings modal, light-theme
-polish, contrast audit). Known deferrals: orb hold-PTT needs a
-ptt.press/release command; rail worktree-spawn returns with the U2
-spawn modal. The mandate text below stands.
+**State: U1 click-through PASSED (user, on the Mac: "everything looks
+good"). U2 was re-grilled with the user (grill-with-docs session) and
+is pinned as DESIGN-DECK rev 5 + ADR-0001 + CONTEXT.md (both new).**
+Headline decisions from the grill:
+- **Workspace-first rail** (ADR-0001, reverses design rev 3): rail =
+  repo → work rows (branch + #issue/PR chip; agents + pages nested;
+  compact single-agent form). View selection and mic are separate
+  state; the mic moves ONLY on explicit agent click or spoken switch
+  phrase; the strip always names the mic holder. "Workspace" is never
+  a UI word.
+- **GitHub link**: context chip + one-click PR diff only (status on
+  rows and issue→worktree orchestration PARKED). git supplies all repo
+  facts; **gh is optional and degrades silently** (no chip, no PR
+  picker entries, zero error surfaces). Lazy + cached detect, manual
+  override.
+- **Freeze-don't-extend** (user): shipped spawn/worktree/pty code
+  stays; disable entrypoints rather than remove; pty UI entrypoint
+  frozen. Spawn modal KEPT (tmux-only, incl. new-worktree). Connect
+  modal = paste-ready attach command.
+- **SPEC-WORKBENCH.md supersedes SPEC.md** where they disagree.
+Build order U2a→U2d per the deck (daemon links → rail pivot → review
+place → create/connect), ONE user click-through at the end. Deferrals
+standing: orb hold-PTT (needs ptt.press/release), PR-status rows,
+orchestration. Then U3 (settings modal, light theme, contrast audit).
 
 ## Previous RESUME (2026-07-06 EOD — UI/UX RE-ARCHITECTURE MANDATE)
 
@@ -363,6 +375,22 @@ Fix class for next session:
 
 ## Journal
 
+- **2026-07-07 (U1 PASSED + U2 grill — workspace-first pivot decided)** —
+  User drove U1 on the Mac: passed. Before U2, the user challenged
+  scope (worktrees out of voco's lane? pty worth it vs attach-first?)
+  and surfaced a new need: hook work to GitHub issues/PRs; doubt that
+  the per-agent rail fits long-run. Ran grill-with-docs. Outcomes (full
+  detail: RESUME above, DESIGN-DECK rev 5, ADR-0001, CONTEXT.md):
+  workspace-first rail adopted after scenario analysis (agents are
+  ephemeral — churn, sweeps; everything persisted is workspace-keyed;
+  agentless review needs a home); explicit-mic rule keeps voice
+  routing 100% deliberate; gh-link lands as context + PR-diff with
+  silent degradation (git for facts, gh optional); freeze-don't-extend
+  policy for spawn/worktree/pty (keep code, disable entrypoints — pty
+  UI frozen, spawn modal kept tmux-only WITH worktree option);
+  SPEC-WORKBENCH supersedes SPEC. New docs minted: CONTEXT.md
+  (glossary) + docs/adr/0001. U2 re-sliced U2a–U2d, one click-through
+  at the end.
 - **2026-07-07 (U1 BUILT — presence + scoping + the quiet skin; AWAITING
   USER CLICK-THROUGH)** — The client shell rebuilt per DESIGN-DECK rev
   4.1. New modules: `presence.mjs` (orb with attention ring + click-

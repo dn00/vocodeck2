@@ -1,20 +1,24 @@
-# DESIGN-DECK — UI/UX re-architecture, rev 4 FINAL (STATUS: awaiting the yes)
+# DESIGN-DECK — UI/UX re-architecture, rev 5 (STATUS: U0+U1 shipped; U2 scope pinned by grill 2026-07-07)
 
-Final revision, 2026-07-07. Four review rounds with the user (rev 1 →
-40%, rev 2 → 50-60%, rev 3.x → 80%, rev 4 = the agreed final scope: the
-quiet pass + policies). The rev-by-rev changelog lives in git history;
-this document is the pinned spec. Interactive mockup:
+Rev 5, 2026-07-07: the U2 grill (grill-with-docs session) pivoted the
+rail to workspace-first (ADR-0001, reverses rev 3's demotion), added
+the GitHub issue/PR link, and pinned the create/connect story. Rev 4.1
+and earlier changelog lives in git history; this document is the pinned
+spec. Interactive mockup (rev 4.1 — rail predates the pivot):
 `DESIGN-DECK.mockup.html` (self-contained), published at
 https://claude.ai/code/artifact/29d18572-3742-46d6-bb7f-4e3c6d9cc7d0
 
-**Nothing here is built. On the user's yes: U0 starts (protocol only).**
+**U0 + U1 are built and click-through-approved. U2 is next.**
 
 ## Thesis
 
-The center is the WORK. Voice is a permanent glanceable PRESENCE, not a
-chat log. One selection — the agent — and every surface follows it.
-Review is a place you go (agentless, diff-annotate parity). Exactly one
-free-text input exists and it means "say this".
+The center is the WORK — and so is the rail: work rows are the durable
+nodes; agents are ephemeral workers attached to them (ADR-0001). What
+you VIEW follows your selection; who HEARS you (the mic) moves only on
+an explicit agent click or a spoken switch phrase — never implicitly.
+Voice is a permanent glanceable PRESENCE, not a chat log. Review is a
+place you go (agentless, diff-annotate parity). Exactly one free-text
+input exists and it means "say this". "Workspace" is never a UI word.
 
 ## The design system (codified — this block lands atop styles.css in U1)
 
@@ -47,12 +51,18 @@ free-text input exists and it means "say this".
    transcript + "full" + route chip) · the ONE input (placeholder
    carries the idle hint) · speaking slot (who + current sentence +
    "full" + ■ stop; click jumps to speaker) · ■ interrupt · ⚙.
-2. **Rail** (left): repo groups (name + review button; agentless groups
-   say "no agents") → agents (state dot + word, ⚡ voice-active, flagged
-   count; blocked sort to top) → pages with type icons (◈ overview ·
+2. **Rail** (left): repo groups (name + "＋ review" + "＋ agent") →
+   **work rows** (branch + #issue/PR chip when linked; open-annotation
+   count; grey when no agent — parked/review-only work stays visible)
+   → inside each row: agents (state dot + word, ⚡ mic-holder, flagged
+   count; blocked sort to top) and pages with type icons (◈ overview ·
    ▦ screen · ± diff · ¶ doc · ❯ terminal) → the diff's file sub-tree
-   (stats + finding dot; click = expand + jump). "＋ agent in a new
-   worktree" opens spawn.
+   (stats + finding dot; click = expand + jump). Single-agent rows
+   render compact (agent inline on the row) so the common case stays
+   one click. Clicking a work row changes the VIEW only; clicking an
+   agent moves the mic. Sessionspaces (repo-less agents) render as bare
+   agent rows. "＋ agent" opens spawn; "＋ review" opens the picker;
+   "connect →" (rail footer + empty states) shows the attach command.
 3. **Work** (center): slim crumb header (Freya / page · rev + page
    actions: expand-all for diffs, live/kill for terminals) + the view.
    Diff = collapsed-by-default file index (smart auto-expand: open
@@ -68,9 +78,13 @@ free-text input exists and it means "say this".
 5. **Status line** (bottom, 24px): ● port · active agent · attention ·
    duplex · state counts (working/listening/blocked) · open
    annotations. Ambient truth only, no controls.
-6. **Modals**: review picker (branch/pr/staged) · spawn (harness, repo,
-   worktree, tmux/pty) · connect (the only place CLI one-liners appear)
-   · settings (config.get/set; hot-apply live, restart keys marked).
+6. **Modals**: review picker (branch from git · PR list via gh when
+   present · staged · file — opening one mints the work row,
+   agentlessly) · spawn (harness · where = existing checkout | new
+   worktree branch+base · tmux only — the pty entrypoint is frozen,
+   code kept) · connect (the only place CLI one-liners appear: the
+   paste-ready attach command for any terminal/ssh session) · settings
+   (config.get/set; hot-apply live, restart keys marked).
 
 ## The long-utterance pattern (rev 4 — replaces floating cards)
 
@@ -98,12 +112,18 @@ the transcript entry while speaking.
 - **Keyboard floor (U1):** Esc closes modals · Enter submits · focus
   ring · PTT hold key while the browser has focus. Ctrl+P parked.
 
-## Scoping model
+## Scoping model (rev 5: view and mic are separate state)
 
-| You select… | Center | Dock·annotations | Dock·transcript | Voice+input |
+| You select… | Center | Dock·annotations | Dock·transcript | Mic |
 |---|---|---|---|---|
-| Agent | her pages (diff vs HER branch/worktree, screen, terminal) | her workspace's ledger | your conversation with her | routes to her |
-| Repo (no agent) | its pages + review picker (agentless fully works) | its ledger | "no agent" + connect/spawn | unchanged |
+| Agent | her work's pages (diff, screen, terminal) | her work's ledger | your conversation with her | **moves to her** |
+| Work row | its pages | its ledger | its agent's conversation; "no agent" + connect/spawn when empty | unchanged |
+| Repo group | its work rows + review picker | — | — | unchanged |
+
+The mic invariant: nothing moves the mic except clicking an agent or a
+spoken switch phrase. The presence strip ALWAYS names the mic holder —
+viewing one thing while talking to another agent is a supported state,
+not an error.
 
 Global exception: sound. If Orion speaks while Freya is selected, the
 speaking slot names him (click jumps). Rail chips stay live for all.
@@ -121,7 +141,25 @@ speaking slot names him (click jumps). Rail chips stay live for all.
 | transcript "queued Ns" meta | `input.queued` |
 | live partial words | `stt.partial` — declared, unemitted (batch whisper); UI subscribes now |
 
-## Daemon budget (all of it)
+## GitHub link (rev 5 — U2)
+
+A workspace may be linked to a GitHub issue and/or PR. Powers, in
+scope for U2: **(a) context** — rail chip `#123` + scope header, click
+opens GitHub, agents read the link off workspace facts; **(b) review**
+— a PR-linked work row offers its PR diff as a one-click page (rides
+the existing `gh pr diff` source). Status-on-row (checks/review state)
+and issue→worktree→agent orchestration are PARKED.
+
+Tool layering: **git** (assumed present) supplies branch/repo/worktree
+facts — already shipped. **gh is optional and degrades silently**: no
+gh (or unauthenticated) → no chip, no PR entries in the picker, ZERO
+error surfaces. gh calls are lazy + cached (on workspace open/select),
+never on the live-git tick. Link acquisition: auto-detect PR via
+`gh pr list --head <branch>` (closing issue rides along from the PR)
++ manual set/correct on the scope header (covers issue-only work).
+Link persists in the workspace manifest.
+
+## Daemon budget — U0 (shipped)
 
 1. `page.publish` control command — human diff publish, daemon-side
    resolution (existing DiffResolver) in the workspace root.
@@ -136,10 +174,34 @@ speaking slot names him (click jumps). Rail chips stay live for all.
 Spawn/connect modals need nothing new (`session.spawn` + adapters
 exist). Untouched: store/bus seam, pages model, findings/asks
 convergence, diff renderer + interdiff, xterm pages, worktrees (W3),
-one-selection agent model, export contract.
+export contract.
+
+## Daemon budget — U2 (rev 5)
+
+1. `Workspace.links` — `{issue?: {number, url, title?}, pr?: {number,
+   url, title?}}` on the workspace + manifest persistence + snapshot.
+2. `workspace.link` control command — set/clear manually.
+3. Lazy PR auto-detect: on workspace open/select, one cached
+   `gh pr list --head <branch>` (+ closing issue off the PR); silent on
+   any failure; never on the live-git tick.
+4. A read command for the connect modal's paste-ready attach snippet
+   (host/port/token already known daemon-side).
+
+Everything else in U2 rides shipped commands: picker → `workspace.open`
++ `page.publish`; spawn modal → `session.spawn` (tmux, worktree spec).
 
 ## Decisions log (user-resolved)
 
+- U2 grill (2026-07-07, rev 5): **workspace-first rail** (ADR-0001;
+  reverses rev 3's demotion; explicit-mic rule; "workspace" never a UI
+  word) · **freeze-don't-extend** for shipped spawn/worktree/pty code —
+  keep it, disable entrypoints rather than rip out; pty UI entrypoint
+  frozen · **SPEC-WORKBENCH supersedes SPEC** where they disagree ·
+  **GitHub link = context + PR-diff only** (status/orchestration
+  parked) · **gh optional, degrades silently** (git supplies repo
+  facts) · link auto-detect + manual override · spawn modal KEPT,
+  tmux-only, incl. new-worktree option · connect modal = attach
+  command.
 - Forks (2026-07-07): orb click-cycles + hold-PTT · input in the top
   strip · transcript bounded 50/side · diff smart auto-expand + rail
   file sub-tree.
@@ -181,10 +243,23 @@ this client as-is or re-skin against the same protocol).
   Checkpoint: you talk and see it; she talks and you see it; long
   prompts readable in the transcript; pull the daemon's plug and the UI
   says so.
-- **U2 — review as a place:** picker, repo review buttons, collapsed
-  file index + rail file sub-tree, reference annotation editor,
-  spawn/connect modals, empty states, withdraw-with-undo. Checkpoint:
-  diff-annotate parity with no agent running.
+- **U2 — work as the axis, review as a place (rev 5 scope):**
+  **U2a — daemon:** links field + manifest + snapshot, `workspace.link`,
+  lazy gh PR auto-detect (silent), attach-snippet read command. Tests
+  at the command seam.
+  **U2b — the rail pivot:** work rows (branch + #chip, compact
+  single-agent form, grey agentless/parked rows), view/mic selection
+  split in the store, scope header follows, sessionspaces as bare agent
+  rows. Re-opens the U1 click-through for the rail.
+  **U2c — review as a place:** ＋ review picker (branch/PR/staged/file),
+  collapsed file index + rail file sub-tree, reference annotation
+  editor, empty states, withdraw-with-undo.
+  **U2d — create/connect:** spawn modal (tmux, worktree option),
+  connect modal (attach command), rail footer.
+  Checkpoint (one click-through at the end): open a PR review with no
+  agent running → annotate → row persists with its chip; agent restart
+  leaves the rail stable; mic provably never moves without an agent
+  click.
 - **U3 — polish:** settings modal, persisted panel sizes, light theme,
   contrast audit, reduced-motion verify. Checkpoint: the "GitHub rando"
   walkthrough.
