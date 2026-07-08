@@ -31,7 +31,8 @@ const STATUS_TAG = {
  * @param {HTMLElement} body
  * @param {any[]} findings
  * @param {{onWithdraw:(id:string)=>void, onReveal:(f:any)=>void,
- *   pageRev?:(pageId:string)=>?number, emptyText?:string}} ctx
+ *   pageRev?:(pageId:string)=>?number, emptyText?:string,
+ *   restoreScroll?:number}} ctx
  */
 export function renderFindings(body, findings, ctx) {
   body.replaceChildren();
@@ -76,4 +77,5 @@ export function renderFindings(body, findings, ctx) {
     scroll.append(item);
   }
   body.append(scroll);
+  if (ctx.restoreScroll) scroll.scrollTop = ctx.restoreScroll;
 }

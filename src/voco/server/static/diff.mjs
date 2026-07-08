@@ -66,7 +66,7 @@ export function seedFolds(content, findings) {
  *   added:string[], removed:string[], unchanged:string[]}}} content
  * @param {{onAnnotate:(a:Anchor, text:string, kind:string, blocking:boolean)=>void,
  *   findings:any[], rev?:number, fold:Set<string>, reveal?:?string,
- *   onFoldChange?:()=>void}} ctx
+ *   scrollTo?:(el:HTMLElement)=>void, onFoldChange?:()=>void}} ctx
  * @returns {{expandAll:(open:boolean)=>void, allOpen:boolean}}
  */
 export function renderDiff(view, content, ctx) {
@@ -173,7 +173,9 @@ export function renderDiff(view, content, ctx) {
       const t = s.querySelector(".tri");
       if (t) t.textContent = "▾";
     }
-    requestAnimationFrame(() => s.scrollIntoView({ block: "start" }));
+    // container-scoped: scrollIntoView would drag every ancestor along
+    requestAnimationFrame(() =>
+      ctx.scrollTo ? ctx.scrollTo(s) : s.scrollIntoView({ block: "start" }));
   }
 
   /** @param {HTMLElement} afterRow @param {Anchor} anchor */

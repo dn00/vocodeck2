@@ -21,8 +21,8 @@ import { renderFindings } from "./findings.mjs";
 import { renderTranscript, flashEntry } from "./transcript.mjs";
 import { renderPresence } from "./presence.mjs";
 import { renderTerminal } from "./term.mjs";
-import { openPicker, openRepo, openSpawn, openConnect, openSettings }
-  from "./modals.mjs";
+import { openPicker, openRepo, openSpawn, openConnect, openSettings,
+  confirmDanger } from "./modals.mjs";
 
 const store = new Store();
 const bus = connectBus(store);
@@ -185,9 +185,12 @@ async function selectAgent(s) {
 }
 
 async function detachAgent(s) {
-  if (!confirm(`forget ${s.name}? (the agent process is not touched)`)) return;
-  try { await bus.command("session.detach", { name: s.name }); }
-  catch (e) { toast("detach failed: " + errMsg(e), true); }
+  // Undo-over-confirm (design policy): detach never touches the process
+  // and the agent re-registers on its next call — no dialog earned.
+  try {
+    await bus.command("session.detach", { name: s.name });
+    toast(`forgot ${s.name} — it reappears on its next call`);
+  } catch (e) { toast("detach failed: " + errMsg(e), true); }
 }
 
 // ---- rail: repo groups → work rows → agents + pages ----------------------------
@@ -196,6 +199,7 @@ const PAGE_ICON = { screen: "▦", diff: "±", doc: "¶", terminal: "❯" };
 function groupKey(ws) { return ws.common_dir || ws.key; }
 
 function renderRail() {
+  const keep = rail.scrollTop; // rebuilds must not move the reader
   rail.replaceChildren();
   // Repo groups hold WORK ROWS (kind=workspace only); sessionspace
   // agents render as bare agent rows under "elsewhere" (ADR-0001).
@@ -232,7 +236,8 @@ function renderRail() {
   const stray = [...store.sessions.values()].filter((s) => !placed.has(s.session_id));
   if (stray.length) {
     rail.append(h("div", { class: "repo-group" },
-      h("span", { class: "rname" }, "elsewhere")));
+      h("span", { class: "rname", title:
+        "agents running outside any git checkout" }, "not in a repo")));
     for (const s of stray) rail.append(agentRow(s, true));
   }
   if (!store.sessions.size && !store.workspaces.size)
@@ -240,6 +245,7 @@ function renderRail() {
       "no agents — run voice_init (MCP) or `voco listen` in a repo"));
   rail.append(h("div", { class: "rail-action rail-foot",
     onclick: () => openConnect(mctx()) }, "connect →"));
+  rail.scrollTop = keep;
 }
 
 // Blocked work first; parked (agentless) work below live work, above gone.
@@ -363,7 +369,9 @@ function pagesTree(ws) {
       onclick: (e) => { e.stopPropagation(); store.selectPage(p.page_id); } },
       h("span", { class: "picon" }, PAGE_ICON[p.type] || "·"),
       h("span", { class: "page-title" }, p.title),
-      p.rev > 1 ? h("span", { class: "rev" }, "r" + p.rev) : "");
+      p.rev > 1 ? h("span", { class: "rev",
+        title: `revision ${p.rev} — republished ${p.rev - 1}×` },
+        "r" + p.rev) : "");
     if (!p.pinned)
       row.append(h("span", { class: "rail-x", title: "close page",
         onclick: (e) => { e.stopPropagation(); closePage(p); } }, "✕"));
@@ -411,7 +419,50 @@ const foldCache = new Map();
 let pendingReveal = null;
 
 // ---- work: crumb header + view -------------------------------------------------
-function renderWork() {
+// U2R render discipline (reference architecture): the center rebuilds
+// ONLY when what it shows actually changed — a fingerprint gates it, so
+// session pings / speech events / unrelated findings are no-ops here.
+// Scroll is remembered PER PAGE and restored after every rebuild; async
+// renders carry a token so a stale fetch can never paint over a newer one.
+let lastWorkKey = "";
+const scrollMemo = new Map(); // pageKey -> scrollTop
+
+const pageKey = () =>
+  (store.selectedPage || "overview") + ":" + (store.selectedWorkspace || "");
+
+function workFingerprint() {
+  const ws = store.selectedWs();
+  const agent = selectedAgent();
+  const pages = ws ? ws.pages.filter((p) => !p.closed) : [];
+  const page = pages.find((p) => p.page_id === store.selectedPage);
+  const parts = [store.selectedWorkspace, store.selectedPage,
+    store.connected ? 1 : 0];
+  if (page) {
+    parts.push(page.rev, page.title);
+    // findings shape the diff's marks/chips — only THIS page's matter
+    if (page.type === "diff")
+      parts.push(store.findingsFor(ws ? ws.key : "")
+        .filter((f) => f.page_id === page.page_id)
+        .map((f) => f.finding_id + f.status).join(","));
+    if (page.type === "screen" && agent)
+      parts.push((agent.screen_markdown || "").length);
+  } else if (agent) {
+    parts.push(stateOf(agent), agent.queued || 0,
+      (agent.screen_markdown || "").length,
+      store.activeSession === agent.session_id ? 1 : 0);
+  } else if (ws) {
+    parts.push(agentsIn(ws).map((a) => a.name + stateOf(a)).join(","),
+      JSON.stringify(ws.links || {}));
+  }
+  return parts.join("|");
+}
+
+function renderWork(force = false) {
+  const key = workFingerprint();
+  if (!force && key === lastWorkKey && !pendingReveal) return;
+  lastWorkKey = key;
+  const oldView = work.querySelector(".view");
+  if (oldView) scrollMemo.set(pageKey(), oldView.scrollTop);
   work.replaceChildren();
   const agent = selectedAgent();
   const ws = store.selectedWs();
@@ -428,17 +479,33 @@ function renderWork() {
     h("span", {}, page ? page.title : "overview"));
   if (page && page.rev > 1)
     crumb.append(h("span", { class: "sep" }, " · "),
-      h("span", { class: "micro rev" }, "r" + page.rev));
+      h("span", { class: "micro rev",
+        title: `republished ${page.rev - 1}× — annotations from older` +
+          " revisions are marked stale, never dropped" },
+        "rev " + page.rev));
   const srnote = h("span", { class: "sr-note" });
   const actions = h("div", { class: "work-actions" });
   work.append(h("div", { class: "work-head" }, crumb, srnote, actions));
   const view = h("div", { class: "view" });
+  view.addEventListener("scroll",
+    () => scrollMemo.set(pageKey(), view.scrollTop), { passive: true });
   work.append(view);
   if (page) { renderPage(view, page, srnote, actions); return; }
   if (agent) { renderAgentCard(view, agent, ws); return; }
   if (ws) { renderWorkCard(view, ws); return; }
   view.classList.add("empty");
   view.append(h("div", { class: "empty-note" }, "no pages here yet"));
+}
+
+/** Scroll WITHIN the center view only — scrollIntoView walks every
+ * scrollable ancestor and was yanking the whole deck around. */
+function scrollViewTo(el, block = "start") {
+  const view = work.querySelector(".view");
+  if (!view || !el) return;
+  const vr = view.getBoundingClientRect();
+  const er = el.getBoundingClientRect();
+  const offset = block === "center" ? (vr.height / 2 - er.height / 2) : 8;
+  view.scrollTop += er.top - vr.top - offset;
 }
 
 function renderAgentCard(view, s, ws) {
@@ -513,14 +580,28 @@ function welcomeView() {
 const kv = (k, v) => h("span", { class: "st-item" },
   h("span", { class: "k" }, k), h("span", {}, v));
 
+// Async render token: only the LATEST renderPage may touch the view —
+// a slow fetch finishing late must not paint over a newer render (this
+// was the "glitchy markdown": racing renders interleaving).
+let renderSeq = 0;
+
+function restoreScroll(view) {
+  const saved = scrollMemo.get(pageKey());
+  if (saved != null && !pendingReveal) view.scrollTop = saved;
+}
+
 async function renderPage(view, page, srnote, actions) {
+  const seq = ++renderSeq;
+  const stale = () => seq !== renderSeq || !view.isConnected;
   if (page.type === "screen" || page.type === "doc") {
     view.textContent = "…";
     try {
       const c = await fetchContent(page.page_id, page.rev);
+      if (stale()) return;
       view.replaceChildren();
       await renderMarkdown(view, c.markdown || "");
-    } catch (e) { view.textContent = "could not load: " + errMsg(e); }
+      if (!stale()) restoreScroll(view);
+    } catch (e) { if (!stale()) view.textContent = "could not load: " + errMsg(e); }
     return;
   }
   if (page.type === "diff") {
@@ -528,6 +609,7 @@ async function renderPage(view, page, srnote, actions) {
     try {
       const cold = (contentCache.get(page.page_id) || {}).rev !== page.rev;
       const c = await fetchContent(page.page_id, page.rev);
+      if (stale()) return;
       // First load of this rev: the rail's file sub-tree can render now.
       if (cold) requestAnimationFrame(renderRail);
       const findings = store.findingsFor(store.selectedWorkspace || "")
@@ -557,10 +639,12 @@ async function renderPage(view, page, srnote, actions) {
         findings,
         fold: fc.fold,
         reveal,
+        scrollTo: (el) => scrollViewTo(el),
         onAnnotate: (anchor, text, kind, blocking) =>
           addFinding(page, anchor, text, kind, blocking),
         onFoldChange: () => syncExpand(),
       });
+      if (!reveal) restoreScroll(view);
       // Head: totals + expand/collapse-all + the since-rev note.
       if (actions) {
         const st = diffStats(c.files || []);
@@ -602,7 +686,9 @@ async function renderPage(view, page, srnote, actions) {
         if (handle)
           actions.append(h("button", { class: "whbtn danger",
             onclick: async () => {
-              if (!confirm(`kill ${handle}? the process dies with it`)) return;
+              const yes = await confirmDanger(`kill ${handle}?`,
+                "the process dies with it — this is not undoable", "kill");
+              if (!yes) return;
               try { await bus.command("session.kill", { name: handle }); }
               catch (e) { toast("kill failed: " + errMsg(e), true); }
             } }, "kill"));
@@ -642,6 +728,8 @@ let dockTab = "annotations";
 function setDockTab(name) { dockTab = name; renderDock(); }
 
 function renderDock() {
+  const scroller = dock.querySelector(".dock-scroll");
+  const keep = scroller ? scroller.scrollTop : 0;
   dock.replaceChildren();
   const wsKey = store.selectedWorkspace || "";
   const ws = store.selectedWs();
@@ -693,6 +781,7 @@ function renderDock() {
     // without a line (findings.mjs shows them via the answer field).
   ];
   renderFindings(body, items, {
+    restoreScroll: keep,
     emptyText: diffOpen
       ? "no annotations — click a diff line to flag one"
       : "no annotations — publish a diff first, then click a line to flag one",
@@ -740,7 +829,7 @@ function blinkRow(a, tries = 40) {
   const sel = `.drow[data-file="${cssEscape(a.file)}"][data-side="${a.side}"][data-line="${a.startLine}"]`;
   const row = work.querySelector(sel);
   if (row) {
-    row.scrollIntoView({ block: "center" });
+    scrollViewTo(row, "center"); // container-scoped: never yanks ancestors
     row.classList.add("blink");
     return;
   }
@@ -881,7 +970,16 @@ store.subscribe("selection", () => {
 store.subscribe("findings", () => { renderDock(); renderWork(); renderRail(); renderStatus(); });
 store.subscribe("asks", () => { renderDock(); renderRail(); });
 store.subscribe("voice", renderStrip);
-store.subscribe("speaking", () => { renderStrip(); renderRail(); renderDock(); });
+// speech.sentence fires per sentence — the strip updates every time,
+// but the rail only cares WHO is speaking (eq marker), and the dock
+// only when the transcript is showing (karaoke lives there).
+let lastSpeakerWho = null;
+store.subscribe("speaking", () => {
+  renderStrip();
+  const who = store.speaking && store.speaking.who;
+  if (who !== lastSpeakerWho) { lastSpeakerWho = who; renderRail(); }
+  if (dockTab === "transcript") renderDock();
+});
 store.subscribe("transcript", () => { if (dockTab === "transcript") renderDock(); });
 store.subscribe("mic", () => { renderStrip(); renderStatus(); });
 store.subscribe("conn", renderConn);

@@ -24,9 +24,13 @@ const el = (tag, attrs = {}, ...kids) => {
 
 const errMsg = (e) => (e instanceof Error ? e.message : String(e));
 
-/** One modal at a time; returns close(). */
 let activeClose = /** @type {?() => void} */ (null);
-function openModal(title, where, body, actions) {
+
+/** One modal at a time; returns close(). onClose fires however the
+ * modal dies (action, Esc, scrim click, replacement) — exactly once.
+ * @param {string} title @param {?string} where @param {any[]} body
+ * @param {any[]} actions @param {?(() => void)} [onClose] */
+function openModal(title, where, body, actions, onClose = null) {
   if (activeClose) activeClose(); // close() removes ITS key listener too
   const modal = el("div", { class: "modal", role: "dialog", "aria-label": title },
     el("h4", { text: title }),
@@ -37,14 +41,34 @@ function openModal(title, where, body, actions) {
   scrim.addEventListener("click", (e) => { if (e.target === scrim) close(); });
   const onKey = (e) => { if (e.key === "Escape") close(); };
   document.addEventListener("keydown", onKey);
+  let closed = false;
   function close() {
+    if (closed) return;
+    closed = true;
     scrim.remove();
     document.removeEventListener("keydown", onKey);
     if (activeClose === close) activeClose = null;
+    if (onClose) onClose();
   }
   document.body.append(scrim);
   activeClose = close;
   return close;
+}
+
+/** In-deck confirm for kill-class actions ONLY (destructive policy:
+ * everything reversible gets undo instead). Native confirm() is banned
+ * — it freezes the event loop and every voice surface with it. */
+export function confirmDanger(title, detail, action) {
+  return new Promise((resolve) => {
+    let decided = false;
+    const done = (v, close) => { decided = true; resolve(v); if (close) close(); };
+    const close = openModal(title, detail, [], [
+      el("button", { class: "btn-ghost", text: "cancel",
+        onclick: () => done(false, close) }),
+      el("button", { class: "btn-primary danger", text: action,
+        onclick: () => done(true, close) }),
+    ], () => { if (!decided) resolve(false); });
+  });
 }
 
 function seg(options, initial, onPick) {

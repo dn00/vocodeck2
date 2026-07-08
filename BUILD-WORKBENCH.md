@@ -441,6 +441,38 @@ REMAINING GAPS (the honest list, by size):
 
 ## Journal
 
+- **2026-07-07/08 (U2R — the render-discipline reset; user field report
+  round 2)** — User verdict: glitchy markdown, unscrollable diff, UI
+  stuck at bottom, strip controls jumping, native confirm(), jargon
+  labels, no workspace separation — "built like an internal tool". ROOT
+  CAUSE named after FINALLY reading the reference project properly
+  (lib/client: panels mount once, onEvent applies deltas, store notifies
+  with a change kind so each panel re-renders only what changed): our
+  app.mjs rebuilt whole panels on nearly every store event — every
+  session ping/speech sentence nuked the center's DOM, scroll position,
+  and the input's focus+text. Fixed as architecture, not patches:
+  (1) center renders gate on a CONTENT FINGERPRINT (workspace, page,
+  rev, page-scoped finding states, agent-card facts) — unrelated events
+  are no-ops; (2) per-page SCROLL MEMORY (passive listener + restore
+  after async render; rail + dock keep scrollTop across rebuilds);
+  (3) async render TOKEN — a stale fetch can never paint over a newer
+  render (the "glitchy markdown" race); (4) container-scoped scrolling
+  helper replaces every scrollIntoView (it walks ALL scrollable
+  ancestors — the "stuck at bottom" yank); (5) presence strip rebuilt
+  MOUNT-ONCE on a fixed six-slot grid — speech starting/stopping shifts
+  nothing, and the input is a persistent element so typing survives
+  every voice event; (6) speech.sentence no longer rebuilds the rail
+  (only a speaker CHANGE does) nor the dock unless the transcript tab
+  shows; (7) native confirm() BANNED — in-deck confirmDanger modal for
+  kill, detach is dialog-free with an informational toast (policy);
+  (8) labels: "rev 2" + explanatory titles (r2 was jargon), "elsewhere"
+  → "not in a repo", repo groups get banded separation. tsc + 356
+  pytest green; live daemon serves the new client (no-cache → refresh
+  picks it up). NEXT (from the reference, as code not memory): port
+  doc annotation (text-range + per-block anchors, doc-review-panel +
+  server anchor.mjs), reveal.mjs jump-back, rail git status
+  (gitstatus.mjs), THEN the P0 loops (worktree diff source, asks in
+  dock, daemon autostart).
 - **2026-07-07 (seed_demo + a real bug it caught — workspace splitting
   on symlinked roots)** — User asked to SEE the deck with full data.
   New `scripts/seed_demo.py`: builds a demo repo + sibling worktree in
