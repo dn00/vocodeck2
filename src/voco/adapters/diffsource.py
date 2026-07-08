@@ -101,6 +101,12 @@ class DiffResolver:
             return r.stdout
         if "staged" in source:
             return self._git(["diff", "--cached"], root)
+        if "worktree" in source:
+            # B2-16: the working tree vs HEAD — staged AND unstaged, the
+            # diff of an agent mid-task. Branch mode (merge-base..HEAD)
+            # shows only committed work; this is the "show me what she's
+            # done so far" source.
+            return self._git(["diff", "HEAD", "--"], root)
         if "branch" in source:
             base = source.get("branch") or self.default_branch(root)
             if not valid_ref(base):
@@ -113,12 +119,14 @@ class DiffResolver:
             # Confinement is the route's job (same as docs); we only read.
             with open(source["diff_file"], encoding="utf-8", errors="replace") as fh:
                 return fh.read()
-        raise DiffResolveError("source must be one of pr|branch|staged|diff_file")
+        raise DiffResolveError(
+            "source must be one of pr|branch|staged|worktree|diff_file"
+        )
 
 
 def source_ref(source: dict) -> str:
     """Stable identity for a diff source — same ref re-resolves in place."""
-    for k in ("pr", "branch", "staged", "diff_file"):
+    for k in ("pr", "branch", "staged", "worktree", "diff_file"):
         if k in source:
             return f"{k}:{source[k]}"
     return "diff:unknown"

@@ -228,9 +228,13 @@ class WorkbenchRoutes:
                 "title": page.data.get("screen_title"),
             }
         if page.type == "doc":
+            params = page.data.get("params") or {}
             if "content" in page.data:
-                return {"markdown": page.data["content"]}
-            return {"markdown": confined_read(ws.root, page.data["path"])}
+                return {"markdown": page.data["content"], "params": params}
+            return {
+                "markdown": confined_read(ws.root, page.data["path"]),
+                "params": params,
+            }
         if page.type == "diff":
             return {
                 "files": page.data.get("files", []),
@@ -354,6 +358,7 @@ class WorkbenchRoutes:
     def _push_doc(self, ws, s, body):
         store = self._server.workspaces
         assert store is not None  # bridge_page guarded it
+        params = self._doc_params(body)
         path = body.get("path")
         if path:
             if s.identity.get("host") != self._host:
@@ -366,13 +371,35 @@ class WorkbenchRoutes:
                     )
                 )
             confined_read(ws.root, str(path))  # confine + readable, up front
-            return store.push_doc(ws, name=body.get("name"), path=str(path))
+            return store.push_doc(
+                ws, name=body.get("name"), path=str(path), params=params
+            )
         try:
             return store.push_doc(
-                ws, name=body.get("name"), content=body.get("content")
+                ws, name=body.get("name"), content=body.get("content"), params=params
             )
         except ValueError as e:
             raise web.HTTPBadRequest(text=str(e)) from e
+
+    @staticmethod
+    def _doc_params(body) -> dict | None:
+        """B1a, per the reference's PAGE-TYPES contract: params are a
+        strictly whitelisted capability set — an unknown key is a 400
+        NAMING the known set, so the contract stays legible to agents.
+        None (absent) on a re-push keeps the page's existing params."""
+        params = body.get("params")
+        if params is None:
+            return None
+        if not isinstance(params, dict):
+            raise web.HTTPBadRequest(text="params must be an object")
+        unknown = set(params) - {"annotatable"}
+        if unknown:
+            raise web.HTTPBadRequest(
+                text=f"unknown params {sorted(unknown)}; known: ['annotatable']"
+            )
+        if "annotatable" in params and not isinstance(params["annotatable"], bool):
+            raise web.HTTPBadRequest(text="annotatable must be a boolean")
+        return params
 
     async def _push_diff(self, ws, s, body):
         import asyncio

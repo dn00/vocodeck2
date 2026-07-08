@@ -453,6 +453,35 @@ REMAINING GAPS (the honest list, by size):
 
 ## Journal
 
+- **2026-07-08 (B2-16 + B1a SHIPPED — worktree diffs; doc annotation +
+  shared reveal)** — Ports done CONCEPT-FIRST per the user's rule:
+  kernels verbatim (anchor offset math, findByText/flash, CSS-escape),
+  architecture native (our store seam, MCP/bridge ingest, server-
+  authoritative ledger). (1) B2-16: `{worktree: true}` diff source =
+  `git diff HEAD` — an agent's uncommitted work is finally reviewable;
+  picker gains "working tree"; live-git tracks it (the diff follows the
+  agent as it works). (2) B1a: new `docview.mjs` — doc pages are an
+  ANNOTATION surface: select a passage or plain-click a block (p/li/h*/
+  pre/quote/cell) → inline editor (pills + blocking + ctrl/cmd+enter);
+  anchors are the reference's text ranges {kind:"text", exact, prefix,
+  suffix, start, end} — they ride the existing findings ledger, wake
+  agents, export in the anchors sidecar (legacy array stays diff-only),
+  and re-anchor by quote. PORTED INVARIANTS honored (recorded in
+  docview.mjs header): editor is a SIBLING of the prose floated at the
+  anchor (offsets never shift), offsets measure against the prose
+  element only, selection wins over block click, links keep navigating,
+  40-char context. New shared `reveal.mjs` (flash/findByText/cssEsc,
+  container-scoped scrolling); findings dock shows text anchors as
+  quotes and reveal flashes the passage. Doc pushes accept
+  `params: {annotatable}` — strictly whitelisted (unknown key = 400
+  naming the known set), re-push without params KEEPS existing ones;
+  content endpoint carries params; read-only docs get no editors.
+  Gates: 360 pytest, mypy, ruff, tsc. Live e2e: uncommitted file
+  visible via worktree publish; doc + params round-trip; text finding
+  minted; unknown param 400s correctly. NOTE: daemon boot lost the
+  workspace lock RACE against its dying predecessor twice tonight —
+  backlog: retry acquire for a few seconds at boot. NEXT: B1c (git
+  status + file viewer, palette dropped by user), then B1b (html).
 - **2026-07-08 (B0 SHIPPED — the three root-caused breaks)** — (1)
   `.work` gets `min-height: 0; overflow: hidden` — grid children
   default their minimum height to CONTENT height, so the center column

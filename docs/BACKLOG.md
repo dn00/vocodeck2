@@ -87,6 +87,11 @@ scroll.
 
 ## B3 — POLISH
 
+0. **Daemon boot lock-race retry** — a restart that begins before the
+   dying daemon releases the workspace lock silently runs with
+   persistence OFF (bit twice on 2026-07-08). Boot should retry the
+   acquire for a few seconds before giving up.
+
 22. Settings: curated per-key help copy, "this browser" section
     (theme, panel-size reset), read-only rows for derived values.
 23. Diff comforts: syntax highlighting, j/k + mark-reviewed,

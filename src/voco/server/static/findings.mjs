@@ -45,9 +45,12 @@ export function renderFindings(body, findings, ctx) {
   const scroll = el("div", { class: "dock-scroll" });
   for (const f of live) {
     const a = f.anchor || {};
+    // diff anchors: file:line; text anchors (docs, B1a): the quote
     const loc = a.file
       ? `${a.file.split("/").pop()}:${a.startLine}${a.endLine > a.startLine ? "–" + a.endLine : ""}`
-      : "—";
+      : a.exact
+        ? `“${String(a.exact).slice(0, 28)}${String(a.exact).length > 28 ? "…" : ""}”`
+        : "—";
     const [tagCls, tagLabel] = STATUS_TAG[f.status] || ["open", f.status];
     const rev = ctx.pageRev ? ctx.pageRev(f.page_id) : null;
     const stale = rev != null && f.rev < rev;

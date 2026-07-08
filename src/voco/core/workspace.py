@@ -482,11 +482,15 @@ class WorkspaceStore:
         name: str | None = None,
         path: str | None = None,
         content: str | None = None,
+        params: dict[str, Any] | None = None,
     ) -> Page:
         """A doc page: path-backed (server confines + reads fresh) or
-        virtual (content held here). Same ref re-push bumps rev."""
+        virtual (content held here). Same ref re-push bumps rev. `params`
+        (B1a: {annotatable: bool}) declare capabilities; None on a
+        re-push KEEPS the existing ones (reference PAGE-TYPES contract)."""
         if bool(path) == bool(content is not None):
             raise ValueError("doc needs exactly one of path|content")
+        data: dict[str, Any]
         if path:
             ref, title, data = (
                 f"doc:{path}",
@@ -500,6 +504,10 @@ class WorkspaceStore:
                 raise ValueError("virtual doc needs content")
             ref, title, data = f"doc:{name}", name, {"content": content}
         page = ws.page_by_ref("doc", ref)
+        if params is not None:
+            data["params"] = dict(params)
+        elif page is not None and "params" in page.data:
+            data["params"] = page.data["params"]
         if page is None:
             page = Page(
                 page_id="",

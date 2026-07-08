@@ -98,16 +98,19 @@ export function openPicker(ctx) {
   const prNum = input({ placeholder: "number" });
   const fields = el("div", {});
   const hint = el("div", { class: "hintline" });
-  const mode = seg(["branch", "pr #", "staged"], "branch", render);
+  const mode = seg(["branch", "pr #", "working tree", "staged"], "branch", render);
   function render() {
     fields.replaceChildren();
     if (mode.value === "branch") {
       fields.append(el("label", { text: "against base" }), base);
       hint.textContent =
-        "empty = the repo's default branch · resolved by the daemon in the workspace root";
+        "committed work vs the base (empty = the repo's default branch)";
     } else if (mode.value === "pr #") {
       fields.append(el("label", { text: "PR number" }), prNum);
       hint.textContent = "needs gh + auth in the workspace root";
+    } else if (mode.value === "working tree") {
+      hint.textContent =
+        "everything uncommitted — staged + unstaged vs HEAD · live-tracks as the agent works";
     } else {
       hint.textContent = "the workspace's staged changes, as git sees them now";
     }
@@ -120,7 +123,8 @@ export function openPicker(ctx) {
       const n = parseInt(prNum.value.trim(), 10);
       if (!Number.isFinite(n)) { ctx.toast("PR needs a number", true); return; }
       source = { pr: n };
-    } else source = { staged: true };
+    } else if (mode.value === "working tree") source = { worktree: true };
+    else source = { staged: true };
     try {
       const r = await ctx.command("page.publish", { workspace: ws.key, source });
       close();

@@ -114,6 +114,81 @@ def test_detect_silent_on_hung_gh():
     assert detect("/repo", "b", run=run) is None
 
 
+# ---- diff source: worktree (B2-16) ------------------------------------------
+
+
+def test_worktree_source_diffs_working_tree_vs_head():
+    from voco.adapters.diffsource import DiffResolver, source_ref
+
+    calls: list[list[str]] = []
+
+    def run(argv, cwd):
+        calls.append(argv)
+        return RunResult(0, "diff --git a/x b/x\n", "")
+
+    out = DiffResolver(runner=run).resolve({"worktree": True}, "/repo")
+    assert out.startswith("diff --git")
+    assert calls == [["git", "diff", "HEAD", "--"]]
+    # stable identity: re-publish replaces in place
+    assert source_ref({"worktree": True}) == "worktree:True"
+
+
+async def test_page_publish_accepts_worktree_source(daemon, tmp_path):
+    key = await opened_key(daemon, tmp_path)
+    daemon.bridge.diff_resolver.resolve = lambda source, root: PATCH
+    out = await daemon._control(
+        "page.publish", {"workspace": key, "source": {"worktree": True}}
+    )
+    assert out["ok"] is True and out["rev"] == 1
+
+
+# ---- doc annotation (B1a): text anchors + params -----------------------------
+
+
+def test_text_anchor_rides_finding_and_export_sidecar(tmp_path):
+    from voco.core.review_export import export_workspace
+
+    store, ws, _ = make_store()
+    page = store.push_doc(ws, name="plan.md", content="# plan\n\nDo the thing.")
+    f = store.add_finding(
+        ws.key,
+        page_id=page.page_id,
+        anchor={
+            "kind": "text",
+            "exact": "Do the thing.",
+            "prefix": "",
+            "suffix": "",
+            "start": 8,
+            "end": 21,
+        },
+        text="which thing, exactly?",
+        kind="question",
+    )
+    export_workspace(
+        store, ws.key, out=str(tmp_path / "review.json"), data_dir=tmp_path
+    )
+    sidecar = json.loads((tmp_path / "review.anchors.json").read_text())
+    rows = sidecar if isinstance(sidecar, list) else sidecar["findings"]
+    rec = next(r for r in rows if r["finding_id"] == f.finding_id)
+    assert rec["anchor"]["kind"] == "text" and rec["anchor"]["exact"] == "Do the thing."
+    # legacy array stays diff-only: the text finding must NOT leak into it
+    legacy = json.loads((tmp_path / "review.json").read_text())
+    assert legacy == []
+
+
+def test_doc_params_whitelist_and_repush_retention():
+    store, ws, _ = make_store()
+    p1 = store.push_doc(ws, name="spec.md", content="v1", params={"annotatable": False})
+    assert p1.data["params"] == {"annotatable": False}
+    # re-push WITHOUT params keeps the existing ones (reference contract)
+    p2 = store.push_doc(ws, name="spec.md", content="v2")
+    assert p2.page_id == p1.page_id and p2.rev == 2
+    assert p2.data["params"] == {"annotatable": False}
+    # explicit params replace
+    p3 = store.push_doc(ws, name="spec.md", content="v3", params={"annotatable": True})
+    assert p3.data["params"] == {"annotatable": True}
+
+
 # ---- store: links field ----------------------------------------------------
 
 

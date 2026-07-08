@@ -779,9 +779,11 @@ class Daemon:
             raise ValueError(f"{key} has no checkout; review needs a workspace")
         source = payload.get("source")
         if not isinstance(source, dict) or not (
-            {"pr", "branch", "staged"} & source.keys()
+            {"pr", "branch", "staged", "worktree"} & source.keys()
         ):
-            raise ValueError("source must be one of {pr}|{branch}|{staged: true}")
+            raise ValueError(
+                "source must be one of {pr}|{branch}|{staged: true}|{worktree: true}"
+            )
         try:
             text = await self._run_blocking(
                 lambda: self.bridge.diff_resolver.resolve(source, ws.root)

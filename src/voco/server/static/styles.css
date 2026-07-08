@@ -550,3 +550,28 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 
 /* U2R: in-deck danger confirm */
 .btn-primary.danger { background: var(--bad); border-color: var(--bad); }
+
+/* ---- B1a: annotatable docs + shared reveal ------------------------------- */
+.review-doc { position: relative; max-width: 860px; }
+.review-prose { cursor: text; }
+.review-doc:not(.no-annotate) .review-prose
+  :is(p, li, h1, h2, h3, h4, h5, h6, pre, blockquote, td, th):hover {
+  background: color-mix(in srgb, var(--voice) 6%, transparent); }
+.doc-editor { background: var(--l0); border: 1px solid var(--edge);
+  padding: 10px 14px; max-width: 640px; margin-top: 8px; }
+.doc-editor.floating { position: absolute; left: 24px; right: 24px;
+  z-index: 5; box-shadow: 0 10px 28px rgba(0, 0, 0, .45); }
+.doc-editor textarea { width: 100%; min-height: 52px; resize: vertical;
+  padding: 8px 10px; font: 12.5px/1.5 var(--mono); }
+.doc-editor textarea:focus { outline: none;
+  box-shadow: inset 0 -1px 0 var(--voice); }
+.reveal-flash { animation: revealflash 1.6s ease-out; }
+@keyframes revealflash {
+  0%, 50% { background: color-mix(in srgb, var(--voice) 16%, transparent);
+    box-shadow: inset 2px 0 0 var(--voice); }
+  100% { background: transparent; box-shadow: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal-flash { animation: none;
+    background: color-mix(in srgb, var(--voice) 12%, transparent); }
+}

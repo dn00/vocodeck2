@@ -19,6 +19,7 @@ import { renderMarkdown } from "./markdown.mjs";
 import { renderDiff, diffStats, seedFolds } from "./diff.mjs";
 import { renderFindings } from "./findings.mjs";
 import { renderTranscript, flashEntry } from "./transcript.mjs";
+import { renderDocView } from "./docview.mjs";
 import { renderPresence } from "./presence.mjs";
 import { renderTerminal } from "./term.mjs";
 import { openPicker, openRepo, openSpawn, openConnect, openSettings,
@@ -415,7 +416,7 @@ function diffSubTree(ws, p) {
 // Fold state per diff page — survives re-renders so the reader keeps
 // their place; reseeded when the page rev moves (new diff, new folds).
 const foldCache = new Map();
-/** @type {?{pageId:string, path:string}} */
+/** @type {?{pageId:string, path?:string, text?:string}} */
 let pendingReveal = null;
 
 // ---- work: crumb header + view -------------------------------------------------
@@ -601,6 +602,25 @@ async function renderPage(view, page, srnote, actions) {
     try {
       const c = await fetchContent(page.page_id, page.rev);
       if (stale()) return;
+      if (page.type === "doc") {
+        // B1a: docs are an annotation surface — select a passage or
+        // click a block; text-range anchors re-anchor after edits.
+        let reveal = null;
+        if (pendingReveal && pendingReveal.pageId === page.page_id
+            && pendingReveal.text) {
+          reveal = pendingReveal.text;
+          pendingReveal = null;
+        }
+        await renderDocView(view, c.markdown || "", {
+          title: page.title,
+          readOnly: !!(c.params && c.params.annotatable === false),
+          reveal,
+          onAnnotate: (anchor, text, kind, blocking) =>
+            addFinding(page, anchor, text, kind, blocking),
+        });
+        if (!stale() && !reveal) restoreScroll(view);
+        return;
+      }
       view.replaceChildren();
       await renderMarkdown(view, c.markdown || "");
       if (!stale()) restoreScroll(view);
@@ -821,8 +841,14 @@ async function loadTranscript(agent) {
 
 function revealFinding(f) {
   const a = f.anchor || {};
-  // Route through the reveal seam so a collapsed fold opens first; the
-  // page re-render is async (content fetch), so the blink retries.
+  // Diff anchors open the fold + blink the row; text anchors (docs)
+  // flash the passage — both ride pendingReveal through the async
+  // render (B1a: one reveal path for every surface).
+  if (a.kind === "text" || (a.exact && !a.file)) {
+    pendingReveal = { pageId: f.page_id, text: a.exact };
+    store.selectPage(f.page_id);
+    return;
+  }
   if (a.file) pendingReveal = { pageId: f.page_id, path: a.file };
   store.selectPage(f.page_id);
   blinkRow(a);
