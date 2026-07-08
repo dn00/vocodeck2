@@ -122,6 +122,10 @@ class Daemon:
             allowed_origins=cfg.get("server", {}).get("allowed_origins"),
         )
         self.bridge.pty_lookup = self._pty_lookup  # /v1/term (W4)
+        # B1b: url-mode artifacts iframe arbitrary origins — off by default.
+        self.bridge.allow_artifact_urls = bool(
+            cfg.get("workbench", {}).get("allow_artifact_urls", False)
+        )
         self.voice: VoiceLoop | None = None
         self._tmux_mgr: TmuxManager | None = None
         # tmux session -> worktree path, for the sessions THIS run spawned

@@ -588,3 +588,11 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 .file-head { display: flex; align-items: center; gap: 12px; margin: 0 0 10px; }
 .file-src { font: 12.5px/1.6 var(--mono); background: var(--l0);
   padding: 12px 14px; overflow-x: auto; margin: 0; }
+
+/* ---- B1b: html artifacts --------------------------------------------------- */
+.artifact-bar { display: flex; align-items: center; gap: 12px;
+  margin: 0 0 8px; }
+.artifact-bar .whbtn.on { color: var(--l0); background: var(--voice);
+  border-color: var(--voice); }
+.artifact-frame { width: 100%; height: calc(100% - 40px); min-height: 320px;
+  border: 1px solid var(--edge); background: #fff; }

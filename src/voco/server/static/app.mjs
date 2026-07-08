@@ -20,6 +20,7 @@ import { renderDiff, diffStats, seedFolds } from "./diff.mjs";
 import { renderFindings } from "./findings.mjs";
 import { renderTranscript, flashEntry } from "./transcript.mjs";
 import { renderDocView } from "./docview.mjs";
+import { renderHtmlView } from "./htmlview.mjs";
 import { renderPresence } from "./presence.mjs";
 import { renderTerminal } from "./term.mjs";
 import { openPicker, openRepo, openSpawn, openConnect, openSettings,
@@ -195,7 +196,7 @@ async function detachAgent(s) {
 }
 
 // ---- rail: repo groups → work rows → agents + pages ----------------------------
-const PAGE_ICON = { screen: "▦", diff: "±", doc: "¶", terminal: "❯" };
+const PAGE_ICON = { screen: "▦", diff: "±", doc: "¶", terminal: "❯", html: "▣" };
 
 function groupKey(ws) { return ws.common_dir || ws.key; }
 
@@ -440,8 +441,40 @@ function diffSubTree(ws, p) {
 // Fold state per diff page — survives re-renders so the reader keeps
 // their place; reseeded when the page rev moves (new diff, new folds).
 const foldCache = new Map();
-/** @type {?{pageId:string, path?:string, text?:string}} */
+/** @type {?{pageId:string, path?:string, text?:string, selector?:string}} */
 let pendingReveal = null;
+
+/** B1b deep links (da:…) from inside artifacts — everything rides the
+ * existing reveal machinery. */
+function routeDeepLink(target) {
+  const ws = store.selectedWs();
+  if (!ws) return;
+  const m = /^da:([a-z]+)\/(.*)$/.exec(String(target));
+  if (!m) return;
+  const rest = decodeURIComponent(m[2]);
+  const pages = ws.pages.filter((p) => !p.closed);
+  if (m[1] === "diff") {
+    const [file, line] = rest.split(":");
+    const page = pages.find((p) => p.type === "diff");
+    if (!page) return;
+    pendingReveal = { pageId: page.page_id, path: file };
+    store.selectPage(page.page_id);
+    if (line) blinkRow({ file, side: "new", startLine: Number(line) });
+  } else if (m[1] === "doc") {
+    const [name, text] = rest.split(":");
+    const page = pages.find((p) => p.type === "doc" && p.title === name)
+      || pages.find((p) => p.type === "doc");
+    if (!page) return;
+    pendingReveal = { pageId: page.page_id, text: text || name };
+    store.selectPage(page.page_id);
+  } else if (m[1] === "section") {
+    const page = pages.find((p) => p.title === rest);
+    if (page) store.selectPage(page.page_id);
+  } else if (m[1] === "file") {
+    fstate(ws.key).path = rest;
+    store.selectPage("__files__");
+  }
+}
 
 // ---- work: crumb header + view -------------------------------------------------
 // U2R render discipline (reference architecture): the center rebuilds
@@ -709,9 +742,34 @@ function restoreScroll(view) {
   if (saved != null && !pendingReveal) view.scrollTop = saved;
 }
 
+let htmlCleanup = /** @type {?() => void} */ (null);
+
 async function renderPage(view, page, srnote, actions) {
   const seq = ++renderSeq;
   const stale = () => seq !== renderSeq || !view.isConnected;
+  if (htmlCleanup) { htmlCleanup(); htmlCleanup = null; } // message listener
+  if (page.type === "html") {
+    view.textContent = "…";
+    try {
+      const c = await fetchContent(page.page_id, page.rev);
+      if (stale()) return;
+      let reveal = null;
+      if (pendingReveal && pendingReveal.pageId === page.page_id
+          && pendingReveal.selector) {
+        reveal = pendingReveal.selector;
+        pendingReveal = null;
+      }
+      htmlCleanup = renderHtmlView(view, c, {
+        title: page.title,
+        wb: (window.__VOCO__ || {}).wb || "",
+        reveal,
+        onAnnotate: (anchor, text, kind, blocking) =>
+          addFinding(page, anchor, text, kind, blocking),
+        onNav: routeDeepLink,
+      });
+    } catch (e) { if (!stale()) view.textContent = "could not load: " + errMsg(e); }
+    return;
+  }
   if (page.type === "screen" || page.type === "doc") {
     view.textContent = "…";
     try {
@@ -959,6 +1017,11 @@ function revealFinding(f) {
   // Diff anchors open the fold + blink the row; text anchors (docs)
   // flash the passage — both ride pendingReveal through the async
   // render (B1a: one reveal path for every surface).
+  if (a.kind === "element" && a.selector) {
+    pendingReveal = { pageId: f.page_id, selector: a.selector };
+    store.selectPage(f.page_id);
+    return;
+  }
   if (a.kind === "text" || (a.exact && !a.file)) {
     pendingReveal = { pageId: f.page_id, text: a.exact };
     store.selectPage(f.page_id);

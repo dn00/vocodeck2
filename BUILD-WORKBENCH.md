@@ -453,6 +453,34 @@ REMAINING GAPS (the honest list, by size):
 
 ## Journal
 
+- **2026-07-08 (B1b SHIPPED — html artifact pages, element annotation,
+  deep links; lock race strike five killed)** — The last reference-
+  parity slice, concept-first: `page_push type:html` {name,
+  content|path|url} (content capped, path confined + local-host only,
+  URL MODE CONFIG-GATED OFF — `[workbench] allow_artifact_urls`);
+  served artifacts render at `/v1/artifact/{id}` with the annotator
+  shim injected (ported kernel: cssPath id/nth-of-type hops) and a
+  `CSP: sandbox allow-scripts` header so even a top-level open stays
+  caged. HARDER than the reference by decision: iframe sandbox is
+  `allow-scripts` ONLY (no allow-same-origin — artifact JS gets an
+  opaque origin: no deck, no token, no API; loosening is a security-
+  review decision). Client `htmlview.mjs`: Annotate toggle → click an
+  element in the render → {kind:"element", selector, exact, tag}
+  finding via the normal ledger; reveal round-trips back into the
+  iframe (da-reveal pulse); read-only artifacts get no shim and no
+  toggle; url mode is honestly view-only. `da:` deep links route
+  through the existing reveal machinery (da:diff/file:line ·
+  da:doc/name:text · da:section/name · da:file/path). Message listener
+  verified against e.source and cleaned up across page switches.
+  ALSO: lock-race strike five root-caused — runner.cleanup() waits up
+  to 60s for an OPEN BROWSER TAB's events WS, holding the lock past
+  the 6s retry; AppRunner now uses shutdown_timeout=2 (loopback WS
+  clients self-heal by design). Proven: immediate restart, clean boot.
+  seed_demo pushes a deep-linked artifact. Gates: 371 pytest, mypy,
+  ruff, tsc. Live e2e: artifact served sandboxed + shimmed, url mode
+  400s with the config hint. B1 (reference parity) COMPLETE except
+  parked-by-demand types. NEXT: B2 loops — asks in dock, autostart,
+  PTT, notifications, edit-annotation.
 - **2026-07-08 (Codex /xai review of B1c applied — 2 blockers fixed, 2
   accepted, 1 note fixed)** — (B1) /v1/file now enforces the TRACKED-
   file contract (`git ls-files --error-unmatch` per read + sessionspace

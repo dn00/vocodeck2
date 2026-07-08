@@ -289,6 +289,31 @@ def main() -> int:
         },
     )
 
+    print("· an html artifact (element-annotatable, deep-linked)")
+    api.post(
+        "/v1/bridge/page",
+        {
+            "session_id": freya["session_id"],
+            "type": "html",
+            "name": "strip dashboard",
+            "content": (
+                "<body style='font-family:system-ui;background:#0c0e12;"
+                "color:#c9d3e0;padding:24px'>"
+                "<h1 id='kpi'>presence strip — 1 open finding</h1>"
+                "<p>orb states shipped; captions shipped; tests green.</p>"
+                "<p><a href='da:diff/src/voco/server/static/presence.mjs:4' "
+                "style='color:#63a8f2'>jump to the flagged line</a> · "
+                "<a href='da:doc/design-notes.md:only curve' "
+                "style='color:#63a8f2'>the design note</a></p>"
+                "<div id='chart' style='display:flex;gap:4px;align-items:flex-end;"
+                "height:60px'><div style='width:24px;height:20%;background:#4cba63'>"
+                "</div><div style='width:24px;height:60%;background:#4cba63'></div>"
+                "<div style='width:24px;height:100%;background:#e0a458'></div></div>"
+                "</body>"
+            ),
+        },
+    )
+
     print("· an open ask + a queued input")
     api.control(
         "ask.create",

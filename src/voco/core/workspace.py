@@ -540,6 +540,56 @@ class WorkspaceStore:
         self._emit_page(ws, page, "updated")
         return page
 
+    def push_html(
+        self,
+        ws: Workspace,
+        *,
+        name: str | None = None,
+        content: str | None = None,
+        path: str | None = None,
+        url: str | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> Page:
+        """An HTML artifact page (B1b, reference `html` sections): exactly
+        one of content|path|url. content/path render sandboxed with the
+        annotator shim (element annotation); url mode iframes a running
+        dev server — view-only, un-shimmed. Same ref re-push bumps rev;
+        params follow the doc contract (None keeps existing)."""
+        if not name:
+            raise ValueError("html page needs a name")
+        given = [x for x in (content, path, url) if x is not None]
+        if len(given) != 1:
+            raise ValueError("html needs exactly one of content|path|url")
+        data: dict[str, Any] = {}
+        if content is not None:
+            data["content"] = content
+        elif path is not None:
+            data["path"] = path
+        else:
+            data["url"] = url
+        ref = f"html:{name}"
+        page = ws.page_by_ref("html", ref)
+        if params is not None:
+            data["params"] = dict(params)
+        elif page is not None and "params" in page.data:
+            data["params"] = page.data["params"]
+        if page is None:
+            page = Page(
+                page_id="",
+                type="html",
+                ref=ref,
+                title=name,
+                scope="workspace",
+                data=data,
+            )
+            return self._mint_page(ws, page)
+        page.data = data
+        page.rev += 1
+        page.closed = False
+        page.updated_ts = self._now()
+        self._emit_page(ws, page, "updated")
+        return page
+
     def upsert_terminal(
         self,
         identity: dict[str, Any],

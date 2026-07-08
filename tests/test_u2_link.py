@@ -261,6 +261,80 @@ async def test_workspace_files_lists_tracked(daemon, tmp_path):
         await daemon._control("workspace.files", {"workspace": "h:/ghost"})
 
 
+# ---- html artifacts (B1b) -----------------------------------------------------
+
+
+def test_push_html_modes_and_repush():
+    store, ws, _ = make_store()
+    p1 = store.push_html(ws, name="dash", content="<h1>hi</h1>")
+    assert p1.type == "html" and p1.ref == "html:dash"
+    p2 = store.push_html(ws, name="dash", content="<h1>hi2</h1>")
+    assert p2.page_id == p1.page_id and p2.rev == 2
+    with pytest.raises(ValueError, match="exactly one"):
+        store.push_html(ws, name="x", content="a", url="http://b")
+    with pytest.raises(ValueError, match="exactly one"):
+        store.push_html(ws, name="x")
+    with pytest.raises(ValueError, match="needs a name"):
+        store.push_html(ws, content="a")
+    # element findings anchor to artifacts like any page
+    f = store.add_finding(
+        ws.key,
+        page_id=p1.page_id,
+        anchor={
+            "kind": "element",
+            "selector": "#kpi > div:nth-of-type(2)",
+            "exact": "42 findings",
+            "tag": "div",
+        },
+        text="that count is stale",
+    )
+    assert f.anchor["kind"] == "element"
+
+
+async def test_artifact_route_injects_shim_and_sandboxes():
+    from voco.server import workbench as wbmod
+
+    store, ws, _ = make_store()
+    page = store.push_html(ws, name="dash", content="<body><h1>k</h1></body>")
+    ro = store.push_html(
+        ws, name="plain", content="<p>x</p>", params={"annotatable": False}
+    )
+
+    class FakeServer:
+        workspaces = store
+
+        def _check_browser_mutation(self, request):
+            pass
+
+    class FakeReq:
+        def __init__(self, pid):
+            self.match_info = {"page_id": pid}
+
+    wb = wbmod.WorkbenchRoutes(FakeServer())
+    resp = await wb.artifact(FakeReq(page.page_id))
+    assert resp.headers["Content-Security-Policy"] == "sandbox allow-scripts"
+    assert "__vocoAnnotator" in resp.text  # shim injected before </body>
+    assert resp.text.index("__vocoAnnotator") < resp.text.index("</body>")
+    ro_resp = await wb.artifact(FakeReq(ro.page_id))
+    assert "__vocoAnnotator" not in ro_resp.text  # read-only: no shim
+
+
+async def test_bridge_html_url_mode_is_config_gated(daemon, tmp_path):
+    # exercised through the real bridge route via the daemon's server
+    key = await opened_key(daemon, tmp_path)
+    ws = daemon.workspaces.get(key)
+    # url artifacts refused by default (allow_artifact_urls unset)
+    assert getattr(daemon.bridge, "allow_artifact_urls", None) is False
+    # content page content shape: served mode → /v1/artifact src
+    page = daemon.workspaces.push_html(ws, name="dash", content="<p>k</p>")
+    from voco.server.workbench import WorkbenchRoutes
+
+    wb = WorkbenchRoutes(daemon.bridge)
+    body = wb._content(ws, page)
+    assert body["mode"] == "artifact"
+    assert body["src"] == f"/v1/artifact/{page.page_id}?rev=1"
+
+
 # ---- manifest lock: boot retry (restart race) --------------------------------
 
 

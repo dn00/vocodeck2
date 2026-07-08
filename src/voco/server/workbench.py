@@ -51,6 +51,17 @@ SHELL = """<!doctype html>
 """
 
 
+_SHIM_CACHE: str | None = None
+
+
+def _artifact_shim() -> str:
+    global _SHIM_CACHE
+    if _SHIM_CACHE is None:
+        p = STATIC_DIR / "artifact-shim.js"
+        _SHIM_CACHE = p.read_text(encoding="utf-8") if p.is_file() else ""
+    return _SHIM_CACHE
+
+
 def add_workbench_routes(app: web.Application, server: BridgeServer) -> None:
     wb = WorkbenchRoutes(server)
     app.router.add_get("/", wb.index)
@@ -68,6 +79,7 @@ def add_workbench_routes(app: web.Application, server: BridgeServer) -> None:
         app.on_response_prepare.append(no_cache)
     app.router.add_get("/v1/page/{page_id}", wb.page_content)
     app.router.add_get("/v1/file", wb.file_content)
+    app.router.add_get("/v1/artifact/{page_id}", wb.artifact)
     app.router.add_get("/v1/term/{session_id}", wb.term_ws)
     app.router.add_post("/v1/bridge/page", wb.bridge_page)
     app.router.add_get("/v1/bridge/findings", wb.bridge_findings)
@@ -249,6 +261,40 @@ class WorkbenchRoutes:
         )
         return web.json_response({"path": path, "content": content})
 
+    async def artifact(self, request: web.Request) -> web.Response:
+        """B1b: serve one html page's document for the sandboxed iframe,
+        with the annotator shim injected (served modes only). The
+        response carries `CSP: sandbox allow-scripts` so the document is
+        sandboxed even if opened top-level — and the iframe side ALSO
+        sandboxes (defense in depth). Browser origins need the wb token
+        (?wb= — an iframe src can't carry headers)."""
+        self._server._check_browser_mutation(request)
+        store = self._server.workspaces
+        if store is None:
+            raise web.HTTPNotFound(text="workbench disabled")
+        page = store.page(request.match_info["page_id"])
+        if page is None or page.closed or page.type != "html":
+            raise web.HTTPNotFound(text="no such artifact")
+        ws = store.workspace_of_page(page.page_id)
+        assert ws is not None
+        if "url" in page.data:
+            raise web.HTTPBadRequest(text="url artifacts are iframed directly")
+        if "content" in page.data:
+            html = page.data["content"]
+        else:
+            html = confined_read(ws.root, page.data["path"])
+        params = page.data.get("params") or {}
+        if params.get("annotatable") is not False:
+            shim = f"<script>{_artifact_shim()}</script>"
+            if "</body>" in html:
+                html = html.replace("</body>", shim + "</body>", 1)
+            else:
+                html += shim
+        resp = web.Response(text=html, content_type="text/html")
+        resp.headers["Content-Security-Policy"] = "sandbox allow-scripts"
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
     async def page_content(self, request: web.Request) -> web.Response:
         store = self._server.workspaces
         if store is None:
@@ -283,6 +329,18 @@ class WorkbenchRoutes:
                 # W5: what moved since the rev this one replaced — the
                 # client's since-rev banner + per-file chips.
                 "interdiff": page.data.get("interdiff"),
+            }
+        if page.type == "html":
+            # The client iframes /v1/artifact (shimmed, sandboxed) for
+            # served modes; url mode iframes the external origin directly
+            # — un-shimmed, so element annotation is honestly OFF there.
+            params = page.data.get("params") or {}
+            if "url" in page.data:
+                return {"mode": "url", "src": page.data["url"], "params": params}
+            return {
+                "mode": "artifact",
+                "src": f"/v1/artifact/{page.page_id}?rev={page.rev}",
+                "params": params,
             }
         if page.type == "terminal":
             # The page carries HOW to attach (SPEC-WORKBENCH §5): stream →
@@ -373,7 +431,7 @@ class WorkbenchRoutes:
         s = server.refresh_session_identity(s, body.get("identity"))
         ws = store.resolve(s.identity)
         type_ = body.get("type")
-        if type_ not in ("doc", "diff"):
+        if type_ not in ("doc", "diff", "html"):
             raise web.HTTPBadRequest(text=f"page type {type_!r} not accepted")
         if ws.kind == "sessionspace":
             raise web.HTTPBadRequest(
@@ -384,6 +442,8 @@ class WorkbenchRoutes:
             )
         if type_ == "diff":
             page = await self._push_diff(ws, s, body)
+        elif type_ == "html":
+            page = self._push_html(ws, s, body)
         else:
             page = self._push_doc(ws, s, body)
         return web.json_response(
@@ -418,6 +478,42 @@ class WorkbenchRoutes:
         try:
             return store.push_doc(
                 ws, name=body.get("name"), content=body.get("content"), params=params
+            )
+        except ValueError as e:
+            raise web.HTTPBadRequest(text=str(e)) from e
+
+    def _push_html(self, ws, s, body):
+        """B1b html artifacts. content is capped; path is confined (and,
+        like docs, local-host only); url mode is CONFIG-GATED off by
+        default — an iframe pointed at an arbitrary origin is a bigger
+        surface than loopback-served, shimmed content."""
+        store = self._server.workspaces
+        assert store is not None  # bridge_page guarded it
+        params = self._doc_params(body)
+        name = body.get("name")
+        content, path, url = body.get("content"), body.get("path"), body.get("url")
+        if content is not None and len(content) > MAX_DOC_BYTES:
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=MAX_DOC_BYTES, actual_size=len(content)
+            )
+        if url is not None:
+            allow = getattr(self._server, "allow_artifact_urls", False)
+            if not allow:
+                raise web.HTTPBadRequest(
+                    text="url artifacts are disabled ([workbench] "
+                    "allow_artifact_urls = true to enable)"
+                )
+            if not str(url).startswith(("http://", "https://")):
+                raise web.HTTPBadRequest(text="artifact url must be http(s)")
+        if path is not None:
+            if s.identity.get("host") != self._host:
+                raise web.HTTPBadRequest(
+                    text="remote session: push content instead of a path"
+                )
+            confined_read(ws.root, str(path))  # confine + readable, up front
+        try:
+            return store.push_html(
+                ws, name=name, content=content, path=path, url=url, params=params
             )
         except ValueError as e:
             raise web.HTTPBadRequest(text=str(e)) from e

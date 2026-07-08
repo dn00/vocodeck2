@@ -130,6 +130,9 @@ class BridgeServer:
         # its lookup; the default means "no streaming terminals here"
         # (tests, headless bridges).
         self.pty_lookup: Callable[[str], Any] = lambda sid: None
+        # B1b: url-mode artifacts iframe arbitrary origins — daemon wires
+        # this from [workbench] allow_artifact_urls; default off.
+        self.allow_artifact_urls: bool = False
         # Daemon-owned control commands (mic.set, interrupt, switch...).
         # Async so subprocess-backed commands (tmux/ssh) never block the
         # loop that pumps WS events and listen polls.
@@ -496,7 +499,11 @@ async def run_server(
 ) -> web.AppRunner:
     if host != "127.0.0.1":
         raise ValueError("SPEC §8.1: bridge binds loopback only")
-    runner = web.AppRunner(server.build_app())
+    # 2s shutdown: cleanup() otherwise waits up to 60s for lingering
+    # connections — an OPEN BROWSER TAB's events WebSocket held the
+    # manifest lock hostage past the restart retry (2026-07-08, fifth
+    # strike). Loopback WS clients self-heal by design; cut them fast.
+    runner = web.AppRunner(server.build_app(), shutdown_timeout=2.0)
     await runner.setup()
     site = web.TCPSite(runner, host, port)
     await site.start()
