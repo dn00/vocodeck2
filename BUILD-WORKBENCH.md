@@ -375,6 +375,19 @@ Fix class for next session:
 
 ## Journal
 
+- **2026-07-07 (Codex /xai review of U2c+U2d applied — 5 fixed, 0
+  security)** — No blockers this round. Fixed with tests where
+  server-side: (W1) a stale async diff render can no longer steal a
+  newer page's pending reveal (consume only on pageId match); (W2)
+  blinkRow's frame budget raised for cold fetches; (W3) fold seeding
+  now unions in findings that lazy-load AFTER the first render
+  (seededEmpty flag — fresh-snapshot selections were rendering
+  collapsed and staying collapsed); (N4) row marks/fmarks now mean
+  "open" only — withdrawn/addressed findings no longer flag rows;
+  (N5) openModal closes the previous modal through ITS close() so
+  document key listeners can't leak; (W6) finding.status test coverage:
+  bogus status 400s, exact duplicates converge ts-identically,
+  COMMAND_TYPES membership. 355 tests, all gates green.
 - **2026-07-07 (U2c+U2d SHIPPED — review as a place; create/connect;
   mockup rev 4.1 look)** — The deck now matches the interactive mockup.
   diff.mjs rewritten as the COLLAPSED FILE INDEX (dfile folds: tri +

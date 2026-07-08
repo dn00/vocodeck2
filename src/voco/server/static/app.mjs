@@ -530,15 +530,26 @@ async function renderPage(view, page, srnote, actions) {
       // First load of this rev: the rail's file sub-tree can render now.
       if (cold) requestAnimationFrame(renderRail);
       const findings = store.findingsFor(store.selectedWorkspace || "")
-        .filter((f) => f.page_id === page.page_id);
+        .filter((f) => f.page_id === page.page_id && f.status !== "withdrawn");
       let fc = foldCache.get(page.page_id);
       if (!fc || fc.rev !== page.rev) {
-        fc = { rev: page.rev, fold: seedFolds(c, findings) };
+        fc = { rev: page.rev, fold: seedFolds(c, findings),
+          seededEmpty: findings.length === 0 };
         foldCache.set(page.page_id, fc);
+      } else if (fc.seededEmpty && findings.length) {
+        // Findings lazy-load AFTER the first render (fresh snapshot):
+        // union their folds in once — user folds are never removed
+        // (xai U2c W3).
+        for (const path of seedFolds(c, findings)) fc.fold.add(path);
+        fc.seededEmpty = false;
       }
-      const reveal = pendingReveal && pendingReveal.pageId === page.page_id
-        ? pendingReveal.path : null;
-      pendingReveal = null;
+      // Consume the reveal only if it targets THIS page — a stale async
+      // render must not steal a newer page's jump (xai U2c W1).
+      let reveal = null;
+      if (pendingReveal && pendingReveal.pageId === page.page_id) {
+        reveal = pendingReveal.path;
+        pendingReveal = null;
+      }
       view.replaceChildren();
       const api = renderDiff(view, c, {
         rev: page.rev,
@@ -709,7 +720,7 @@ function revealFinding(f) {
   blinkRow(a);
 }
 
-function blinkRow(a, tries = 16) {
+function blinkRow(a, tries = 40) {
   const sel = `.drow[data-file="${cssEscape(a.file)}"][data-side="${a.side}"][data-line="${a.startLine}"]`;
   const row = work.querySelector(sel);
   if (row) {

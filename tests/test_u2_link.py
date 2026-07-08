@@ -385,6 +385,41 @@ async def test_finding_status_reopens_withdrawn(daemon, tmp_path):
     assert out["finding"]["status"] == "open"
 
 
+async def test_finding_status_validates_and_converges(daemon, tmp_path):
+    # xai U2c W6: bogus statuses 400; exact duplicates are true no-ops.
+    from voco.protocol.messages import COMMAND_TYPES
+
+    assert "finding.status" in COMMAND_TYPES
+    key = await opened_key(daemon, tmp_path)
+    daemon.bridge.diff_resolver.resolve = lambda source, root: PATCH
+    page = await daemon._control(
+        "page.publish", {"workspace": key, "source": {"staged": True}}
+    )
+    f = await daemon._control(
+        "finding.add",
+        {
+            "workspace": key,
+            "page_id": page["page_id"],
+            "anchor": {"file": "f.py", "side": "new", "startLine": 1, "endLine": 1},
+            "text": "x",
+            "kind": "nit",
+        },
+    )
+    fid = f["finding"]["finding_id"]
+    with pytest.raises(ValueError, match="not allowed"):
+        await daemon._control(
+            "finding.status",
+            {"workspace": key, "finding_id": fid, "status": "bogus"},
+        )
+    once = await daemon._control(
+        "finding.status", {"workspace": key, "finding_id": fid, "status": "addressed"}
+    )
+    again = await daemon._control(
+        "finding.status", {"workspace": key, "finding_id": fid, "status": "addressed"}
+    )
+    assert once["finding"]["updated_ts"] == again["finding"]["updated_ts"]
+
+
 async def test_attach_snippet_names_the_daemon(daemon):
     out = await daemon._control("attach.snippet", {})
     assert out["url"].startswith("http://127.0.0.1:")

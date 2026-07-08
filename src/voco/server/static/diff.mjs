@@ -89,11 +89,11 @@ export function renderDiff(view, content, ctx) {
   const byLine = new Map();
   const openByFile = new Map();
   for (const f of ctx.findings || []) {
+    if (f.status !== "open") continue; // marks mean "needs you" — only open
     const a = f.anchor || {};
     for (let ln = a.startLine; ln <= (a.endLine || a.startLine); ln++)
       byLine.set(`${a.file}:${a.side}:${ln}`, f);
-    if (f.status === "open")
-      openByFile.set(a.file, (openByFile.get(a.file) || 0) + 1);
+    openByFile.set(a.file, (openByFile.get(a.file) || 0) + 1);
   }
 
   const stats = diffStats(content.files);

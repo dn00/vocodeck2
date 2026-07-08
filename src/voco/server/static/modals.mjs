@@ -25,8 +25,9 @@ const el = (tag, attrs = {}, ...kids) => {
 const errMsg = (e) => (e instanceof Error ? e.message : String(e));
 
 /** One modal at a time; returns close(). */
+let activeClose = /** @type {?() => void} */ (null);
 function openModal(title, where, body, actions) {
-  document.querySelectorAll(".scrim").forEach((n) => n.remove());
+  if (activeClose) activeClose(); // close() removes ITS key listener too
   const modal = el("div", { class: "modal", role: "dialog", "aria-label": title },
     el("h4", { text: title }),
     where ? el("div", { class: "pwhere", text: where }) : null,
@@ -39,8 +40,10 @@ function openModal(title, where, body, actions) {
   function close() {
     scrim.remove();
     document.removeEventListener("keydown", onKey);
+    if (activeClose === close) activeClose = null;
   }
   document.body.append(scrim);
+  activeClose = close;
   return close;
 }
 
