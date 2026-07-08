@@ -105,6 +105,15 @@ def test_detect_survives_runner_oserror():
     assert detect("/repo", "b", run=run) is None
 
 
+def test_detect_silent_on_hung_gh():
+    # xai BLOCKER 1: TimeoutExpired is NOT an OSError — a hung gh must
+    # still answer "no link", never raise into the command loop.
+    def run(argv: list[str], cwd: str) -> RunResult:
+        raise subprocess.TimeoutExpired(argv, 30)
+
+    assert detect("/repo", "b", run=run) is None
+
+
 # ---- store: links field ----------------------------------------------------
 
 
@@ -142,6 +151,43 @@ def test_set_links_validates():
         store.set_links(ws.key, {"badkind": {"number": 1}})
     with pytest.raises(ValueError):
         store.set_links("nope:/x", {"pr": {"number": 1}})
+
+
+def test_branch_switch_drops_detected_links_keeps_manual():
+    # xai WARNING 4: a PR belongs to its branch. gh-sourced links die on
+    # a branch switch; manual links are the user's word and stay.
+    store, ws, events = make_store()
+    store.set_links(
+        ws.key,
+        {
+            "pr": {"number": 7, "url": "u", "src": "gh"},
+            "issue": {"number": 3, "src": "manual"},
+        },
+    )
+    events.clear()
+    store.resolve({"host": "h", "cwd": "/w", "worktree": "/w", "branch": "other"})
+    assert "pr" not in ws.links
+    assert ws.links["issue"]["number"] == 3
+    assert events and events[-1][1]["branch"] == "other"
+
+
+def test_restore_cleans_malformed_links():
+    # xai WARNING 5: a corrupt link must never cost the workspace.
+    store, ws, _ = make_store()
+    dumped = store.dump_workspace(ws)
+    dumped["links"] = {"pr": "garbage", "issue": {"number": "NaN"}, "x": {}}
+    restored = WorkspaceStore().restore_workspace(dumped)
+    assert restored is not None and restored.links == {}
+    dumped["links"] = "not even a dict"
+    restored = WorkspaceStore().restore_workspace(dumped)
+    assert restored is not None and restored.links == {}
+
+
+def test_meta_counts_open_asks():
+    # xai WARNING 6: unvisited rail rows must count unanswered asks too.
+    store, ws, _ = make_store()
+    store.add_ask(ws.key, text="which way?")
+    assert ws.meta()["open_asks"] == 1
 
 
 def test_links_ride_meta_dump_and_restore():
@@ -226,6 +272,58 @@ async def test_workspace_link_detect_applies_and_caches(daemon, tmp_path):
         "workspace.link", {"workspace": key, "detect": True, "force": True}
     )
     assert len(calls) == 2
+
+
+async def test_workspace_link_clear_beats_detect_in_same_command(daemon, tmp_path):
+    # xai BLOCKER 2: {"pr": null, "detect": true} must not refill what
+    # the same command just cleared.
+    key = await opened_key(daemon, tmp_path)
+    await daemon._control(
+        "workspace.link", {"workspace": key, "pr": {"number": 1, "url": "u"}}
+    )
+    daemon._ghlink_detect = lambda root, branch: {"pr": {"number": 7, "url": "d"}}
+    out = await daemon._control(
+        "workspace.link",
+        {"workspace": key, "pr": None, "detect": True, "force": True},
+    )
+    assert "pr" not in out["links"]
+
+
+async def test_workspace_link_detect_rekeys_on_branch_change(daemon, tmp_path):
+    # xai WARNING 4: the detect cache is branch-keyed — a branch switch
+    # re-asks gh instead of trusting a stale answer.
+    key = await opened_key(daemon, tmp_path)
+    calls = []
+    daemon._ghlink_detect = lambda root, branch: (calls.append(branch), None)[1]
+    await daemon._control("workspace.link", {"workspace": key, "detect": True})
+    await daemon._control("workspace.link", {"workspace": key, "detect": True})
+    assert len(calls) == 1  # cached for this branch
+    ws = daemon.workspaces.get(key)
+    ws.branch = "feature-x"
+    await daemon._control("workspace.link", {"workspace": key, "detect": True})
+    assert calls == ["main", "feature-x"]
+
+
+async def test_workspace_link_detect_stamps_provenance(daemon, tmp_path):
+    key = await opened_key(daemon, tmp_path)
+    daemon._ghlink_detect = lambda root, branch: {"pr": {"number": 7, "url": "u"}}
+    out = await daemon._control("workspace.link", {"workspace": key, "detect": True})
+    assert out["links"]["pr"]["src"] == "gh"
+    out = await daemon._control(
+        "workspace.link", {"workspace": key, "issue": {"number": 3}}
+    )
+    assert out["links"]["issue"]["src"] == "manual"
+
+
+async def test_workspace_link_detect_swallows_detector_crash(daemon, tmp_path):
+    key = await opened_key(daemon, tmp_path)
+
+    def boom(root, branch):
+        raise RuntimeError("detector bug")
+
+    daemon._ghlink_detect = boom
+    out = await daemon._control("workspace.link", {"workspace": key, "detect": True})
+    assert out["links"] == {}  # optional-gh holds even for a broken detector
 
 
 async def test_workspace_link_detect_never_overwrites_manual(daemon, tmp_path):

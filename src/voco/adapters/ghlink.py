@@ -49,7 +49,10 @@ def detect(root: str, branch: str, run: Runner = _default_runner) -> dict | None
         if r.returncode != 0:
             return None
         prs = json.loads(r.stdout)
-    except (OSError, ValueError):
+    except Exception:
+        # Deliberately blind (xai BLOCKER 1): gh is optional BY DECISION —
+        # a hung gh (TimeoutExpired), a raising runner, bad JSON, anything:
+        # the answer is "no link", never an error.
         return None
     if not isinstance(prs, list) or not prs:
         return None

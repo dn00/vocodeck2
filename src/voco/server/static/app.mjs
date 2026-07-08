@@ -115,12 +115,16 @@ const workLabel = (ws) => String(ws.branch || ws.name);
 
 // ---- selection: VIEW (work) vs MIC (agent) — ADR-0001 --------------------------
 // gh is optional by decision: detection is lazy, cached, and silent.
+// The tried-set keys on branch too — a branch switch re-detects (the
+// daemon drops gh-sourced links on branch change for the same reason).
 const detectTried = new Set();
 function lazyDetectLinks(ws) {
-  if (!ws || ws.kind !== "workspace" || detectTried.has(ws.key)) return;
+  if (!ws || ws.kind !== "workspace") return;
+  const tryKey = ws.key + "@" + (ws.branch || "");
+  if (detectTried.has(tryKey)) return;
   const l = ws.links || {};
   if (l.pr || l.issue) return;
-  detectTried.add(ws.key);
+  detectTried.add(tryKey);
   bus.command("workspace.link", { workspace: ws.key, detect: true })
     .catch(() => {});
 }
@@ -285,7 +289,8 @@ function flaggedChip(ws) {
   const open = store.findings.has(ws.key)
     ? store.findingsFor(ws.key).filter((f) => f.status === "open").length
       + store.asksFor(ws.key).filter((a) => a.answer == null).length
-    : (ws.finding_counts && ws.finding_counts.open) || 0;
+    : ((ws.finding_counts && ws.finding_counts.open) || 0)
+      + (ws.open_asks || 0);
   return open ? h("span", { class: "chip amber" }, open + " flagged") : "";
 }
 

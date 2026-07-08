@@ -213,11 +213,36 @@ class Workspace:
             "links": self.links,
             "pages": [p.meta() for p in self.pages.values()],
             "finding_counts": self.finding_counts(),
+            # Unanswered asks ride the snapshot so unvisited rail rows count
+            # them too — finding_counts alone undercounts (xai WARNING 6).
+            "open_asks": sum(1 for a in self.asks.values() if a.answer is None),
         }
 
 
 def _workspace_key(host: str, root: str) -> str:
     return f"{host}:{root.rstrip('/') or '/'}"
+
+
+LINK_KINDS = ("pr", "issue")
+
+
+def _clean_links(raw: Any) -> dict[str, Any]:
+    """Manifest-boundary normalization (xai WARNING 5): keep only
+    well-shaped links, drop garbage silently — a corrupt link must never
+    cost the workspace it rides in."""
+    out: dict[str, Any] = {}
+    if not isinstance(raw, dict):
+        return out
+    for kind in LINK_KINDS:
+        v = raw.get(kind)
+        if not isinstance(v, dict) or not isinstance(v.get("number"), int):
+            continue
+        link: dict[str, Any] = {"number": v["number"]}
+        for k in ("url", "title", "src"):
+            if isinstance(v.get(k), str) and v[k]:
+                link[k] = v[k]
+        out[kind] = link
+    return out
 
 
 class WorkspaceStore:
@@ -254,6 +279,15 @@ class WorkspaceStore:
             branch = identity.get("branch")
             if branch and branch != ws.branch:
                 ws.branch = str(branch)
+                # A PR belongs to its branch: gh-DETECTED links die with a
+                # branch switch; manual links are the user's word and stay
+                # (xai WARNING 4 — provenance rides `src`).
+                for k in [
+                    k
+                    for k, v in ws.links.items()
+                    if isinstance(v, dict) and v.get("src") == "gh"
+                ]:
+                    del ws.links[k]
                 self._emit_updated(ws)
             if identity.get("common_dir") and not ws.common_dir:
                 ws.common_dir = str(identity["common_dir"])
@@ -313,18 +347,19 @@ class WorkspaceStore:
 
     # ---- links (DESIGN-DECK rev 5, U2a) --------------------------------------
 
-    LINK_KINDS = ("pr", "issue")
+    LINK_KINDS = LINK_KINDS  # module constant, exposed for the daemon seam
 
     def set_links(self, key: str, updates: dict[str, Any]) -> Workspace:
         """Set/clear GitHub links. `updates` maps kind (pr|issue) to a
-        {number, url?, title?} dict, or None to clear that kind. An exact
-        duplicate is a true no-op — no event (at-least-once house style)."""
+        {number, url?, title?, src?} dict, or None to clear that kind. An
+        exact duplicate is a true no-op — no event (at-least-once house
+        style). `src` is provenance: "gh" links die on branch switch."""
         ws = self._spaces.get(key)
         if ws is None:
             raise ValueError(f"unknown workspace: {key}")
         changed = False
         for kind, raw in updates.items():
-            if kind not in self.LINK_KINDS:
+            if kind not in LINK_KINDS:
                 raise ValueError(f"bad link kind: {kind}")
             if raw is None:
                 if kind in ws.links:
@@ -334,7 +369,7 @@ class WorkspaceStore:
             if not isinstance(raw, dict) or not isinstance(raw.get("number"), int):
                 raise ValueError(f"{kind} link needs an integer number")
             link: dict[str, Any] = {"number": raw["number"]}
-            for k in ("url", "title"):
+            for k in ("url", "title", "src"):
                 if isinstance(raw.get(k), str) and raw[k]:
                     link[k] = raw[k]
             if ws.links.get(kind) != link:
@@ -790,7 +825,7 @@ class WorkspaceStore:
                 repo=data.get("repo"),
                 branch=data.get("branch"),
                 common_dir=data.get("common_dir"),
-                links=dict(data.get("links") or {}),
+                links=_clean_links(data.get("links")),
             )
             for praw in data.get("pages", []):
                 page = Page(

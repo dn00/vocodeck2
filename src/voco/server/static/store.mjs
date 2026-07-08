@@ -13,7 +13,8 @@
  * @typedef {{key:string, host:string, root:string, name:string, kind:string,
  *   repo:?string, branch:?string, common_dir:?string,
  *   links?:{pr?:GhLink, issue?:GhLink},
- *   finding_counts?:Record<string, number>, pages:PageMeta[]}} Workspace
+ *   finding_counts?:Record<string, number>, open_asks?:number,
+ *   pages:PageMeta[]}} Workspace
  * @typedef {{page_id:string, type:string, ref:string, title:string,
  *   scope:string, rev:number, pinned:boolean, closed:boolean,
  *   session_id:?string, call_name:?string}} PageMeta

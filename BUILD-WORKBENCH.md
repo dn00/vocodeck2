@@ -375,6 +375,23 @@ Fix class for next session:
 
 ## Journal
 
+- **2026-07-07 (Codex /xai review of U2a+U2b applied — 6 fixed, 1
+  declined)** — Adversarial review per the new per-phase policy. Fixed
+  with tests (8 new, 353 total): (B1) hung gh — TimeoutExpired is not
+  an OSError — now blind-except in ghlink.detect + a second net at the
+  daemon seam (the optional-gh decision as code, twice); (B2) clear no
+  longer loses to detect in the same command (detect fills only kinds
+  untouched by the payload); (W3) in-flight detect can't resurrect a
+  clear (fillable snapshot taken before the gh call, re-checked after);
+  (W4) link provenance — detected links carry src="gh" and DIE on
+  branch switch, manual links stay; detect caches (daemon + client)
+  key on branch; (W5) manifest-boundary `_clean_links` — corrupt links
+  drop silently instead of costing the workspace; (W6) meta gains
+  `open_asks` so parked rows count unanswered asks at boot. DECLINED
+  (W7): view moving while a mic switch fails is the ADR-0001 split
+  working as designed — toast + standing mic-holder cell keep it
+  honest. One security note routed to ../vocodeck2-security/ via
+  codex -o (never entered the session, per policy).
 - **2026-07-07 (U2b SHIPPED — the workspace-first rail)** — ADR-0001 as
   pixels. Rail = repo groups → WORK ROWS (branch + issue/PR chips +
   flagged count; two-line rows; blocked work sorts first, parked

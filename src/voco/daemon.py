@@ -808,31 +808,51 @@ class Daemon:
 
     async def _workspace_link(self, payload: dict) -> dict:
         """DESIGN-DECK rev 5 (U2a): GitHub links on a workspace. Manual
-        set/clear always wins; `detect` lazily asks gh — an OPTIONAL edge:
-        silence on every failure, and it only fills kinds manual didn't
-        set. Detection is cached per run; `force` re-asks."""
+        set/clear always wins — over detect in the SAME command and over
+        an in-flight detect (xai B2/W3: detect fills only kinds untouched
+        by this payload AND missing both before and after the gh call).
+        Detected links carry src="gh" so a branch switch drops them (W4);
+        the detect cache is keyed by branch for the same reason. gh is an
+        OPTIONAL edge: silence on every failure."""
         key = str(payload.get("workspace", ""))
         ws = self.workspaces.get(key)
         if ws is None:
             raise ValueError(f"unknown workspace: {key}")
-        manual = {k: payload[k] for k in self.workspaces.LINK_KINDS if k in payload}
+        kinds = self.workspaces.LINK_KINDS
+        manual: dict[str, Any] = {}
+        for k in kinds:
+            if k not in payload:
+                continue
+            v = payload[k]
+            # dicts get provenance; None clears; junk flows through so
+            # set_links raises a contextual 400 (never silently dropped).
+            manual[k] = {**v, "src": "manual"} if isinstance(v, dict) else v
         if manual:
             self.workspaces.set_links(key, manual)
+        cache_key = f"{key}@{ws.branch}"
         wants_detect = (
             payload.get("detect")
             and ws.kind == "workspace"
             and ws.branch
-            and (payload.get("force") or key not in self._gh_checked)
+            and (payload.get("force") or cache_key not in self._gh_checked)
         )
         if wants_detect:
-            self._gh_checked.add(key)
+            self._gh_checked.add(cache_key)
+            fillable = [k for k in kinds if k not in manual and k not in ws.links]
             root, branch = ws.root, str(ws.branch)
-            found = await self._run_blocking(lambda: self._ghlink_detect(root, branch))
+            try:
+                found = await self._run_blocking(
+                    lambda: self._ghlink_detect(root, branch)
+                )
+            except Exception:
+                # The optional-gh decision holds even for a misbehaving
+                # detector: no link, never an error.
+                found = None
             if found:
                 fill = {
-                    k: v
+                    k: {**v, "src": "gh"}
                     for k, v in found.items()
-                    if k in self.workspaces.LINK_KINDS and k not in ws.links
+                    if k in fillable and k not in ws.links
                 }
                 if fill:
                     self.workspaces.set_links(key, fill)
