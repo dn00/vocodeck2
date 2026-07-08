@@ -408,6 +408,32 @@ REMAINING GAPS (the honest list, by size):
 6. **Group-header "no agents" rmeta** — cosmetic. Tiny.
 7. **U3 checkpoint items** — contrast audit, GitHub-rando walkthrough.
 
+### The product-loop audit (2026-07-07, "would I daily-drive this?") — NO, because:
+
+- **P0 · You cannot see uncommitted work.** Diff sources are
+  pr / branch (merge-base..HEAD, committed only) / staged (--cached).
+  An agent mid-task has NOTHING reviewable until it commits. Daily
+  review of in-flight work needs a `worktree` source (`git diff HEAD`)
+  in resolver + picker. Small change, biggest daily payoff.
+- **P0 · Asks are counted but invisible.** The flagged chips count
+  unanswered asks; the dock renders ONLY findings (the code comment
+  claims otherwise). The whole W2 ask loop (create → wake → agent
+  reply) is daemon-complete and UI-orphaned since the chat tab died in
+  U1. Render asks + answers in the annotations ledger.
+- **P0 · Nothing starts the daemon.** Daily tool = always on. A
+  `voco up` + launchd agent (Tier-0 first-run work, ADR-0002) — until
+  then the deck is a thing you remember to boot.
+- **P1 · Hold-PTT** (orb + key) — needs daemon ptt.press/release.
+- **P1 · OS notification on blocked/needs-you** — parked from herdr;
+  without it a blocked agent waits until you happen to look.
+- **P1 · Annotations are write-only in the UI** — finding.update
+  exists daemon-side; no edit affordance in the dock.
+- **P2 · Reviewer comforts** — syntax highlighting, j/k + mark-
+  reviewed, reply-on-finding from the dock.
+- **P2 · Detach uses confirm(); policy says undo-toast.** Reconnect
+  countdown missing. Group rmeta cosmetic.
+- **P3 · Theme/light, settings help copy, panel reset** (U3).
+
 ## Journal
 
 - **2026-07-07 (Codex /xai review of U2c+U2d applied — 5 fixed, 0
