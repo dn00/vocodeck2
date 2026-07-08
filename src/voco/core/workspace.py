@@ -151,6 +151,10 @@ class Workspace:
     # U2a: GitHub links {pr?: {number, url?, title?}, issue?: {...}} —
     # context only (rev 5); gh is optional, absence is not an error.
     links: dict[str, Any] = field(default_factory=dict)
+    # B1c: local git facts {dirty, staged, unstaged, untracked, ahead,
+    # behind} — TRANSIENT display state (never persisted; the live-git
+    # tick recomputes it). None = unknown.
+    git: dict[str, Any] | None = None
     pages: dict[str, Page] = field(default_factory=dict)
     findings: dict[str, Finding] = field(default_factory=dict)
     asks: dict[str, Ask] = field(default_factory=dict)
@@ -212,6 +216,7 @@ class Workspace:
             "branch": self.branch,
             "common_dir": self.common_dir,
             "links": self.links,
+            "git": self.git,
             "pages": [p.meta() for p in self.pages.values()],
             "finding_counts": self.finding_counts(),
             # Unanswered asks ride the snapshot so unvisited rail rows count
@@ -358,6 +363,7 @@ class WorkspaceStore:
                 "branch": ws.branch,
                 "common_dir": ws.common_dir,
                 "links": ws.links,
+                "git": ws.git,
                 "pages": len(ws.pages),
             },
         )
@@ -395,6 +401,15 @@ class WorkspaceStore:
         if changed:
             self._emit_updated(ws)
         return ws
+
+    def set_git(self, key: str, status: dict[str, Any] | None) -> None:
+        """B1c: refresh local git facts; an unchanged status is a true
+        no-op (the live tick calls this every few seconds)."""
+        ws = self._spaces.get(key)
+        if ws is None or ws.git == status:
+            return
+        ws.git = status
+        self._emit_updated(ws)
 
     # ---- lookups ------------------------------------------------------------
 

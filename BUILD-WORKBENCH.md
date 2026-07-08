@@ -453,6 +453,31 @@ REMAINING GAPS (the honest list, by size):
 
 ## Journal
 
+- **2026-07-08 (B1c SHIPPED — rail git status + file viewer; lock race
+  KILLED at the root)** — (1) New `adapters/gitstatus.py` (concept from
+  the reference's gitstatus.mjs, split on voco's seams: gh-side facts
+  already ride LINKS; this is the LOCAL half): porcelain-v2 parse →
+  {dirty, staged, unstaged, untracked, ahead, behind}, degrade-to-None.
+  `Workspace.git` is TRANSIENT display state (never persisted); rides
+  meta/updated; `set_git` converges. Refreshed on workspace.open + the
+  live-git tick. Rail work rows show the cluster (±n ?n ↑a↓b, nonzero
+  facts only, tooltip spells it out) — the user's missing "git info".
+  (2) File viewer: `workspace.files` command (git ls-files, capped
+  5000) + confined `/v1/file` GET (fd-based confinement + caps reused;
+  wb-token gated; escape attempts 404 — verified live). Client: "files"
+  pseudo-page per work row → filter box (client-local state, agent
+  churn can't rebuild it mid-typing — fingerprinted separately) →
+  source view with ← back. View-only by design; file annotation waits
+  for demand. (3) The restart lock race is DEAD at the root: shutdown
+  now flushes manifests + releases the lock RIGHT AFTER the server
+  closes and mutation tasks cancel — BEFORE the >10s audio/model
+  teardown that was holding it (four losses today); boot retries 6s
+  (manifest.acquire(wait_s)). Proven live: 1-second kill-restart, zero
+  lock errors. Gates: 368 pytest, mypy (47 files), ruff, tsc; e2e: git
+  facts on the demo workspace, file list + confined read + 404 escape.
+  PROTOCOL 31 commands. NEXT: B1b (html pages) awaits its slice; then
+  B2 loops (asks in dock, autostart, PTT, notifications, edit
+  annotation).
 - **2026-07-08 (Codex /xai review of B0+B2-16+B1a applied — 2 blockers
   + 5 warnings fixed, 1 accepted risk)** — (B1) worktree diffs now
   include UNTRACKED files (each vs /dev/null, bounded at 200, --no-index

@@ -265,6 +265,7 @@ function workRow(ws, agents) {
       ...linkChips(ws),
       flaggedChip(ws)),
     h("div", { class: "wr-sub" },
+      gitCluster(ws),
       single ? inlineAgent(single)
         : h("span", { class: "wr-note" }, agents.length
           // state word rides the note: state is never color-only (a11y)
@@ -334,6 +335,24 @@ function flaggedChip(ws) {
   return open ? h("span", { class: "chip amber" }, open + " flagged") : "";
 }
 
+/** B1c: the work row's local git facts — only nonzero truths render.
+ * ± staged+unstaged · ?untracked · ↑ahead ↓behind vs upstream. */
+function gitCluster(ws) {
+  const g = ws.git;
+  if (!g) return "";
+  const bits = [];
+  const changed = (g.staged || 0) + (g.unstaged || 0);
+  if (changed) bits.push("±" + changed);
+  if (g.untracked) bits.push("?" + g.untracked);
+  if (g.ahead) bits.push("↑" + g.ahead);
+  if (g.behind) bits.push("↓" + g.behind);
+  if (!bits.length) return "";
+  return h("span", { class: "wr-git", title:
+    `${g.staged} staged · ${g.unstaged} unstaged · ${g.untracked} untracked`
+    + (g.ahead != null ? ` · ${g.ahead} ahead ${g.behind} behind upstream` : "") },
+    bits.join(" "));
+}
+
 function linkChip(kind, link) {
   const chip = h("span", {
     class: "link-chip" + (link.url ? " go" : ""),
@@ -359,6 +378,11 @@ function pagesTree(ws) {
     class: "page-row" + (store.selectedPage == null ? " sel" : ""),
     onclick: (e) => { e.stopPropagation(); store.selectPage(null); } },
     h("span", { class: "picon" }, "◈"), h("span", {}, "overview")));
+  if (ws && ws.kind === "workspace")
+    tree.append(h("div", {
+      class: "page-row" + (store.selectedPage === "__files__" ? " sel" : ""),
+      onclick: (e) => { e.stopPropagation(); store.selectPage("__files__"); } },
+      h("span", { class: "picon" }, "▤"), h("span", {}, "files")));
   const pages = ws
     ? ws.pages.filter((p) => !p.closed)
       .sort((a, b) => (a.pinned ? 0 : 1) - (b.pinned ? 0 : 1)
@@ -438,6 +462,12 @@ function workFingerprint() {
   const page = pages.find((p) => p.page_id === store.selectedPage);
   const parts = [store.selectedWorkspace, store.selectedPage,
     store.connected ? 1 : 0];
+  if (store.selectedPage === "__files__" && ws) {
+    // the file browser is client-local state — agent churn must not
+    // rebuild it (the filter box would lose focus mid-typing)
+    parts.push("files", fstate(ws.key).path);
+    return parts.join("|");
+  }
   if (page) {
     parts.push(page.rev, page.title);
     // findings shape the diff's marks/chips — only THIS page's matter
@@ -478,11 +508,13 @@ function renderWork(force = false) {
   }
   const pages = ws ? ws.pages.filter((p) => !p.closed) : [];
   const page = pages.find((p) => p.page_id === store.selectedPage);
+  const isFiles = store.selectedPage === "__files__" && ws
+    && ws.kind === "workspace";
   const crumb = h("div", { class: "crumb" });
   crumb.append(
     h("span", { class: "crumb-who" }, ws ? workLabel(ws) : (agent ? agent.name : "")),
     h("span", { class: "sep" }, " / "),
-    h("span", {}, page ? page.title : "overview"));
+    h("span", {}, isFiles ? "files" : page ? page.title : "overview"));
   if (page && page.rev > 1)
     crumb.append(h("span", { class: "sep" }, " · "),
       h("span", { class: "micro rev",
@@ -501,11 +533,84 @@ function renderWork(force = false) {
   view.addEventListener("scroll",
     () => scrollMemo.set(renderedKey, view.scrollTop), { passive: true });
   work.append(view);
+  if (isFiles) { renderFilesView(view, ws); return; }
   if (page) { renderPage(view, page, srnote, actions); return; }
   if (agent) { renderAgentCard(view, agent, ws); return; }
   if (ws) { renderWorkCard(view, ws); return; }
   view.classList.add("empty");
   view.append(h("div", { class: "empty-note" }, "no pages here yet"));
+}
+
+// ---- files (B1c): tracked-file browser + confined source view -----------------
+const filesState = new Map(); // wsKey -> {path, filter, list, truncated}
+function fstate(wsKey) {
+  if (!filesState.has(wsKey))
+    filesState.set(wsKey, { path: null, filter: "", list: null, truncated: 0 });
+  return filesState.get(wsKey);
+}
+
+async function renderFilesView(view, ws) {
+  const st = fstate(ws.key);
+  if (st.path) return renderFileSource(view, ws, st);
+  if (!st.list) {
+    view.textContent = "…";
+    try {
+      const r = await bus.command("workspace.files", { workspace: ws.key });
+      st.list = r.files || [];
+      st.truncated = r.truncated || 0;
+    } catch (e) {
+      view.textContent = "files unavailable: " + errMsg(e);
+      return;
+    }
+  }
+  view.replaceChildren();
+  const filter = /** @type {HTMLInputElement} */ (h("input", {
+    class: "file-filter", type: "text",
+    placeholder: `filter ${st.list.length} tracked files…` }));
+  filter.value = st.filter;
+  const listBox = h("div", { class: "file-list" });
+  const renderList = () => {
+    listBox.replaceChildren();
+    const q = st.filter.toLowerCase();
+    const hits = st.list.filter((f) => f.toLowerCase().includes(q));
+    for (const f of hits.slice(0, 500))
+      listBox.append(h("div", { class: "file-row",
+        onclick: () => { st.path = f; renderWork(true); } }, f));
+    if (hits.length > 500)
+      listBox.append(h("div", { class: "empty-note" },
+        `+${hits.length - 500} more — narrow the filter`));
+    if (!hits.length)
+      listBox.append(h("div", { class: "empty-note" }, "no matches"));
+  };
+  filter.addEventListener("input", () => { st.filter = filter.value; renderList(); });
+  renderList();
+  view.append(filter, listBox);
+  if (st.truncated)
+    view.append(h("div", { class: "micro" },
+      `${st.truncated} more file(s) beyond the listing cap`));
+}
+
+async function renderFileSource(view, ws, st) {
+  view.textContent = "…";
+  const back = () => { st.path = null; renderWork(true); };
+  try {
+    const resp = await fetch(
+      `/v1/file?workspace=${encodeURIComponent(ws.key)}`
+      + `&path=${encodeURIComponent(st.path)}`,
+      { headers: { "x-voco-wb": (window.__VOCO__ || {}).wb || "" } });
+    if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
+    const body = await resp.json();
+    view.replaceChildren(
+      h("div", { class: "file-head" },
+        h("button", { class: "whbtn", onclick: back }, "← files"),
+        h("span", { class: "mono" }, st.path)),
+      h("pre", { class: "file-src" }, body.content));
+  } catch (e) {
+    view.replaceChildren(
+      h("div", { class: "file-head" },
+        h("button", { class: "whbtn", onclick: back }, "← files")),
+      h("div", { class: "empty-note" }, "could not read: " + errMsg(e)));
+  }
 }
 
 /** Scroll WITHIN the center view only — scrollIntoView walks every

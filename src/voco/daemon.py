@@ -687,6 +687,8 @@ class Daemon:
             return await self._page_publish(payload)
         if cmd == "workspace.link":
             return await self._workspace_link(payload)
+        if cmd == "workspace.files":
+            return await self._workspace_files(payload)
         if cmd == "attach.snippet":
             return self._attach_snippet(payload)
         if cmd == "session.transcript":
@@ -754,6 +756,11 @@ class Daemon:
                 "branch": facts.get("branch"),
                 "common_dir": facts.get("common_dir"),
             }
+        )
+        from voco.adapters.gitstatus import git_status
+
+        self.workspaces.set_git(
+            ws.key, await self._run_blocking(lambda: git_status(ws.root))
         )
         return {
             "workspace": ws.key,
@@ -859,6 +866,30 @@ class Daemon:
                 if fill:
                     self.workspaces.set_links(key, fill)
         return {"workspace": key, "links": ws.links}
+
+    async def _workspace_files(self, payload: dict) -> dict:
+        """B1c file viewer: the workspace's tracked files (git ls-files),
+        capped — the client filters locally, the source view reads each
+        file through the confined /v1/file route."""
+        from voco.adapters.diffsource import _default_runner
+
+        key = str(payload.get("workspace", ""))
+        ws = self.workspaces.get(key)
+        if ws is None:
+            raise ValueError(f"unknown workspace: {key}")
+        if ws.kind == "sessionspace":
+            raise ValueError(f"{key} has no checkout; no tracked files")
+        root = ws.root
+        r = await self._run_blocking(lambda: _default_runner(["git", "ls-files"], root))
+        if r.returncode != 0:
+            raise ValueError(f"git ls-files failed in {root!r}: {r.stderr.strip()}")
+        files = r.stdout.splitlines()
+        cap = 5000
+        return {
+            "workspace": key,
+            "files": files[:cap],
+            "truncated": max(0, len(files) - cap),
+        }
 
     def _attach_snippet(self, payload: dict) -> dict:
         """DESIGN-DECK rev 5 (U2d server half): the paste-ready attach
@@ -1258,6 +1289,8 @@ class Daemon:
         import socket as _socket
 
         host = _socket.gethostname().split(".")[0]
+        from voco.adapters.gitstatus import git_status
+
         while True:
             await asyncio.sleep(interval)
             for ws in self.workspaces.all():
@@ -1265,6 +1298,11 @@ class Daemon:
                     continue  # workspace.live {live: false}
                 if ws.host != host or ws.kind != "workspace":
                     continue  # a remote disk is not ours to resolve
+                # B1c: the rail's git facts ride the same tick; set_git
+                # converges, so an unchanged status emits nothing.
+                root = ws.root
+                st = await self._run_blocking(lambda r=root: git_status(r))
+                self.workspaces.set_git(ws.key, st)
                 for page in list(ws.pages.values()):
                     if page.type != "diff" or page.closed:
                         continue
@@ -1432,8 +1470,6 @@ class Daemon:
             # cleanly), then close the server, then the audio shell.
             await self.bridge.shutdown()
             await runner.cleanup()
-            if self.voice is not None:
-                self.voice.stop()
             if self._watcher_task is not None:
                 self._watcher_task.cancel()
             if self._live_git_task is not None:
@@ -1442,6 +1478,17 @@ class Daemon:
                 self._state_save_task.cancel()
             if self._manifest_save_task is not None:
                 self._manifest_save_task.cancel()
+            if self._manifest_locked:
+                # Server closed + mutation tasks cancelled: nothing can
+                # touch the store anymore — flush and RELEASE THE LOCK
+                # NOW, before the audio/model teardown below (it can take
+                # >10s, and a restarting daemon is waiting on this lock —
+                # the race cost us persistence four times on 2026-07-08).
+                self._dirty_workspaces.update(self.workspaces.dirty_keys())
+                self._flush_manifests()
+                self._manifest.release()
+            if self.voice is not None:
+                self.voice.stop()
             try:
                 self._state.save(self.registry.dump())  # final synchronous save
             except Exception as e:
@@ -1449,11 +1496,6 @@ class Daemon:
             if self._pty is not None:
                 # v1: pty terminals die with the daemon (§5, honest).
                 self._pty.shutdown()
-            if self._manifest_locked:
-                # Flush every workspace touched this run, then drop the lock.
-                self._dirty_workspaces.update(self.workspaces.dirty_keys())
-                self._flush_manifests()
-                self._manifest.release()
             print("voco-d: shut down cleanly")
 
 

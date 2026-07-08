@@ -13,6 +13,8 @@
  * @typedef {{key:string, host:string, root:string, name:string, kind:string,
  *   repo:?string, branch:?string, common_dir:?string,
  *   links?:{pr?:GhLink, issue?:GhLink},
+ *   git?:?{dirty:boolean, staged:number, unstaged:number,
+ *     untracked:number, ahead:?number, behind:?number},
  *   finding_counts?:Record<string, number>, open_asks?:number,
  *   pages:PageMeta[]}} Workspace
  * @typedef {{page_id:string, type:string, ref:string, title:string,
@@ -112,7 +114,7 @@ export class Store {
         const ex = this.workspaces.get(p.key);
         if (ex) Object.assign(ex, { repo: p.repo, branch: p.branch,
           common_dir: p.common_dir, name: p.name,
-          links: p.links ?? ex.links });
+          links: p.links ?? ex.links, git: p.git ?? ex.git });
         else this.workspaces.set(p.key,
           { ...p, pages: [] });
         if (!this.selectedWorkspace) this.selectWorkspace(p.key);

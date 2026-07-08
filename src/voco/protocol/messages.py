@@ -95,6 +95,8 @@ COMMAND_TYPES = {
     "attach.snippet",
     # U2c: human status path — undo-over-confirm needs re-open.
     "finding.status",
+    # B1c: the file viewer's tracked-file list.
+    "workspace.files",
     "page.close",
     "page.reopen",
     "finding.list",

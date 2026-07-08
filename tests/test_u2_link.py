@@ -183,6 +183,84 @@ async def test_page_publish_accepts_worktree_source(daemon, tmp_path):
     assert out["ok"] is True and out["rev"] == 1
 
 
+# ---- git status (B1c) ---------------------------------------------------------
+
+
+def test_git_status_parses_porcelain_v2():
+    from voco.adapters.gitstatus import git_status
+
+    porcelain = "\n".join(
+        [
+            "# branch.oid deadbeef",
+            "# branch.head workbench-strip",
+            "# branch.upstream origin/workbench-strip",
+            "# branch.ab +2 -1",
+            "1 M. N... 100644 100644 100644 h1 h2 staged.py",
+            "1 .M N... 100644 100644 100644 h1 h2 unstaged.py",
+            "1 MM N... 100644 100644 100644 h1 h2 both.py",
+            "2 R. N... 100644 100644 100644 h1 h2 R100 new.py\told.py",
+            "u UU N... 100644 100644 100644 100644 h1 h2 h3 conflicted.py",
+            "? brand-new.py",
+        ]
+    )
+    st = git_status("/repo", run=runner_returning(porcelain))
+    assert st == {
+        "dirty": True,
+        "staged": 3,  # M., MM, R.
+        "unstaged": 3,  # .M, MM, u
+        "untracked": 1,
+        "ahead": 2,
+        "behind": 1,
+    }
+
+
+def test_git_status_degrades_silently():
+    from voco.adapters.gitstatus import git_status
+
+    assert git_status("/repo", run=runner_returning("", code=128)) is None
+    assert git_status("", run=runner_returning("")) is None
+    # clean tree, no upstream: all-zero facts, no ahead/behind
+    st = git_status("/repo", run=runner_returning("# branch.head main\n"))
+    assert st == {
+        "dirty": False,
+        "staged": 0,
+        "unstaged": 0,
+        "untracked": 0,
+        "ahead": None,
+        "behind": None,
+    }
+
+
+def test_set_git_converges_and_rides_meta():
+    store, ws, events = make_store()
+    st = {
+        "dirty": True,
+        "staged": 1,
+        "unstaged": 0,
+        "untracked": 0,
+        "ahead": None,
+        "behind": None,
+    }
+    store.set_git(ws.key, st)
+    assert ws.meta()["git"]["dirty"] is True
+    events.clear()
+    store.set_git(ws.key, dict(st))  # unchanged: true no-op, no event
+    assert events == []
+    # git facts are transient: never persisted, restore starts unknown
+    restored = WorkspaceStore().restore_workspace(store.dump_workspace(ws))
+    assert restored is not None and restored.git is None
+
+
+async def test_workspace_files_lists_tracked(daemon, tmp_path):
+    key = await opened_key(daemon, tmp_path)
+    repo = daemon.workspaces.get(key).root
+    (subprocess.run(["git", "-C", repo, "ls-files"], capture_output=True))
+    out = await daemon._control("workspace.files", {"workspace": key})
+    assert out["truncated"] == 0 and isinstance(out["files"], list)
+    with pytest.raises(ValueError, match="unknown workspace"):
+        await daemon._control("workspace.files", {"workspace": "h:/ghost"})
+
+
 # ---- manifest lock: boot retry (restart race) --------------------------------
 
 

@@ -16,6 +16,7 @@ remote adapters resolve locally and push content instead).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import socket
@@ -66,6 +67,7 @@ def add_workbench_routes(app: web.Application, server: BridgeServer) -> None:
 
         app.on_response_prepare.append(no_cache)
     app.router.add_get("/v1/page/{page_id}", wb.page_content)
+    app.router.add_get("/v1/file", wb.file_content)
     app.router.add_get("/v1/term/{session_id}", wb.term_ws)
     app.router.add_post("/v1/bridge/page", wb.bridge_page)
     app.router.add_get("/v1/bridge/findings", wb.bridge_findings)
@@ -207,6 +209,28 @@ class WorkbenchRoutes:
         return self._server.html_response(body)
 
     # ---- page content (read on demand; snapshot carries metadata only) --------
+
+    async def file_content(self, request: web.Request) -> web.Response:
+        """B1c file viewer: read ONE tracked file, confined to the
+        workspace root (same fd-based confinement + size/binary caps as
+        doc pages). Browser origins need the wb token, like every other
+        workbench surface."""
+        self._server._check_browser_mutation(request)
+        store = self._server.workspaces
+        if store is None:
+            raise web.HTTPNotFound(text="workbench disabled")
+        ws = store.get(str(request.query.get("workspace", "")))
+        if ws is None:
+            raise web.HTTPNotFound(
+                text=f"unknown workspace: {request.query.get('workspace')!r}"
+            )
+        path = str(request.query.get("path", ""))
+        if not path:
+            raise web.HTTPBadRequest(text="path required")
+        content = await asyncio.get_running_loop().run_in_executor(
+            None, confined_read, ws.root, path
+        )
+        return web.json_response({"path": path, "content": content})
 
     async def page_content(self, request: web.Request) -> web.Response:
         store = self._server.workspaces
