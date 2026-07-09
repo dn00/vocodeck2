@@ -198,10 +198,17 @@ export class Store {
         this._staleTranscript(p.session_id);
         this._notify("transcript", "sessions");
         break;
-      case "agent.say":
+      case "agent.say": {
+        // keep the card's "last utterance" live between snapshots (mk4)
+        const s = this.sessions.get(p.session_id);
+        if (s && p.text) {
+          s.say_tail = [...(s.say_tail || []),
+            { ts: env.ts || 0, text: p.text }].slice(-5);
+        }
         this._staleTranscript(p.session_id);
-        this._notify("transcript");
+        this._notify("transcript", "sessions");
         break;
+      }
       case "speech.started":
         if (p.source === "agent")
           this.speaking = { who: p.who ?? null, text: p.text ?? null,

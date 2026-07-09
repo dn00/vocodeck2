@@ -72,16 +72,16 @@ const rail = h("div", { class: "rail" });
 const gripRail = h("div", { class: "grip", role: "separator", tabindex: "0",
   "aria-label": "resize rail" });
 const work = h("div", { class: "work" });
-const gripRack = h("div", { class: "grip", role: "separator", tabindex: "0",
-  "aria-label": "resize channel rack" });
-const rack = h("div", { class: "rack" });
-// The dock is the full-width bottom console row.
+const gripDock = h("div", { class: "grip", role: "separator", tabindex: "0",
+  "aria-label": "resize ledger" });
+// mk4: the LEDGER (annotations · transcript · asks · log) rides the
+// right column beside the work; THE DECK (agent cards) is the bottom
+// band — vocodeck, full circle.
 const dock = h("div", { class: "dock" });
-const gripConsole = h("div", { class: "grip h", role: "separator",
-  tabindex: "0", "aria-label": "resize console" });
+const deckEl = h("div", { class: "deckrow" });
 const statusline = h("div", { class: "statusline" });
-const body = h("div", { class: "deck-body" }, rail, gripRail, work, gripRack, rack);
-app.append(presence, body, gripConsole, dock, statusline);
+const body = h("div", { class: "deck-body" }, rail, gripRail, work, gripDock, dock);
+app.append(presence, body, deckEl, statusline);
 
 // ---- toasts (policy: errors persist w/ dismiss; successes fade) ---------------
 function toast(msg, sticky = false) {
@@ -150,6 +150,9 @@ function selectedAgent() {
 // herdr borrow: blocked is loud — attention-first ordering.
 const STATE_ORDER = { blocked: 0, working: 1, listening: 2, idle: 3, stale: 4, gone: 5 };
 const stateOf = (s) => s.display_state || s.state || "idle";
+// "listening" renders as "ready" (audit): the state means the agent is
+// parked at its listen call — the word listening belongs to the mic.
+const stateWord = (st) => (st === "listening" ? "ready" : st);
 
 function dot(s) {
   const state = stateOf(s);
@@ -378,7 +381,7 @@ function agentRow(s, bare = false) {
       store.activeSession === s.session_id
         ? h("span", { class: "hot", title: "holds the mic" }, "MIC · ") : "",
       s.queued ? h("span", { class: "hot" }, "q" + s.queued + " · ") : "",
-      h("span", { class: "ar-state " + stateOf(s) }, stateOf(s))),
+      h("span", { class: "ar-state " + stateOf(s) }, stateWord(stateOf(s)))),
     h("span", { class: "rail-x", title: "forget this session",
       onclick: (e) => { e.stopPropagation(); detachAgent(s); } }, "✕"));
   if (bare && sel) {
@@ -921,7 +924,7 @@ function renderAgentCard(view, s, ws) {
     store.activeSession === s.session_id
       ? h("span", { class: "agent-card-active" }, "⚡ holds the mic") : ""));
   card.append(h("div", { class: "agent-card-meta" },
-    kv("state", stateOf(s)),
+    kv("state", stateWord(stateOf(s))),
     kv("queued", String(s.queued || 0)),
     kv("capabilities", (s.capabilities || []).join(" ") || "?")));
   if (s.screen_markdown && s.screen_markdown.trim()) {
@@ -1339,18 +1342,20 @@ function renderDock() {
     tab("annotations", openF.length, false),
     tab("transcript", null, false),
     tab("asks", openAsks, true), // amber when a question is outstanding
-    tab("log", null, false),
-    h("div", { class: "cfoot" },
-      h("span", { title:
-        "open annotations and asks reach this work's agents automatically"
-        + " — no send step" },
-        h("b", {}, openF.length + " open"),
-        blockingN ? ` · ${blockingN} blocking` : ""),
-      h("span", {}, "scope: " + scopeTxt))));
+    tab("log", null, false)));
   const body = h("div", { class: "cbody" });
   body.addEventListener("scroll",
     () => dockScrollMemo.set(memoKey, body.scrollTop), { passive: true });
   dock.append(body);
+  // footer pinned under the scroll body (mk4 ledger)
+  const foot = h("div", { class: "cfoot" },
+    h("span", { title:
+      "open annotations and asks reach this work's agents automatically"
+      + " — no send step" },
+      h("b", {}, openF.length + " open"),
+      blockingN ? ` · ${blockingN} blocking` : ""),
+    h("span", { class: "cfoot-scope" }, "scope: " + scopeTxt));
+  dock.append(foot);
 
   if (dockTab === "transcript") {
     if (agent) {
@@ -1390,52 +1395,46 @@ function renderDock() {
     return;
   }
 
-  // annotations: the mk3 table -------------------------------------------------
+  // annotations: mk4 ledger rows (tall panel beside the work) -------------------
   if (!findings.length) {
     body.append(h("div", { class: "empty-note" }, annotationsEmptyText(ws)));
     body.scrollTop = keep;
     return;
   }
   const kindCls = { concern: "k-c", question: "k-q", nit: "k-n" };
-  const table = h("table", {},
-    h("tr", {},
-      h("th", { style: "width:110px" }, "KIND"),
-      h("th", {}, "TEXT"),
-      h("th", { style: "width:240px" }, "ANCHOR"),
-      h("th", { style: "width:30px" }, "")));
   for (const f of findings) {
     const done = f.status !== "open";
-    const kindCell = h("td", { class: "kind " + (kindCls[f.kind] || "k-n") },
-      f.kind, f.blocking ? h("span", { class: "blk" }, " ⚑") : "");
-    if (done)
-      kindCell.append(h("div", { class: "fstate s-" + f.status }, f.status));
-    const textCell = h("td", { class: "txt" }, f.text || "");
-    if (f.answer)
-      textCell.append(h("div", { class: "freply" },
-        h("b", {}, "agent"), " — " + f.answer));
-    if (f.note)
-      textCell.append(h("div", { class: "freply" }, f.note));
-    if (f.commit) // audit #4: the fixing commit, when an agent stamped it
-      textCell.append(h("div", { class: "freply" },
-        "✓ fixed in " + String(f.commit).slice(0, 10)));
-    table.append(h("tr", { class: done ? "done" : "",
+    const textBox = h("div", { class: "ftext" }, f.text || "");
+    const item = h("div", { class: "fitem" + (done ? " done" : ""),
       onclick: (e) => {
         // an in-place edit owns the row — clicks in it never reveal
-        if (/** @type {Element} */ (e.target).closest(".edit-ta, .editor-actions"))
-          return;
+        if (/** @type {Element} */ (e.target)
+          .closest(".edit-ta, .editor-actions, .fops")) return;
         revealFinding(f);
       } },
-      kindCell, textCell,
-      h("td", { class: "loc" }, anchorLabel(f)),
-      h("td", { class: "x" }, ...(f.status === "open" ? [
-        h("span", { title: "edit",
-          onclick: (e) => { e.stopPropagation(); editFindingInline(textCell, wsKey, f); } },
-        "✎"), " ",
-        h("span", { title: "withdraw (undoable)",
-          onclick: (e) => { e.stopPropagation(); withdrawFinding(wsKey, f); } },
-        "✕")] : []))));
+      h("div", { class: "fh" },
+        h("span", { class: kindCls[f.kind] || "k-n" }, f.kind),
+        f.blocking ? h("span", { class: "blk" }, "⚑ blocking") : "",
+        done ? h("span", { class: "fstate s-" + f.status }, f.status) : "",
+        h("span", { class: "fops" }, ...(f.status === "open" ? [
+          h("span", { title: "edit",
+            onclick: (e) => { e.stopPropagation();
+              editFindingInline(textBox, wsKey, f); } }, "✎"), " ",
+          h("span", { title: "withdraw (undoable)",
+            onclick: (e) => { e.stopPropagation();
+              withdrawFinding(wsKey, f); } }, "✕")] : []))),
+      textBox);
+    if (f.answer)
+      item.append(h("div", { class: "freply" },
+        h("b", {}, "agent"), " — " + f.answer));
+    if (f.note)
+      item.append(h("div", { class: "freply" }, f.note));
+    if (f.commit) // audit #4: the fixing commit, when an agent stamped it
+      item.append(h("div", { class: "freply" },
+        "✓ fixed in " + String(f.commit).slice(0, 10)));
+    item.append(h("div", { class: "floc" }, anchorLabel(f)));
+    body.append(item);
   }
-  body.append(table);
   body.scrollTop = keep;
 }
 
@@ -1603,7 +1602,7 @@ function renderStrip() {
 }
 
 function renderRackPanel() {
-  renderRack(rack, store, {
+  renderRack(deckEl, store, {
     command: (cmd, payload) => bus.command(cmd, payload),
     selectAgent,
     focusAgent,
@@ -1645,7 +1644,7 @@ function renderStatus() {
     h("span", {},
       counts.blocked ? h("span", { class: "bad" }, counts.blocked + " blocked · ") : "",
       h("span", {}, h("b", {}, String(counts.working)), " working · ",
-        h("b", {}, String(counts.listening)), " listening")),
+        h("b", {}, String(counts.listening)), " ready")),
     openCount ? h("span", { class: "amber sc", title: "open the annotations tab",
       onclick: () => setDockTab("annotations") }, openCount + " ann") : "",
     statusClock);
@@ -1655,6 +1654,7 @@ function renderStatus() {
 function renderConn() {
   body.classList.toggle("offline", !store.connected);
   dock.classList.toggle("offline", !store.connected);
+  deckEl.classList.toggle("offline", !store.connected);
   renderStrip(); renderRackPanel(); renderStatus();
   if (store.connected) {
     loadFindings(store.selectedWorkspace || "");
@@ -1681,7 +1681,7 @@ function paletteItems() {
       run: () => { selectWork(ws); store.selectPage("__files__"); } });
   }
   for (const s of store.sessions.values()) {
-    items.push({ label: "view: " + s.name, hint: stateOf(s),
+    items.push({ label: "view: " + s.name, hint: stateWord(stateOf(s)),
       run: () => focusAgent(s) });
     items.push({ label: "mic → " + s.name, hint: "patch",
       run: () => selectAgent(s) });
@@ -1767,9 +1767,7 @@ function grip(el, cssVar, min, max, invert, storeKey, opts = {}) {
   });
 }
 grip(gripRail, "--railw", 180, 400, false, "voco.railw");
-grip(gripRack, "--rackw", 180, 320, true, "voco.rackw");
-grip(gripConsole, "--dockh", 120, 420, true, "voco.dockh",
-  { vertical: true, target: document.documentElement });
+grip(gripDock, "--dockw", 260, 520, true, "voco.dockw");
 
 // ---- wire subscriptions -----------------------------------------------------
 store.subscribe("workspaces", () => { renderRail(); renderWork(); renderDock(); });

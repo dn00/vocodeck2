@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CONSOLE mk4 — THE DECK (agent cards) + right ledger</title>
+<style>
+  /* ============ mk4 proposal — the swap ============
+     Right panel  = the LEDGER (annotations · transcript · asks · log):
+                    tall content beside the work it reviews.
+     Bottom band  = THE DECK: agents as cards laid left-to-right like a
+                    real console's channel strips. vocodeck, full circle.
+     The deck has TWO heights: expanded cards (~150px, full machinery)
+     and MINIMIZED (~44px: LED · name · MIC · queue chips only) via the
+     — / ▢ toggle in its header. Tokens unchanged from mk3 (index5). */
+  :root {
+    --b0:#131417; --b1:#17181c; --b2:#1c1e23; --b3:#24262c; --hov:#20232a;
+    --line:#26282e; --line2:#33363e;
+    --t0:#d6d9de; --t1:#9aa0a9; --t2:#5f646d;
+    --sel:#3d63804d; --sel-edge:#6ea3d8;
+    --grn:#43b581; --amber:#d9a334; --red:#d95c4f; --blu:#6ea3d8;
+    --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0e0f11;color:var(--t0);font:12px/1.4 var(--sans)}
+  .note{max-width:1340px;margin:26px auto 12px;padding:0 20px}
+  .note h1{font:700 14px var(--mono);letter-spacing:.04em}
+  .note h1 span{color:var(--blu)}
+  .note p{color:var(--t1);margin-top:6px;max-width:78ch;font-size:13px}
+  .note a{color:var(--blu)}
+  /* ---------- frame ---------- */
+  .deckf{width:1340px;height:820px;margin:14px auto;border:1px solid var(--line2);
+    display:grid;grid-template-rows:36px 1fr 150px 24px;background:var(--b0)}
+  .mid{display:grid;grid-template-columns:266px 1fr 340px;min-height:0}
+  /* ---------- command bar (unchanged) ---------- */
+  .cmd{display:flex;align-items:stretch;background:var(--b1);
+    border-bottom:1px solid var(--line);font:11px var(--mono)}
+  .cmd .cell{display:flex;align-items:center;gap:8px;padding:0 12px;
+    border-right:1px solid var(--line);color:var(--t1)}
+  .cmd .app{color:var(--t0);font-weight:700}
+  .cmd .ok{color:var(--grn)}
+  .prompt{flex:1;display:flex;align-items:center;gap:8px;padding:0 12px;
+    font:12px var(--mono);color:var(--t2)}
+  .prompt .p{color:var(--blu)}
+  .prompt .route{margin-left:auto;color:var(--t2)}
+  .prompt .route b{color:var(--amber);font-weight:400}
+  .cmd .keys{border-left:1px solid var(--line);border-right:none;color:var(--t2)}
+  .kbd{border:1px solid var(--line2);padding:0 5px;color:var(--t1);
+    background:var(--b2);font-size:10px}
+  /* ---------- fleet tree (unchanged, abbreviated) ---------- */
+  .tree{background:var(--b1);border-right:1px solid var(--line);overflow:auto;
+    font:12px var(--mono);padding-bottom:10px}
+  .thead{padding:7px 12px;font:10px var(--mono);color:var(--t2);letter-spacing:.12em}
+  .grp{display:flex;align-items:baseline;gap:7px;padding:9px 12px 3px;
+    color:var(--t1);font-weight:700}
+  .grp .ops{margin-left:auto;color:var(--t2);font-weight:400;font-size:10px}
+  .tw{color:var(--t2);width:10px;flex:none;font-weight:400}
+  .glyph{color:var(--t2);width:12px;flex:none;text-align:center}
+  .trow{display:flex;align-items:center;gap:7px;padding:3px 12px;cursor:pointer;
+    white-space:nowrap}
+  .trow:hover{background:var(--hov)}
+  .trow.sel{background:var(--sel);box-shadow:inset 2px 0 var(--sel-edge)}
+  .trow .lbl{color:var(--t0)} .trow .lbl.dim{color:var(--t1)}
+  .trow .meta{margin-left:auto;color:var(--t2);font-size:10.5px}
+  .meta .b{color:var(--blu)} .meta .g{color:var(--grn)} .meta .hot{color:var(--amber)}
+  .d1{padding-left:26px} .d2{padding-left:40px}
+  .led{width:6px;height:6px;flex:none}
+  .led.on{background:var(--grn)} .led.warn{background:var(--amber)}
+  /* ---------- canvas (unchanged, doc hero) ---------- */
+  .canvas{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--b0)}
+  .tabbar{display:flex;align-items:center;background:var(--b1);
+    border-bottom:1px solid var(--line);font:11px var(--mono)}
+  .tab{display:flex;gap:7px;align-items:center;padding:7px 14px;color:var(--t1)}
+  .tab .g{color:var(--t2)}
+  .tab.on{background:var(--b0);color:var(--t0);box-shadow:inset 0 2px var(--sel-edge)}
+  .pgbar{display:flex;gap:14px;align-items:center;padding:5px 14px;
+    border-bottom:1px solid var(--line);font:10.5px var(--mono);color:var(--t2)}
+  .pgbar b{color:var(--t1);font-weight:400}
+  .pgbar .hint{margin-left:auto}
+  .view{overflow:auto;flex:1;padding:20px 22px}
+  .doc{max-width:660px;font:13.5px/1.7 var(--sans)}
+  .doc h2{font:700 16px var(--sans);padding-bottom:8px;margin-bottom:12px;
+    border-bottom:1px solid var(--line)}
+  .doc ul{list-style:none;margin-bottom:14px}
+  .doc li{padding:3px 8px;display:flex;gap:8px;align-items:baseline}
+  .doc li::before{content:"–";color:var(--t2)}
+  .ann-hl{background:#d9a3341f;box-shadow:inset 0 -1px var(--amber)}
+  .mk{font:10px var(--mono);color:#131417;background:var(--amber);padding:0 4px;margin-left:6px}
+  .selected{background:var(--sel);box-shadow:inset 0 0 0 1px var(--sel-edge)}
+  .editor{width:480px;margin:10px 0;border:1px solid var(--line2);background:var(--b1)}
+  .ed-bar{display:flex;gap:10px;padding:6px 10px;background:var(--b2);
+    font:10.5px var(--mono);color:var(--t2)}
+  .ed-bar b{color:var(--t1);font-weight:400}
+  .editor textarea{width:100%;height:52px;background:var(--b0);border:none;resize:none;
+    padding:8px 10px;font:12px/1.6 var(--mono);color:var(--t0)}
+  .ed-ctl{display:flex;align-items:center;gap:12px;padding:7px 10px;font:11px var(--mono)}
+  .seg{display:flex;background:var(--b0)}
+  .seg span{padding:4px 12px;color:var(--t1)}
+  .seg span.on{background:var(--b3);color:var(--t0);box-shadow:inset 0 -2px var(--red)}
+  .ed-go{margin-left:auto;display:flex;gap:10px;align-items:center;color:var(--t2)}
+  .ed-go .add{background:var(--b3);color:var(--t0);padding:4px 12px;font-weight:700}
+  /* ---------- RIGHT: the ledger ---------- */
+  .ledger{background:var(--b1);border-left:1px solid var(--line);display:flex;
+    flex-direction:column;min-height:0}
+  .ltabs{display:flex;align-items:center;font:11px var(--mono);flex:none}
+  .ltab{padding:7px 12px;color:var(--t1);cursor:pointer}
+  .ltab.on{background:var(--b0);color:var(--t0);box-shadow:inset 0 2px var(--sel-edge)}
+  .ltab .n{color:var(--t2)} .ltab .n.hot{color:var(--amber)}
+  .lbody{flex:1;overflow-y:auto;background:var(--b0)}
+  .fitem{padding:9px 14px;border-bottom:1px solid #1a1c21;cursor:pointer}
+  .fitem:hover{background:var(--hov)}
+  .fh{display:flex;gap:8px;align-items:baseline;font:10px var(--mono);
+    letter-spacing:.06em;text-transform:uppercase}
+  .k-c{color:var(--red)} .k-q{color:var(--blu)} .k-n{color:var(--t2)}
+  .fh .blk{color:var(--amber)}
+  .fh .ops{margin-left:auto;color:var(--t2);visibility:hidden;letter-spacing:0}
+  .fitem:hover .ops{visibility:visible}
+  .ftext{margin-top:4px;font:12px/1.5 var(--sans);color:var(--t0)}
+  .floc{margin-top:4px;font:10.5px var(--mono);color:var(--t2)}
+  .freply{margin-top:5px;padding-left:9px;box-shadow:inset 1px 0 var(--line2);
+    font:11.5px var(--sans);color:var(--t1)}
+  .freply b{color:var(--blu);font-size:10px}
+  .fitem.done .ftext{text-decoration:line-through;color:var(--t2)}
+  .lfoot{padding:6px 14px;border-top:1px solid var(--line);font:10.5px var(--mono);
+    color:var(--t2);display:flex;gap:14px;flex:none}
+  .lfoot b{color:var(--t1);font-weight:400}
+  /* ---------- BOTTOM: THE DECK (agent cards) ---------- */
+  .deck{border-top:1px solid var(--line2);background:var(--b1);display:flex;
+    flex-direction:column;min-height:0}
+  .dhead{display:flex;align-items:center;gap:14px;padding:4px 12px 0;
+    font:10px var(--mono);color:var(--t2);letter-spacing:.12em;flex:none}
+  .dhead .tgl{margin-left:auto;letter-spacing:0;cursor:pointer;color:var(--t2);
+    border:1px solid var(--line2);padding:0 6px;background:var(--b2)}
+  .cards{display:flex;gap:8px;padding:6px 12px 10px;overflow-x:auto;flex:1;
+    align-items:stretch}
+  .card{width:230px;flex:none;background:var(--b2);border:1px solid var(--line);
+    padding:8px 10px;cursor:pointer;display:flex;flex-direction:column;gap:6px}
+  .card:hover{border-color:var(--line2)}
+  .card.live{border-color:var(--amber);box-shadow:inset 0 2px 0 var(--amber)}
+  .c-top{display:flex;align-items:center;gap:7px;font:12px var(--mono)}
+  .c-top .nm{color:var(--t0);font-weight:700}
+  .c-top .st{margin-left:auto;font-size:10px;color:var(--t2)}
+  .c-top .st.w{color:var(--grn)}
+  .c-mid{display:flex;align-items:center;gap:8px}
+  .patch{font:10px var(--mono);border:1px solid var(--line2);padding:2px 8px;
+    color:var(--t2);flex:none;cursor:pointer}
+  .patch.on{background:var(--amber);color:var(--b0);border-color:var(--amber);font-weight:700}
+  .meter{flex:1;height:7px;background:var(--b0);display:flex;gap:1px;padding:1px}
+  .meter i{width:4px;background:var(--grn)}
+  .meter i.a{background:var(--amber)}
+  .meter.idle i{background:var(--b3)}
+  .c-cap{font:10.5px/1.4 var(--mono);color:var(--t1);border-left:2px solid var(--amber);
+    padding-left:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .c-meta{font:10px var(--mono);color:var(--t2);display:flex;gap:10px;margin-top:auto}
+  .c-meta .q{color:var(--amber)}
+  /* master card */
+  .card.master{width:190px;background:var(--b1);border-style:dashed}
+  .m-row{display:flex;justify-content:space-between;font:10.5px var(--mono);
+    color:var(--t2)}
+  .m-row .v{color:var(--t1)} .m-row .v.hot{color:var(--amber)}
+  .hold{font:10px var(--mono);border:1px solid var(--line2);background:var(--b2);
+    color:var(--t1);text-align:center;padding:4px 0;cursor:pointer}
+  /* ---------- status ---------- */
+  .status{display:flex;gap:20px;align-items:center;background:var(--b1);
+    border-top:1px solid var(--line);font:10.5px var(--mono);color:var(--t2);
+    padding:0 14px}
+  .status .ok{color:var(--grn)} .status .mic{color:var(--amber)}
+  .status b{color:var(--t1);font-weight:400}
+  .status .r{margin-left:auto}
+  /* ---------- the MINIMIZED deck sample ---------- */
+  .minwrap{width:1340px;margin:0 auto 60px;border:1px solid var(--line2);
+    border-top:none}
+  .minlabel{padding:8px 14px;font:10px var(--mono);color:var(--t2);
+    letter-spacing:.12em;background:var(--b0)}
+  .mindeck{display:flex;align-items:center;gap:8px;background:var(--b1);
+    border-top:1px solid var(--line2);padding:6px 12px;height:44px}
+  .mindeck .dh{font:10px var(--mono);color:var(--t2);letter-spacing:.12em;flex:none}
+  .chipcard{display:flex;align-items:center;gap:7px;background:var(--b2);
+    border:1px solid var(--line);padding:4px 10px;font:11px var(--mono);
+    cursor:pointer;flex:none}
+  .chipcard.live{border-color:var(--amber)}
+  .chipcard .nm{color:var(--t0);font-weight:700}
+  .chipcard .mic{font-size:9px;background:var(--amber);color:var(--b0);
+    padding:0 4px;font-weight:700}
+  .chipcard .q{color:var(--amber);font-size:10px}
+  .chipcard .st{color:var(--t2);font-size:10px}
+  .mindeck .tgl{margin-left:auto;font:10px var(--mono);color:var(--t2);
+    border:1px solid var(--line2);padding:0 6px;background:var(--b2)}
+</style>
+</head>
+<body>
+<div class="note">
+  <h1>mk4 · <span>THE DECK</span> — agents as cards + the right ledger</h1>
+  <p>The swap: review content (annotations · transcript · asks · log) moves to a tall
+  RIGHT ledger beside the work; agents become THE DECK — cards laid left-to-right like a
+  real console's channel strips, with a pinned master card. The — toggle minimizes the
+  deck to a 44px chip strip (second frame below). Tokens unchanged from mk3.
+  <a href="index5.html">← mk3 final</a></p>
+</div>
+
+<div class="deckf">
+  <div class="cmd">
+    <div class="cell"><span class="app">voco</span><span class="ok">●</span><span>127.0.0.1:7777</span></div>
+    <div class="prompt"><span class="p">&gt;</span> say "deck …" or type
+      <span class="route">route → <b>HUGO</b></span></div>
+    <div class="cell keys"><span><span class="kbd">F13</span> ptt</span><span><span class="kbd">⌘K</span> cmd</span><span>⚙</span></div>
+  </div>
+
+  <div class="mid">
+    <!-- tree (abbreviated) -->
+    <div class="tree">
+      <div class="thead">FLEET</div>
+      <div class="grp"><span class="tw">▾</span>vocodeck2 <span class="ops">+rev +agt</span></div>
+      <div class="trow d1"><span class="tw">▾</span><span class="glyph">⌥</span><span class="lbl">workbench</span>
+        <span class="meta"><span class="b">pr#7</span> · ±3 <span class="g">↑2</span> · <span class="hot">3⚑ · ?1</span></span></div>
+      <div class="trow d2"><span class="led on"></span><span class="lbl">Hugo</span>
+        <span class="meta"><span class="hot">MIC</span> · working</span></div>
+      <div class="trow d2"><span class="glyph">◈</span><span class="lbl dim">overview</span></div>
+      <div class="trow d2"><span class="glyph">±</span><span class="lbl dim">branch</span><span class="meta">r11</span></div>
+      <div class="grp"><span class="tw">▾</span>voco-demo <span class="ops">+rev +agt</span></div>
+      <div class="trow d1 sel"><span class="tw">▾</span><span class="glyph">⌥</span><span class="lbl">workbench-strip</span>
+        <span class="meta"><span class="b">#42 pr#7</span> · <span class="hot">2⚑ · ?2</span></span></div>
+      <div class="trow d2 sel"><span class="glyph">▦</span><span class="lbl">strip status</span><span class="meta">r4</span></div>
+    </div>
+
+    <!-- canvas -->
+    <div class="canvas">
+      <div class="tabbar">
+        <div class="tab on"><span class="g">▦</span>strip status<span class="g">@r4</span></div>
+        <div class="tab"><span class="g">±</span>branch:main<span class="g">@r8</span></div>
+        <div class="tab"><span class="g">▤</span>files</div>
+        <div class="tab"><span class="g">+</span></div>
+      </div>
+      <div class="pgbar"><b>voco-demo/workbench-strip</b> · ▦ screen · rev 4 · pushed 21:58:12 by freya
+        <span class="hint">annotate: click block · select text</span></div>
+      <div class="view">
+        <div class="doc">
+          <h2>strip status</h2>
+          <ul>
+            <li><span class="ann-hl">orb states: <b>done</b></span><span class="mk">A2</span></li>
+            <li>captions: done</li>
+            <li><span class="selected">tests: 3 green</span></li>
+          </ul>
+          <div class="editor">
+            <div class="ed-bar">ANNOTATE <b>"tests: 3 green"</b> · anchors survive edits</div>
+            <textarea>3 green — but the suite gained 12 tests since r3.</textarea>
+            <div class="ed-ctl">
+              <div class="seg"><span class="on">concern</span><span>question</span><span>nit</span></div>
+              <div class="ed-go"><span>ask</span><span>cancel</span><span class="add">add ⏎</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: the ledger -->
+    <div class="ledger">
+      <div class="ltabs">
+        <div class="ltab on">annotations <span class="n">2</span></div>
+        <div class="ltab">transcript</div>
+        <div class="ltab">asks <span class="n hot">2</span></div>
+        <div class="ltab">log</div>
+      </div>
+      <div class="lbody">
+        <div class="fitem">
+          <div class="fh"><span class="k-c">concern</span><span class="blk">⚑ blocking</span>
+            <span class="ops">✎ ✕</span></div>
+          <div class="ftext">orb must reflect attention mode, not just VAD — muted should read differently from idle</div>
+          <div class="floc">± presence.mjs:4</div>
+        </div>
+        <div class="fitem">
+          <div class="fh"><span class="k-q">question</span><span class="ops">✎ ✕</span></div>
+          <div class="ftext">is "orb states: done" still true after the attention-mode rework?</div>
+          <div class="floc">▦ strip status · “orb states…”</div>
+        </div>
+        <div class="fitem done">
+          <div class="fh"><span class="k-n">nit · addressed</span></div>
+          <div class="ftext">caption quotes render straight, should be curly</div>
+          <div class="floc">± presence.mjs:31</div>
+          <div class="freply"><b>agent</b> — fixed; regression test added
+            <div style="margin-top:2px">✓ fixed in 3622102ab</div></div>
+        </div>
+      </div>
+      <div class="lfoot"><span><b>2 open</b> · 1 blocking</span><span>scope: workbench-strip</span></div>
+    </div>
+  </div>
+
+  <!-- BOTTOM: THE DECK -->
+  <div class="deck">
+    <div class="dhead">DECK · 4 <span class="tgl" title="minimize the deck">—</span></div>
+    <div class="cards">
+      <div class="card master">
+        <div class="hold">● hold to talk</div>
+        <div class="m-row"><span>attention</span><span class="v hot">ptt_only</span></div>
+        <div class="m-row"><span>duplex</span><span class="v">half</span></div>
+        <div class="m-row"><span>working / listening</span><span class="v">1 / 0</span></div>
+      </div>
+      <div class="card live">
+        <div class="c-top"><span class="led on"></span><span class="nm">HUGO</span><span class="st w">working · 42s</span></div>
+        <div class="c-mid"><span class="patch on">MIC</span>
+          <span class="meter"><i></i><i></i><i></i><i></i><i class="a"></i><i class="a"></i></span></div>
+        <div class="c-cap">“flag the orb bullet, it's stale…”</div>
+        <div class="c-meta"><span>vocodeck2/workbench</span></div>
+      </div>
+      <div class="card">
+        <div class="c-top"><span class="led warn"></span><span class="nm">FREYA</span><span class="st">stale · 6m</span></div>
+        <div class="c-mid"><span class="patch">mic</span><span class="meter idle"><i></i><i></i><i></i><i></i><i></i><i></i></span></div>
+        <div class="c-cap">“gates are green — 3 tests, tsc clean.”</div>
+        <div class="c-meta"><span class="q">queue 4</span><span>session</span></div>
+      </div>
+      <div class="card">
+        <div class="c-top"><span class="led warn"></span><span class="nm">IRIS</span><span class="st">stale · 11m</span></div>
+        <div class="c-mid"><span class="patch">mic</span><span class="meter idle"><i></i><i></i><i></i><i></i><i></i><i></i></span></div>
+        <div class="c-cap">“recap posted to the doc page.”</div>
+        <div class="c-meta"><span class="q">queue 1</span><span>session</span></div>
+      </div>
+      <div class="card">
+        <div class="c-top"><span class="led on"></span><span class="nm">ORION</span><span class="st w">ready</span></div>
+        <div class="c-mid"><span class="patch">mic</span><span class="meter idle"><i></i><i></i><i></i><i></i><i></i><i></i></span></div>
+        <div class="c-cap">“pty repro captured; waiting on you.”</div>
+        <div class="c-meta"><span>voco-demo/fix-pty</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="status">
+    <span class="ok">● daemon 7777</span>
+    <span class="mic">MIC → HUGO</span>
+    <span>ptt_only · half_duplex</span>
+    <span><b>1</b> working · <b>1</b> listening · <b>2</b> ann</span>
+    <span class="r">22:41:07</span>
+  </div>
+</div>
+
+<!-- the MINIMIZED deck -->
+<div class="minwrap">
+  <div class="minlabel">SAME FRAME, DECK MINIMIZED (— toggle) — 44px: chips only, details fold away</div>
+  <div class="mindeck">
+    <span class="dh">DECK</span>
+    <span class="chipcard live"><span class="led on"></span><span class="nm">HUGO</span><span class="mic">MIC</span><span class="st">working</span></span>
+    <span class="chipcard"><span class="led warn"></span><span class="nm">FREYA</span><span class="q">q4</span><span class="st">stale</span></span>
+    <span class="chipcard"><span class="led warn"></span><span class="nm">IRIS</span><span class="q">q1</span><span class="st">stale</span></span>
+    <span class="chipcard"><span class="led on"></span><span class="nm">ORION</span><span class="st">ready</span></span>
+    <span class="tgl" title="expand the deck">▢</span>
+  </div>
+</div>
+</body>
+</html>

@@ -208,6 +208,31 @@ mid cols: 266px fleet tree / 1fr canvas / 220px channel rack
 
 ## Journal
 
+- **2026-07-09 · mk4 SHIPPED — THE DECK + the right ledger (the swap).**
+  Captain-proposed layout revision, mocked as design/index6.html and
+  blessed with three notes (all in): no "MIC PATCHES HERE" wording,
+  "listening" renders as READY (the state means parked-at-listen; the
+  word belongs to the mic — display-only rename, classes/protocol
+  untouched), and every card carries its agent's LAST UTTERANCE
+  (say_tail, kept live by pushing agent.say events into the store; the
+  holder's card shows the live caption instead mid-turn, the speaker's
+  card shows the karaoke sentence + ■). Layout: the ledger (annotations
+  · transcript · asks · log) moved to a 340px right column beside the
+  work — tall content beside the thing it reviews; annotations re-flow
+  from the table to stacked rows (kind/⚑/status header with hover
+  ✎✕, text, replies, ✓ fixed-in, anchor); footer is its own pinned
+  row; transcript/asks revert from the wide-gutter layout to stacked
+  (the gutter solved a width problem that no longer exists). THE DECK:
+  agents as cards along the bottom, console-strips-laid-flat; dashed
+  master card first (hold-to-talk, attention cycle, duplex, counts),
+  then mic holder, then by attention order; horizontal scroll for big
+  fleets; — / ▢ minimize toggle to a 44px chip strip (persisted,
+  voco.deckMin). Card body = view, patch = mic (invariant carried
+  over). Gates: 374 pytest · ruff · tsc. Browser-verified on :7911:
+  layout, minimize round-trip + persistence, last-say on cards, ready
+  wording, reviewed marks still riding the diff heads. STILL OWED:
+  #17 scripted smoke (against THIS layout — the wait was right).
+
 - **2026-07-09 · FIT-AUDIT BATCH — export demoted, honest affordances,
   console width.** Captain challenged the export button ("why not send
   to the agent?") — the audit answer: SENDING ALREADY HAPPENS (open

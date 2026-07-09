@@ -38,7 +38,7 @@
   --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo,
     Consolas, monospace;
   --railw: 266px;
-  --rackw: 220px;
+  --dockw: 340px;
 }
 
 * { box-sizing: border-box; min-width: 0; }
@@ -111,14 +111,12 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 .cmd-btn.warm { color: var(--voice); }
 .cmd-btn.stop { color: var(--bad); font-size: 10px; padding: 1px 6px; }
 
-/* ---- body grid + grips + offline (mk3 M5: tree | canvas | rack) --------------- */
+/* ---- body grid + grips + offline (mk4: tree | canvas | ledger) ----------------- */
 .deck-body { flex: 1; display: grid; min-height: 0;
-  grid-template-columns: var(--railw) 5px 1fr 5px var(--rackw); }
+  grid-template-columns: var(--railw) 5px 1fr 5px var(--dockw); }
 .grip { cursor: col-resize; background: transparent; position: relative; }
 .grip:hover::after, .grip.dragging::after { content: ""; position: absolute;
   inset: 0 1.5px; background: var(--sel); opacity: .5; }
-.grip.h { cursor: row-resize; height: 5px; flex: none; }
-.grip.h:hover::after, .grip.h.dragging::after { inset: 1.5px 0; }
 .deck-body.offline { opacity: .55; pointer-events: none; }
 
 /* ---- fleet tree (mk3 M2): groups → work rows → agents + pages ------------------- */
@@ -262,50 +260,46 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 .md blockquote { border-left: 2px solid var(--edge); margin: 0;
   padding-left: 12px; color: var(--ink2); }
 
-/* ---- console row (mk3): full-width bottom, height via the grip ----------------- */
-:root { --dockh: 210px; }
-.dock { background: var(--l1); border-top: 1px solid var(--edge2);
-  height: var(--dockh); flex: none; display: flex; flex-direction: column;
-  min-height: 0; overflow: hidden; }
+/* ---- the LEDGER (mk4): right column beside the work ----------------------------- */
+.dock { background: var(--l1); border-left: 1px solid var(--edge);
+  display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  overflow: hidden; }
 .dock.offline { opacity: .55; pointer-events: none; }
 .ctabs { display: flex; align-items: center; flex: none;
   font: 11px var(--mono); }
-.ctab { padding: 6px 16px; color: var(--ink2); cursor: pointer; }
+.ctab { padding: 6px 11px; color: var(--ink2); cursor: pointer; }
 .ctab:hover { color: var(--ink); }
 .ctab.on { background: var(--l0); color: var(--ink);
   box-shadow: inset 0 2px 0 var(--sel); }
 .ctab .n { color: var(--ink3); }
 .ctab .n.hot { color: var(--voice); }
-.cfoot { margin-left: auto; padding-right: 14px; font: 10.5px var(--mono);
-  color: var(--ink3); display: flex; gap: 18px; align-items: center; }
+.cfoot { flex: none; border-top: 1px solid var(--edge);
+  padding: 6px 14px; font: 10.5px var(--mono); color: var(--ink3);
+  display: flex; gap: 14px; align-items: baseline; }
 .cfoot b { color: var(--ink2); font-weight: 400; }
-.cfoot-btn { cursor: pointer; color: var(--ink2); }
-.cfoot-btn:hover { color: var(--ink); }
+.cfoot-scope { margin-left: auto; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
 .cbody { flex: 1; overflow-y: auto; min-height: 0; background: var(--l0); }
-/* the annotations table */
-.cbody table { width: 100%; border-collapse: collapse;
-  font: 11.5px var(--mono); }
-.cbody th { font: 10px var(--mono); color: var(--ink3);
-  letter-spacing: .1em; text-align: left; padding: 5px 14px;
-  border-bottom: 1px solid var(--edge); position: sticky; top: 0;
-  background: var(--l1); z-index: 1; }
-.cbody td { padding: 6px 14px; color: var(--ink2); vertical-align: top; }
-.cbody tr { cursor: pointer; }
-.cbody tr:hover td { background: var(--hov); }
-td.kind { white-space: nowrap; }
+/* annotations: ledger rows (mk4) */
+.fitem { padding: 9px 14px; cursor: pointer;
+  border-bottom: 1px solid color-mix(in srgb, var(--edge) 55%, transparent); }
+.fitem:hover { background: var(--hov); }
+.fh { display: flex; gap: 8px; align-items: baseline;
+  font: 10px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
 .k-c { color: var(--bad); } .k-q { color: var(--sel); }
 .k-n { color: var(--ink3); }
-td.kind .blk { color: var(--voice); }
-.fstate { font-size: 9.5px; color: var(--ink3); margin-top: 2px;
-  letter-spacing: .06em; }
+.fh .blk { color: var(--voice); }
+.fh .fops { margin-left: auto; color: var(--ink3); letter-spacing: 0;
+  visibility: hidden; }
+.fitem:hover .fops { visibility: visible; }
+.fops span { cursor: pointer; }
+.fops span:hover { color: var(--bad); }
+.fstate { font-size: 9.5px; color: var(--ink3); letter-spacing: .06em; }
 .fstate.s-addressed { color: var(--ok); }
 .fstate.s-disputed { color: var(--voice); }
-td.txt { color: var(--ink); font: 12px var(--sans); max-width: 640px; }
-td.loc { color: var(--ink3); }
-tr.done td { color: var(--ink3); }
-tr.done td.txt { text-decoration: line-through; color: var(--ink3); }
-td.x span { cursor: pointer; color: var(--ink3); }
-td.x span:hover { color: var(--bad); }
+.ftext { margin-top: 4px; font: 12px/1.5 var(--sans); color: var(--ink); }
+.floc { margin-top: 4px; font: 10.5px var(--mono); color: var(--ink3); }
+.fitem.done .ftext { text-decoration: line-through; color: var(--ink3); }
 /* asks: you → the work's agents; answers land inline */
 .ask-composer { display: flex; gap: 9px; align-items: center;
   padding: 8px 14px; border-bottom: 1px solid var(--edge);
@@ -313,19 +307,17 @@ td.x span:hover { color: var(--bad); }
 .ask-input { flex: 1; background: transparent; border: none;
   color: var(--ink); font: 12px var(--mono); outline: none; }
 .ask-input::placeholder { color: var(--ink3); }
-.ask { display: grid; grid-template-columns: 160px minmax(0, 1fr);
-  gap: 0 16px; padding: 6px 14px; }
+.ask { padding: 8px 14px; }
 .ask + .ask { border-top: 1px solid var(--edge); }
 .ask-head { display: flex; gap: 9px; align-items: baseline;
-  justify-content: flex-end; text-align: right; margin-top: 2px;
   font: 10.5px var(--mono); color: var(--ink3); }
 .ask-head b { color: var(--voice); font-weight: 700; }
 .ask-head .hot { color: var(--voice); }
-.ask-text { margin-top: 0; font: 12.5px/1.55 var(--sans);
-  color: var(--ink); max-width: 110ch; }
-.ask-answer { grid-column: 2; margin-top: 6px; padding-left: 10px;
+.ask-text { margin-top: 2px; font: 12px/1.55 var(--sans);
+  color: var(--ink); }
+.ask-answer { margin-top: 6px; padding-left: 10px;
   box-shadow: inset 2px 0 0 var(--edge2); font-size: 12px;
-  color: var(--ink2); max-width: 110ch; }
+  color: var(--ink2); }
 .ask-answer p { margin: 4px 0; }
 /* log: the daemon event tail */
 .logln { display: flex; gap: 10px; padding: 1.5px 14px;
@@ -334,23 +326,18 @@ td.x span:hover { color: var(--bad); }
 .lg-ty { color: var(--ink2); flex: none; min-width: 150px; }
 .lg-pl { color: var(--ink3); overflow: hidden; text-overflow: ellipsis; }
 
-/* ---- transcript: a radio log — full-width console layout: the meta
-   (speaker · time) lives in a right-aligned LEFT GUTTER so every line
-   of text starts at one x and the wide panel reads like a real log --- */
+/* ---- transcript: a radio log — mk4 ledger (narrow panel): meta line
+   above the text, stacked entries ------------------------------------------------ */
 .t-scroll { flex: 1; overflow-y: auto; min-height: 0; padding: 4px 0; }
-.tline { display: grid; grid-template-columns: 160px minmax(0, 1fr);
-  gap: 0 16px; padding: 3px 14px; }
+.tline { padding: 6px 14px; }
 .tline .thead { display: flex; gap: 9px; align-items: baseline;
-  justify-content: flex-end; text-align: right;
   font-size: 11px; color: var(--ink3); }
 .tline .thead b { font-weight: 600; font-size: 11px; }
 .tline.you .thead b { color: var(--voice); }
 .tline.agent .thead b { color: var(--sel); }
-.tline .ttext { margin-top: 0; font: 12.5px/1.6 var(--mono);
-  color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere;
-  max-width: 110ch; }
-.tline.meta { grid-column: 2; font-size: 11px; color: var(--ink3);
-  padding: 0 14px 3px 0; }
+.tline .ttext { margin-top: 2px; font: 12px/1.6 var(--mono);
+  color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tline.meta { font-size: 11px; color: var(--ink3); padding: 1px 14px 4px; }
 .tline .said { color: var(--ink2); }
 .tline .saying { background: color-mix(in srgb, var(--sel) 18%, transparent);
   padding: 0 2px; }
@@ -362,19 +349,32 @@ td.x span:hover { color: var(--bad); }
   100% { background: transparent; box-shadow: none; }
 }
 
-/* ---- channel rack (mk3 M5): agents as channel strips ----------------------------- */
-.rack { background: var(--l1); border-left: 1px solid var(--edge);
-  display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
-.rhead { padding: 7px 12px 5px; flex: none; }
-.chan { padding: 8px 12px; cursor: pointer; flex: none; }
-.chan:hover { background: var(--hov); }
-.chan.live { background: var(--l2); box-shadow: inset 2px 0 0 var(--voice); }
-.ch-top { display: flex; align-items: center; gap: 7px; font: 12px var(--mono); }
-.ch-top .nm { color: var(--ink); font-weight: 700; }
-.ch-top .st { margin-left: auto; font-size: 10px; color: var(--ink3);
+/* ---- THE DECK (mk4): agents as cards along the bottom --------------------------- */
+.deckrow { border-top: 1px solid var(--edge2); background: var(--l1);
+  display: flex; flex-direction: column; min-height: 0; flex: none; }
+.deckrow.offline { opacity: .55; pointer-events: none; }
+.dhead { display: flex; align-items: center; gap: 14px;
+  padding: 5px 12px 0; flex: none; }
+.dhead .tgl { margin-left: auto; letter-spacing: 0; cursor: pointer;
+  color: var(--ink3); border: 1px solid var(--edge2); padding: 0 7px;
+  background: var(--l2); font: 11px var(--mono); }
+.dhead .tgl:hover { color: var(--ink); }
+.cards { display: flex; gap: 8px; padding: 6px 12px 10px;
+  overflow-x: auto; align-items: stretch; }
+.deckrow.min .cards { padding: 5px 12px 7px; align-items: center; }
+.card { width: 232px; flex: none; background: var(--l2);
+  border: 1px solid var(--edge); padding: 8px 10px; cursor: pointer;
+  display: flex; flex-direction: column; gap: 6px; min-height: 96px; }
+.card:hover { border-color: var(--edge2); }
+.card.live { border-color: var(--voice);
+  box-shadow: inset 0 2px 0 var(--voice); }
+.c-top { display: flex; align-items: center; gap: 7px;
+  font: 12px var(--mono); }
+.c-top .nm { color: var(--ink); font-weight: 700; }
+.c-top .st { margin-left: auto; font-size: 10px; color: var(--ink3);
   flex: none; }
-.ch-top .st.w { color: var(--ok); }
-.ch-mic { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.c-top .st.w { color: var(--ok); }
+.c-mid { display: flex; align-items: center; gap: 8px; }
 .patch { font: 10px var(--mono); border: 1px solid var(--edge2);
   padding: 2px 8px; cursor: pointer; color: var(--ink3); flex: none; }
 .patch:hover { color: var(--ink); }
@@ -392,24 +392,42 @@ td.x span:hover { color: var(--bad); }
 .meter.live i:nth-child(5) { animation-delay: .48s; }
 .meter.live i:nth-child(6) { animation-delay: .6s; }
 @keyframes meterpulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
-.ch-cap { margin-top: 7px; font: 10.5px/1.5 var(--mono); color: var(--ink2);
-  border-left: 2px solid var(--voice); padding-left: 7px;
+.c-cap { font: 10.5px/1.4 var(--mono); color: var(--ink2);
+  border-left: 2px solid var(--edge2); padding-left: 6px;
   display: flex; gap: 6px; align-items: baseline; min-width: 0; }
-.ch-cap span:first-child { overflow: hidden; text-overflow: ellipsis; }
-.ch-idle { margin-top: 6px; font: 10px var(--mono); color: var(--ink3);
-  display: flex; gap: 10px; align-items: center; }
-.ch-idle .q { color: var(--voice); }
-.ch-speak { margin-top: 7px; display: flex; gap: 6px; align-items: center;
-  font: 10.5px var(--mono); color: var(--ink2); min-width: 0; }
-.ch-speak .sp-text { overflow: hidden; text-overflow: ellipsis;
+.c-cap.live { border-left-color: var(--voice); }
+.c-cap span:first-child { overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
-.master { margin-top: auto; padding: 9px 12px; border-top: 1px solid var(--edge);
-  font: 10.5px var(--mono); color: var(--ink3); flex: none; }
-.master .row { display: flex; justify-content: space-between; margin: 2px 0; }
-.master .row .v { color: var(--ink2); }
-.master .row .v.hot { color: var(--voice); }
-.master .row .v.cyc { cursor: pointer; }
-.master .row .v.cyc:hover { color: var(--ink); }
+.c-meta { font: 10px var(--mono); color: var(--ink3); display: flex;
+  gap: 10px; margin-top: auto; }
+.c-meta .q { color: var(--voice); }
+/* the master card */
+.card.master { width: 196px; background: var(--l1); border-style: dashed; }
+.m-row { display: flex; justify-content: space-between;
+  font: 10.5px var(--mono); color: var(--ink3); }
+.m-row .v { color: var(--ink2); }
+.m-row .v.hot { color: var(--voice); }
+.m-row .v.cyc { cursor: pointer; }
+.m-row .v.cyc:hover { color: var(--ink); }
+.hold { font: 10px var(--mono); border: 1px solid var(--edge2);
+  background: var(--l2); color: var(--ink2); text-align: center;
+  padding: 4px 0; cursor: pointer; user-select: none; }
+.hold:hover { color: var(--ink); }
+.hold.held { background: var(--voice); color: var(--l0);
+  border-color: var(--voice); font-weight: 700; }
+.hold.none { color: var(--ink3); cursor: default; }
+/* minimized: chip strip */
+.chipcard { display: flex; align-items: center; gap: 7px;
+  background: var(--l2); border: 1px solid var(--edge);
+  padding: 4px 10px; font: 11px var(--mono); cursor: pointer;
+  flex: none; }
+.chipcard:hover { border-color: var(--edge2); }
+.chipcard.live { border-color: var(--voice); }
+.chipcard .nm { color: var(--ink); font-weight: 700; }
+.chipcard .micchip { font-size: 9px; background: var(--voice);
+  color: var(--l0); padding: 0 4px; font-weight: 700; }
+.chipcard .q { color: var(--voice); font-size: 10px; }
+.chipcard .st { color: var(--ink3); font-size: 10px; }
 
 /* ---- status line: ambient truth (mk3 M1) ---------------------------------------- */
 .statusline { height: 24px; flex: none; display: flex; align-items: center;
@@ -720,12 +738,6 @@ td.x span:hover { color: var(--bad); }
 /* #13: status segments that act */
 .statusline .sc { cursor: pointer; }
 .statusline .sc:hover { color: var(--ink); }
-/* #7: hold-to-talk in the rack's master block */
-.ptt-hold { cursor: pointer; user-select: none; color: var(--ink2); }
-.ptt-hold:hover { color: var(--ink); }
-.ptt-hold.held { color: var(--l0); background: var(--voice);
-  padding: 0 6px; font-weight: 700; }
-.ptt-hold.none { color: var(--ink3); cursor: default; }
 /* #15: reviewed diff files */
 .rvw { font-size: 10px; color: var(--ink3); cursor: pointer;
   padding: 0 5px; }
