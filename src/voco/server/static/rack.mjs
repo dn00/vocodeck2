@@ -83,19 +83,28 @@ function lastSayOf(s) {
   return t && t.text ? t.text : null;
 }
 
+/** ADR-0003: the holder always wears the MIC badge; the explicit patch
+ * button appears on OTHER cards only while the mic is LOCKED (clicks
+ * are view-only then, so the override needs its own affordance). */
 function patchBtn(s, isMic, ctx) {
-  return el("span", { class: "patch" + (isMic ? " on" : ""),
-    title: isMic ? "your mic is patched here" : `patch the mic to ${s.name}`,
-    text: isMic ? "MIC" : "mic",
-    onclick: (e) => { e.stopPropagation(); if (!isMic) ctx.selectAgent(s); } });
+  if (isMic)
+    return el("span", { class: "patch on", title: "your mic is patched here",
+      text: "MIC" });
+  if (!ctx.micLocked()) return null; // unlocked: clicking the card talks
+  return el("span", { class: "patch",
+    title: `re-route the locked mic to ${s.name}`,
+    text: "mic",
+    onclick: (e) => { e.stopPropagation();
+      ctx.selectAgent(s, { force: true }); } });
 }
 
 /**
  * @param {HTMLElement} deck
  * @param {import("./store.mjs").Store} store
  * @param {{command:(cmd:string, payload?:object)=>Promise<any>,
- *   selectAgent:(s:any)=>void, focusAgent:(s:any)=>void,
- *   stateOf:(s:any)=>string,
+ *   selectAgent:(s:any, opts?:{force?:boolean})=>void,
+ *   focusAgent:(s:any)=>void, stateOf:(s:any)=>string,
+ *   micLocked:()=>boolean, onToggleLock:()=>void,
  *   onFull:(target:"you"|"agent")=>void,
  *   toast:(msg:string, sticky?:boolean)=>void}} ctx
  */
@@ -131,8 +140,10 @@ export function renderRack(deck, store, ctx) {
       const state = ctx.stateOf(s);
       cards.append(el("span", {
         class: "chipcard" + (isMic ? " live" : "") + (isSel ? " sel" : ""),
-        title: `view ${s.name}'s work — the mic stays put`,
-        onclick: () => ctx.focusAgent(s) },
+        title: ctx.micLocked()
+          ? `view ${s.name}'s work (mic locked)`
+          : `talk to ${s.name} — selection is routing`,
+        onclick: () => ctx.selectAgent(s) },
         el("span", { class: "dot " + state }),
         el("span", { class: "nm", text: s.name }),
         isMic ? el("span", { class: "micchip", text: "MIC" }) : "",
@@ -192,8 +203,17 @@ export function renderRack(deck, store, ctx) {
     const st = ctx.stateOf(s);
     if (st in counts) counts[st]++;
   }
+  // ADR-0003 lock: pins the mic so agent clicks become view-only.
+  const locked = ctx.micLocked();
+  const lockEl = el("span", { class: "v cyc" + (locked ? " hot" : ""),
+    text: locked ? "locked 🔒" : "follows selection",
+    title: locked
+      ? "mic is pinned — agent clicks are view-only; click to unlock"
+      : "mic follows your selection; click to pin it in place",
+    onclick: (e) => { e.stopPropagation(); ctx.onToggleLock(); } });
   cards.append(el("div", { class: "card master" },
     hold,
+    el("div", { class: "m-row" }, el("span", { text: "mic" }), lockEl),
     el("div", { class: "m-row" }, el("span", { text: "attention" }), attn),
     el("div", { class: "m-row" }, el("span", { text: "duplex" }),
       el("span", { class: "v", text: mic.duplex || "—" })),
@@ -210,13 +230,15 @@ export function renderRack(deck, store, ctx) {
     const speaking = store.speaking && store.speaking.who === s.name
       ? store.speaking : null;
     const age = observedAge(s, state);
-    // sel = the VIEWED agent (steel, like the tree); live = the mic
-    // holder (amber). Both can be true; amber declares later and wins
-    // the border.
+    // sel = the VIEWED agent (steel); live = the mic holder (amber,
+    // declared later, wins the border). Unlocked they usually coincide;
+    // the dual language appears exactly in the locked/split state.
     const card = el("div", { class: "card" + (isSel ? " sel" : "")
       + (isMic ? " live" : ""),
-      title: `view ${s.name}'s work — the mic stays put`,
-      onclick: () => ctx.focusAgent(s) });
+      title: ctx.micLocked()
+        ? `view ${s.name}'s work (mic locked)`
+        : `talk to ${s.name} — selection is routing`,
+      onclick: () => ctx.selectAgent(s) });
     card.append(el("div", { class: "c-top" },
       el("span", { class: "dot " + state }),
       el("span", { class: "nm", text: s.name }),

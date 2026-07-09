@@ -208,6 +208,24 @@ mid cols: 266px fleet tree / 1fr canvas / 220px channel rack
 
 ## Journal
 
+- **2026-07-09 · ADR-0003 SHIPPED — selection is routing (+ 🔒 lock).**
+  The captain suggested this model earlier and was right; the builder
+  defended the old rule first — for the record. Sober-analysis
+  supersession of the explicit-mic invariant (adr/0003): clicking an
+  agent ANYWHERE (tree row, deck card) views + routes — eye contact;
+  the master card's mic row toggles a lock ("follows selection" ↔
+  "locked 🔒", mirrored as `route → X 🔒`) that makes agent clicks
+  view-only for split attention; explicit movers override (per-card
+  patch — now shown ONLY while locked, ⌘K mic→ forces, spoken switch);
+  daemon-initiated mic moves pull selection along unless locked
+  (symmetric via a sessions watcher on activeSession); mic follows
+  PEOPLE never places (derived work-row focus stays view-only). Also
+  this session: stable card order (no mic-first jumping — channels
+  never move; c2b05e7) and the viewed-card steel marking + deck
+  selection subscription (a395955). Verified live on :7911, both
+  states + override patch. Gates: 374 pytest · tsc. Lock is ephemeral
+  by decision (persist only if real use asks).
+
 - **2026-07-09 · mk4 SHIPPED — THE DECK + the right ledger (the swap).**
   Captain-proposed layout revision, mocked as design/index6.html and
   blessed with three notes (all in): no "MIC PATCHES HERE" wording,

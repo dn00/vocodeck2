@@ -81,6 +81,7 @@ function buildOnce(bar) {
  * @param {HTMLElement} bar
  * @param {import("./store.mjs").Store} store
  * @param {{command:(cmd:string, payload?:object)=>Promise<any>,
+ *   micLocked?:boolean,
  *   onFull:(target:"you"|"agent")=>void, toast:(msg:string, sticky?:boolean)=>void,
  *   onSettings:()=>void}} ctx
  */
@@ -120,7 +121,8 @@ export function renderPresence(bar, store, ctx) {
     ? "say “deck …” or type"
     : "type — routes like speech";
   dom.input.disabled = offline;
-  dom.route.textContent = activeName ? "route → " + activeName : "route → —";
+  dom.route.textContent = (activeName ? "route → " + activeName : "route → —")
+    + (ctx.micLocked ? " 🔒" : "");
   dom.route.classList.toggle("none", !activeName);
 }
 

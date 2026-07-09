@@ -196,9 +196,21 @@ function selectWork(ws) {
   lazyDetectLinks(ws);
 }
 
-/** View an agent's work WITHOUT moving the mic (mk3.1 #11: the rack's
- * channel body is view-only; only the MIC patch, the tree's agent row,
- * and spoken switch phrases move the mic). */
+// ---- mic model (ADR-0003: selection is routing) ---------------------------------
+// Clicking an AGENT (tree row, deck card) views AND talks — eye
+// contact. The 🔒 lock pins the mic for split attention: while locked,
+// agent clicks are view-only and only explicit movers (patch, ⌘K
+// mic→, spoken switch) re-route. Mic follows people, never places:
+// work-row/page browsing derives a view focus and never touches it.
+let micLock = false;
+
+function setMicLock(on) {
+  micLock = on;
+  renderRackPanel(); renderStrip(); renderRail();
+}
+
+/** View an agent's work WITHOUT moving the mic (derived focus, or any
+ * agent click while the mic is locked). */
 function focusAgent(s) {
   store.selectedAgent = s.session_id;
   const ws = wsOf(s);
@@ -213,9 +225,12 @@ function focusAgent(s) {
   return ws;
 }
 
-/** The ONLY mic-mover in the deck (besides spoken switch phrases). */
-async function selectAgent(s) {
+/** Agent click: view + mic (selection is routing). While the mic is
+ * locked, unforced clicks degrade to view-only; force = the explicit
+ * movers (MIC patch, ⌘K mic→). */
+async function selectAgent(s, { force = false } = {}) {
   const ws = focusAgent(s);
+  if (micLock && !force) return; // locked: look, don't re-route
   try { await bus.command("switch_session", { name: s.name }); }
   catch (e) { toast("activate failed: " + errMsg(e), true); }
   if (ws && (!Array.isArray(s.capabilities) || s.capabilities.includes("review"))) {
@@ -223,6 +238,20 @@ async function selectAgent(s) {
     catch (e) { /* agent may lack review capability; the dock says so */ }
   }
 }
+
+// Voice/daemon-initiated mic moves (spoken switch, another client):
+// selection FOLLOWS the mic unless locked — the model is symmetric.
+let lastFollowedActive = null;
+store.subscribe("sessions", () => {
+  const active = store.activeSession;
+  if (active && active !== lastFollowedActive) {
+    lastFollowedActive = active;
+    if (!micLock && store.selectedAgent !== active) {
+      const s = store.sessions.get(active);
+      if (s) focusAgent(s);
+    }
+  }
+});
 
 async function detachAgent(s) {
   // Undo-over-confirm (design policy): detach never touches the process
@@ -372,7 +401,8 @@ function agentRow(s, bare = false) {
   const sel = store.selectedAgent === s.session_id;
   const row = h("div", {
     class: "agent-row" + (bare ? " bare" : "") + (sel ? " sel" : ""),
-    title: `talk to ${s.name} (moves the mic)`,
+    title: micLock ? `view ${s.name} (mic locked)`
+      : `talk to ${s.name} — selection is routing`,
     onclick: () => selectAgent(s) },
     dot(s),
     h("span", { class: "ar-name" }, s.name),
@@ -1595,6 +1625,7 @@ function jumpToTranscript(target) {
 function renderStrip() {
   renderPresence(presence, store, {
     command: (cmd, payload) => bus.command(cmd, payload),
+    micLocked: micLock,
     onFull: jumpToTranscript,
     toast,
     onSettings: () => openSettings(mctx()),
@@ -1607,6 +1638,8 @@ function renderRackPanel() {
     selectAgent,
     focusAgent,
     stateOf,
+    micLocked: () => micLock,
+    onToggleLock: () => setMicLock(!micLock),
     onFull: jumpToTranscript,
     toast,
   });
@@ -1684,7 +1717,7 @@ function paletteItems() {
     items.push({ label: "view: " + s.name, hint: stateWord(stateOf(s)),
       run: () => focusAgent(s) });
     items.push({ label: "mic → " + s.name, hint: "patch",
-      run: () => selectAgent(s) });
+      run: () => selectAgent(s, { force: true }) });
   }
   for (const t of ["annotations", "transcript", "asks", "log"])
     items.push({ label: "console: " + t, hint: "tab",
