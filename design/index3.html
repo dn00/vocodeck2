@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CONSOLE · final — the quiet instrument</title>
+<style>
+  /* ============ CONSOLE · final — the quiet instrument ============
+     D's DNA (channel rack · fleet tree · tabbed canvas · console table)
+     with the noise floor dropped:
+     - separation by surface, not by hairline (borders only at the four
+       zone seams + table header)
+     - color only means "needs you now": amber = mic/blocking, green/red
+       = live signal. Everything else rests in gray.
+     - one merged bar where D stacked three
+     - stale channels collapse to a row; only the live channel meters
+     Function count is identical to D. */
+  :root {
+    --bg:#141519; --panel:#191a1f; --raise:#1f2126; --hover:#24262c;
+    --seam:#26282d;
+    --t0:#d4d6da; --t1:#8f939b; --t2:#565a63;
+    --sel:#31415233; --sel-edge:#7fa6c9;
+    --grn:#4a9e77; --amber:#cf9d3d; --red:#c25a50; --blu:#7fa6c9;
+    --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#101114;color:var(--t0);font:12.5px/1.5 var(--sans)}
+  .note{max-width:1340px;margin:26px auto 12px;padding:0 20px}
+  .note h1{font:700 14px var(--mono)}
+  .note h1 span{color:var(--blu)}
+  .note p{color:var(--t1);margin-top:6px;max-width:78ch;font-size:13px}
+  .note a{color:var(--blu)}
+  /* ---------- frame ---------- */
+  .deck{width:1340px;height:820px;margin:14px auto;border:1px solid var(--seam);
+    display:grid;grid-template-rows:40px 1fr 200px 26px;background:var(--bg)}
+  .mid{display:grid;grid-template-columns:260px 1fr 216px;min-height:0}
+  /* ---------- command bar (one bar, three things) ---------- */
+  .cmd{display:flex;align-items:center;gap:14px;background:var(--panel);
+    border-bottom:1px solid var(--seam);padding:0 14px}
+  .mark{font:700 12px var(--mono);color:var(--t1)}
+  .prompt{flex:1;display:flex;align-items:center;gap:10px;background:var(--bg);
+    padding:7px 12px;font:12px var(--mono);color:var(--t2)}
+  .prompt .p{color:var(--blu)}
+  .prompt .route{margin-left:auto;color:var(--t2)}
+  .prompt .route b{color:var(--amber);font-weight:400}
+  .keys{font:10.5px var(--mono);color:var(--t2);display:flex;gap:12px;align-items:center}
+  .kbd{border:1px solid var(--seam);padding:0 5px;color:var(--t1);background:var(--raise)}
+  /* ---------- fleet tree ---------- */
+  .tree{background:var(--panel);border-right:1px solid var(--seam);overflow:auto;
+    font:12px var(--mono);padding:8px 0}
+  .grp{display:flex;align-items:baseline;padding:10px 14px 4px;color:var(--t1);font-weight:700}
+  .grp .ops{margin-left:auto;color:var(--t2);font-weight:400;font-size:10px}
+  .trow{display:flex;align-items:center;gap:8px;padding:4px 14px;cursor:pointer;white-space:nowrap}
+  .trow:hover{background:var(--hover)}
+  .trow.sel{background:var(--sel);box-shadow:inset 2px 0 var(--sel-edge)}
+  .trow .tw{color:var(--t2);width:10px;flex:none}
+  .trow .glyph{color:var(--t2);width:12px;flex:none;text-align:center}
+  .trow .lbl{color:var(--t0)} .trow .lbl.dim{color:var(--t1)}
+  .trow .meta{margin-left:auto;color:var(--t2);font-size:10.5px;display:flex;gap:8px}
+  .meta .hot{color:var(--amber)}
+  .depth1{padding-left:28px} .depth2{padding-left:42px}
+  .led{width:6px;height:6px;flex:none}
+  .led.on{background:var(--grn)} .led.warn{background:var(--amber)} .led.off{background:#3a3d43}
+  .connect{margin:10px 14px 0;padding-top:10px;border-top:1px solid var(--seam);
+    color:var(--t2);font-size:11px}
+  .connect b{color:var(--t1);font-weight:400}
+  /* ---------- work canvas ---------- */
+  .canvas{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--bg)}
+  .tabbar{display:flex;align-items:center;background:var(--panel);border-bottom:1px solid var(--seam);
+    font:11.5px var(--mono);padding-right:14px}
+  .tab{display:flex;gap:8px;align-items:center;padding:8px 16px;color:var(--t1);cursor:pointer}
+  .tab .g{color:var(--t2)}
+  .tab.on{background:var(--bg);color:var(--t0);box-shadow:inset 0 2px var(--sel-edge)}
+  .tab .x{color:var(--t2);margin-left:2px}
+  .tab.plus{color:var(--t2);padding:8px 10px}
+  .prov{margin-left:auto;font:10.5px var(--mono);color:var(--t2)}
+  .prov b{color:var(--t1);font-weight:400}
+  .view{overflow:auto;flex:1;padding:22px 26px 34px}
+  .doc{max-width:680px;font:13.5px/1.75 var(--sans)}
+  .doc h2{font:700 17px var(--sans);margin-bottom:14px}
+  .doc ul{list-style:none;margin-bottom:16px}
+  .doc li{padding:4px 10px;margin:1px 0;cursor:pointer;display:flex;align-items:baseline;gap:9px}
+  .doc li::before{content:"–";color:var(--t2)}
+  .doc li:hover{background:var(--hover)}
+  .doc code{font:12px var(--mono);background:var(--raise);padding:1px 6px;color:var(--blu)}
+  .ann-hl{background:#cf9d3d1c;box-shadow:inset 0 -1px var(--amber)}
+  .mk{font:10px var(--mono);color:#141519;background:var(--amber);padding:0 4px;margin-left:6px}
+  .selected{background:var(--sel);box-shadow:inset 0 0 0 1px var(--sel-edge)}
+  /* annotation editor — one surface, one seam */
+  .editor{width:520px;margin:12px 0 18px;background:var(--panel);border:1px solid var(--seam)}
+  .ed-bar{display:flex;align-items:center;gap:10px;padding:7px 12px;font:10.5px var(--mono);color:var(--t2)}
+  .ed-bar b{color:var(--t1);font-weight:400}
+  .ed-bar .close{margin-left:auto;cursor:pointer}
+  .editor textarea{width:100%;height:62px;background:var(--bg);border:none;resize:vertical;
+    padding:9px 12px;font:12px/1.6 var(--mono);color:var(--t0);outline:none}
+  .ed-ctl{display:flex;align-items:center;padding:8px 12px;gap:14px;font:11px var(--mono)}
+  .seg{display:flex;background:var(--raise)}
+  .seg span{padding:4px 12px;color:var(--t1);cursor:pointer}
+  .seg span.on{background:var(--hover);color:var(--t0);box-shadow:inset 0 -2px var(--red)}
+  .chk{color:var(--t1);display:flex;gap:6px;align-items:center}
+  .chk .box{width:10px;height:10px;border:1px solid var(--t2)}
+  .ed-go{margin-left:auto;display:flex;gap:10px;align-items:center}
+  .ed-go .cancel{color:var(--t2);cursor:pointer}
+  .ed-go .add{background:var(--raise);color:var(--t0);padding:4px 14px;cursor:pointer;font-weight:700}
+  .ed-go .add em{font:10px var(--mono);color:var(--t2);font-style:normal;margin-left:6px}
+  /* ---------- channel rack ---------- */
+  .rack{background:var(--panel);border-left:1px solid var(--seam);display:flex;flex-direction:column;
+    min-height:0;padding:8px 0}
+  .rhead{padding:4px 14px 8px;font:10px var(--mono);color:var(--t2);letter-spacing:.1em}
+  .chan{padding:9px 14px;cursor:pointer}
+  .chan:hover{background:var(--hover)}
+  .chan.live{background:var(--raise);box-shadow:inset 2px 0 var(--amber)}
+  .ch-top{display:flex;align-items:center;gap:8px;font:12px var(--mono)}
+  .ch-top .nm{color:var(--t0);font-weight:700}
+  .ch-top .st{margin-left:auto;font-size:10px;color:var(--t2)}
+  .ch-top .st.w{color:var(--grn)}
+  .ch-mic{display:flex;align-items:center;gap:8px;margin-top:7px}
+  .patch{font:10px var(--mono);border:1px solid var(--seam);padding:2px 9px;cursor:pointer;color:var(--t2)}
+  .patch.on{background:var(--amber);color:#141519;border-color:var(--amber);font-weight:700}
+  .meter{flex:1;height:6px;background:var(--bg);display:flex;gap:1px;padding:1px}
+  .meter i{width:4px;background:var(--grn)}
+  .meter i.a{background:var(--amber)}
+  .ch-cap{margin-top:7px;font:10.5px/1.5 var(--mono);color:var(--t1);
+    border-left:2px solid var(--amber);padding-left:7px}
+  .ch-meta{margin-top:4px;font:10px var(--mono);color:var(--t2)}
+  .ch-meta .hot{color:var(--amber)}
+  .master{margin-top:auto;padding:10px 14px;border-top:1px solid var(--seam);
+    font:10.5px var(--mono);color:var(--t2)}
+  .master .row{display:flex;justify-content:space-between;margin:2px 0}
+  .master .row .v{color:var(--t1)}
+  .master .row .v.hot{color:var(--amber)}
+  /* ---------- console ---------- */
+  .console{border-top:1px solid var(--seam);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+  .ctabs{display:flex;align-items:center;font:11.5px var(--mono);padding:0 6px}
+  .ctab{padding:7px 14px;color:var(--t1);cursor:pointer}
+  .ctab.on{color:var(--t0);box-shadow:inset 0 -2px var(--sel-edge)}
+  .ctab .n{color:var(--t2)}
+  .ctabs .foot{margin-left:auto;padding-right:10px;font:10.5px var(--mono);color:var(--t2);display:flex;gap:16px}
+  .ctabs .foot b{color:var(--t1);font-weight:400}
+  .cbody{flex:1;overflow:auto;background:var(--bg)}
+  table{width:100%;border-collapse:collapse;font:11.5px var(--mono)}
+  th{font:10px var(--mono);color:var(--t2);letter-spacing:.08em;text-align:left;
+    padding:5px 14px;border-bottom:1px solid var(--seam);position:sticky;top:0;background:var(--panel)}
+  td{padding:6px 14px;color:var(--t1);vertical-align:top}
+  tr + tr td{border-top:1px solid #1d1f24}
+  td.kind{white-space:nowrap}
+  .k-c{color:var(--red)} .k-q{color:var(--blu)} .k-n{color:var(--t2)}
+  td .blk{color:var(--amber)}
+  td.txt{color:var(--t0);font:12px var(--sans);max-width:600px}
+  td.loc{color:var(--t2)}
+  tr.done td{color:var(--t2)} tr.done td.txt{text-decoration:line-through;color:var(--t2)}
+  tr:hover td{background:var(--hover)}
+  td .x{cursor:pointer;color:var(--t2)}
+  /* ---------- status ---------- */
+  .status{display:flex;gap:22px;align-items:center;background:var(--panel);
+    border-top:1px solid var(--seam);font:10.5px var(--mono);color:var(--t2);padding:0 14px}
+  .status .ok{color:var(--grn)} .status .mic{color:var(--amber)}
+  .status b{color:var(--t1);font-weight:400}
+  .status .right{margin-left:auto}
+  /* ---------- samples + tokens ---------- */
+  .samples{max-width:1340px;margin:24px auto 80px;padding:0 20px;display:grid;
+    grid-template-columns:1fr 1fr 1fr;gap:16px}
+  .sample{border:1px solid var(--seam);background:var(--panel)}
+  .sample h3{font:10px var(--mono);color:var(--t2);letter-spacing:.12em;padding:9px 14px}
+  .drow{display:grid;grid-template-columns:46px 34px 1fr;font:12px/1.65 var(--mono)}
+  .dline{color:var(--t2);text-align:right;padding-right:10px}
+  .drow .code{padding-left:12px;white-space:pre;color:var(--t1)}
+  .drow.add .code{background:#4a9e7714;color:var(--t0)}
+  .drow.add .sign{color:var(--grn)}
+  .drow.del .code{background:#c25a5014}
+  .drow.del .sign{color:var(--red)}
+  .drow.flagged .code{box-shadow:inset 2px 0 var(--amber)}
+  .sign{text-align:center}
+  .treex{font:12px/1.75 var(--mono);padding:8px 14px;color:var(--t1)}
+  .treex .sel{color:var(--blu)}
+  .treex .stat{color:var(--grn)} .treex .statd{color:var(--red)}
+  .tok{font:11px/1.9 var(--mono);padding:8px 14px;color:var(--t1)}
+  .tok i{display:inline-block;width:10px;height:10px;margin-right:8px;vertical-align:-1px;font-style:normal}
+  .tok .r{color:var(--t2)}
+</style>
+</head>
+<body>
+<div class="note">
+  <h1>CONSOLE · <span>final</span> — the quiet instrument</h1>
+  <p>D with the noise floor dropped. Same functions, same layout logic — channel rack,
+  fleet tree, tabbed canvas, console table — but separation comes from surfaces instead of
+  hairlines, chrome rests in gray, and color speaks only when something needs you: amber is
+  the mic and blocking flags, green/red is live signal. One merged bar where D stacked three.
+  <a href="index2.html">← compare with D</a> · <a href="index.html">round 1</a></p>
+</div>
+
+<div class="deck">
+  <!-- command bar -->
+  <div class="cmd">
+    <span class="mark">voco</span>
+    <div class="prompt"><span class="p">&gt;</span> say "deck …" or type
+      <span class="route">route → <b>Hugo</b></span></div>
+    <div class="keys"><span><span class="kbd">F13</span> ptt</span><span><span class="kbd">⌘K</span> commands</span><span class="kbd">⚙</span></div>
+  </div>
+
+  <div class="mid">
+    <!-- fleet tree -->
+    <div class="tree">
+      <div class="grp">vocodeck2 <span class="ops">+ review · + agent</span></div>
+      <div class="trow depth1"><span class="tw">▾</span><span class="glyph">⌥</span><span class="lbl">workbench</span>
+        <span class="meta"><span>pr#7 · ±3 ↑2</span><span class="hot">3⚑</span></span></div>
+      <div class="trow depth2"><span class="led on"></span><span class="lbl">Hugo</span>
+        <span class="meta"><span class="hot">mic</span><span>working</span></span></div>
+      <div class="trow depth2"><span class="glyph">◈</span><span class="lbl dim">overview</span></div>
+      <div class="trow depth2"><span class="glyph">▤</span><span class="lbl dim">files</span></div>
+      <div class="trow depth2"><span class="glyph">±</span><span class="lbl dim">branch</span><span class="meta">r11</span></div>
+
+      <div class="grp">voco-demo <span class="ops">+ review · + agent</span></div>
+      <div class="trow depth1"><span class="tw">▸</span><span class="glyph">⌥</span><span class="lbl dim">fix-pty</span><span class="meta">no agent</span></div>
+      <div class="trow depth1 sel"><span class="tw">▾</span><span class="glyph">⌥</span><span class="lbl">workbench-strip</span>
+        <span class="meta"><span>#3 pr#7</span><span class="hot">8⚑</span></span></div>
+      <div class="trow depth2"><span class="glyph">±</span><span class="lbl dim">branch:main</span><span class="meta">r8</span></div>
+      <div class="trow depth2 sel"><span class="glyph">▦</span><span class="lbl">strip status</span><span class="meta">r4</span></div>
+
+      <div class="grp">sessions</div>
+      <div class="trow depth1"><span class="led warn"></span><span class="lbl dim">Freya</span><span class="meta">q4 · stale</span></div>
+      <div class="trow depth1"><span class="led warn"></span><span class="lbl dim">Iris</span><span class="meta">q1 · stale</span></div>
+      <div class="connect">connect → <b>voco attach …</b></div>
+    </div>
+
+    <!-- work canvas -->
+    <div class="canvas">
+      <div class="tabbar">
+        <div class="tab on"><span class="g">▦</span>strip status<span class="x">✕</span></div>
+        <div class="tab"><span class="g">±</span>branch:main<span class="x">✕</span></div>
+        <div class="tab"><span class="g">▤</span>files<span class="x">✕</span></div>
+        <div class="tab plus">+</div>
+        <div class="prov"><b>voco-demo/workbench-strip</b> · r4 · freya · 21:58 · <b>annotate: click block / select text</b></div>
+      </div>
+      <div class="view">
+        <div class="doc">
+          <h2>strip status</h2>
+          <ul>
+            <li><span class="ann-hl">orb states: <b>done</b></span><span class="mk">A2</span></li>
+            <li>captions: done</li>
+            <li><span class="selected">tests: 3 green</span></li>
+          </ul>
+
+          <div class="editor">
+            <div class="ed-bar">annotate <b>"tests: 3 green"</b> · anchors survive edits<span class="close">esc</span></div>
+            <textarea>3 green — but the suite gained 12 tests since r3. Re-run and re-push; stale counts read as fresh signal.</textarea>
+            <div class="ed-ctl">
+              <div class="seg"><span class="on">concern</span><span>question</span><span>nit</span></div>
+              <div class="chk"><span class="box"></span> blocking</div>
+              <div class="ed-go"><span class="cancel">cancel</span><span class="add">add<em>⏎</em></span></div>
+            </div>
+          </div>
+
+          <p>next: wire <code>speech.sentence</code> karaoke</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- channel rack -->
+    <div class="rack">
+      <div class="rhead">CHANNELS</div>
+      <div class="chan live">
+        <div class="ch-top"><span class="led on"></span><span class="nm">Hugo</span><span class="st w">working · 42s</span></div>
+        <div class="ch-mic"><span class="patch on">MIC</span>
+          <div class="meter"><i></i><i></i><i></i><i></i><i class="a"></i></div></div>
+        <div class="ch-cap">"flag the orb bullet, it's stale…"</div>
+      </div>
+      <div class="chan">
+        <div class="ch-top"><span class="led warn"></span><span class="nm">Freya</span><span class="st">stale · q4</span></div>
+        <div class="ch-mic"><span class="patch">mic</span><span class="ch-meta">session · 6m quiet</span></div>
+      </div>
+      <div class="chan">
+        <div class="ch-top"><span class="led warn"></span><span class="nm">Iris</span><span class="st">stale · q1</span></div>
+        <div class="ch-mic"><span class="patch">mic</span><span class="ch-meta">session · 11m quiet</span></div>
+      </div>
+      <div class="master">
+        <div class="row"><span>ptt · duplex</span><span class="v">hold F13 · half</span></div>
+        <div class="row"><span>attention</span><span class="v hot">ptt_only</span></div>
+        <div class="row"><span>working / listening</span><span class="v">1 / 0</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- console -->
+  <div class="console">
+    <div class="ctabs">
+      <div class="ctab on">annotations <span class="n">3</span></div>
+      <div class="ctab">transcript <span class="n">50</span></div>
+      <div class="ctab">asks <span class="n">0</span></div>
+      <div class="ctab">log</div>
+      <div class="foot"><span><b>2 open</b> · 1 blocking</span><span>export ↓</span></div>
+    </div>
+    <div class="cbody">
+      <table>
+        <tr><th style="width:110px">kind</th><th>text</th><th style="width:260px">anchor</th><th style="width:30px"></th></tr>
+        <tr>
+          <td class="kind k-c">concern <span class="blk">⚑</span></td>
+          <td class="txt">orb must reflect attention mode, not just VAD — muted should read differently from idle</td>
+          <td class="loc">± presence.mjs:4</td><td class="x">✕</td>
+        </tr>
+        <tr>
+          <td class="kind k-q">question</td>
+          <td class="txt">is "orb states: done" still true after the attention-mode rework?</td>
+          <td class="loc">▦ strip status · "orb states…"</td><td class="x">✕</td>
+        </tr>
+        <tr class="done">
+          <td class="kind k-n">nit</td>
+          <td class="txt">caption quotes render straight, should be curly</td>
+          <td class="loc">± presence.mjs:31</td><td></td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- status -->
+  <div class="status">
+    <span class="ok">● 7777</span>
+    <span class="mic">mic → Hugo</span>
+    <span>ptt_only · half_duplex</span>
+    <span><b>1</b> working · <b>0</b> listening · <b>3</b> ann</span>
+    <span class="right">22:41:07 · rev-sync ok</span>
+  </div>
+</div>
+
+<div class="samples">
+  <div class="sample">
+    <h3>DIFF · FLAGGED ROW</h3>
+    <div class="drow del"><span class="dline">33</span><span class="sign">−</span><span class="code">timeout_ms = 800</span></div>
+    <div class="drow add"><span class="dline">33</span><span class="sign">+</span><span class="code"># timeout_ms = 800</span></div>
+    <div class="drow add flagged"><span class="dline">34</span><span class="sign">+</span><span class="code"># late_window_ms = 8000</span></div>
+    <div class="drow"><span class="dline">35</span><span class="sign"></span><span class="code">stream = true</span></div>
+  </div>
+  <div class="sample">
+    <h3>FILE TREE</h3>
+    <div class="treex">
+      <div>▾ src/voco/server/</div>
+      <div>&nbsp;&nbsp;▸ adapters/</div>
+      <div class="sel">&nbsp;&nbsp;workbench.py <span class="stat">+698</span></div>
+      <div>&nbsp;&nbsp;http.py <span class="stat">+218</span> <span class="statd">−33</span></div>
+      <div>▾ static/</div>
+      <div>&nbsp;&nbsp;docview.mjs <span class="stat">+184</span></div>
+    </div>
+  </div>
+  <div class="sample">
+    <h3>TOKENS (implementation contract)</h3>
+    <div class="tok">
+      <div><i style="background:#141519"></i>bg #141519 · panel #191a1f · raise #1f2126</div>
+      <div><i style="background:#7fa6c9"></i>selection #7fa6c9 <span class="r">(steel — the only chrome color)</span></div>
+      <div><i style="background:#cf9d3d"></i>amber #cf9d3d <span class="r">= mic · blocking · needs-you</span></div>
+      <div><i style="background:#4a9e77"></i>green #4a9e77 · <i style="background:#c25a50"></i>red #c25a50 <span class="r">= live signal</span></div>
+      <div class="r">type: 12px mono (data) · 12.5–13.5px sans (prose) · 10px labels</div>
+      <div class="r">seams only at zone edges + table header · surfaces do the rest</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

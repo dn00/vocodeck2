@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D · CONSOLE mk3 — final assembly</title>
+<style>
+  /* ============ D · CONSOLE mk3 — final assembly ============
+     mk2's quiet body + the D details the captain kept:
+       - D's cellular command bar (voco ● full address | prompt | keys)
+       - D's two-line canvas header: tab strip + page bar (provenance,
+         annotate hint, export)
+       - colored tree meta restored: pr/issue chips steel-blue, ahead
+         green, dirty/queue/flags amber
+       - repo groups are collapsible (▾/▸ on the group row)
+     Everything else identical to mk2 (index4). */
+  :root {
+    --b0:#131417; --b1:#17181c; --b2:#1c1e23; --b3:#24262c; --hov:#20232a;
+    --line:#26282e; --line2:#33363e;
+    --t0:#d6d9de; --t1:#9aa0a9; --t2:#5f646d;
+    --sel:#3d63804d; --sel-edge:#6ea3d8;
+    --grn:#43b581; --amber:#d9a334; --red:#d95c4f; --blu:#6ea3d8;
+    --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0e0f11;color:var(--t0);font:12px/1.4 var(--sans)}
+  .note{max-width:1340px;margin:26px auto 12px;padding:0 20px}
+  .note h1{font:700 14px var(--mono);letter-spacing:.04em}
+  .note h1 span{color:var(--blu)}
+  .note p{color:var(--t1);margin-top:6px;max-width:78ch;font-size:13px}
+  .note a{color:var(--blu)}
+  /* ---------- frame ---------- */
+  .deck{width:1340px;height:820px;margin:14px auto;border:1px solid var(--line2);
+    display:grid;grid-template-rows:36px 1fr 210px 24px;background:var(--b0)}
+  .mid{display:grid;grid-template-columns:266px 1fr 220px;min-height:0}
+  /* ---------- command bar (D's cells) ---------- */
+  .cmd{display:flex;align-items:stretch;background:var(--b1);
+    border-bottom:1px solid var(--line);font:11px var(--mono)}
+  .cmd .cell{display:flex;align-items:center;gap:8px;padding:0 12px;
+    border-right:1px solid var(--line);color:var(--t1)}
+  .cmd .app{color:var(--t0);font-weight:700}
+  .cmd .ok{color:var(--grn)}
+  .prompt{flex:1;display:flex;align-items:center;gap:8px;padding:0 12px;
+    font:12px var(--mono);color:var(--t2)}
+  .prompt .p{color:var(--blu)}
+  .prompt .route{margin-left:auto;color:var(--t2)}
+  .prompt .route b{color:var(--amber);font-weight:400}
+  .cmd .keys{display:flex;align-items:center;gap:12px;padding:0 12px;
+    border-left:1px solid var(--line);border-right:none;color:var(--t2)}
+  .kbd{border:1px solid var(--line2);padding:0 5px;color:var(--t1);background:var(--b2);font-size:10px}
+  /* ---------- fleet tree ---------- */
+  .tree{background:var(--b1);border-right:1px solid var(--line);overflow:auto;
+    font:12px var(--mono);padding-bottom:10px}
+  .thead{padding:7px 12px;font:10px var(--mono);color:var(--t2);letter-spacing:.12em}
+  .grp{display:flex;align-items:baseline;gap:7px;padding:8px 12px 3px;color:var(--t1);
+    font-weight:700;cursor:pointer}
+  .grp .tw{color:var(--t2);width:10px;flex:none;font-weight:400}
+  .grp .ops{margin-left:auto;color:var(--t2);font-weight:400;font-size:10px}
+  .trow{display:flex;align-items:center;gap:7px;padding:3px 12px;cursor:pointer;white-space:nowrap}
+  .trow:hover{background:var(--hov)}
+  .trow.sel{background:var(--sel);box-shadow:inset 2px 0 var(--sel-edge)}
+  .trow .tw{color:var(--t2);width:10px;flex:none}
+  .trow .glyph{color:var(--t2);width:12px;flex:none;text-align:center}
+  .trow .lbl{color:var(--t0)} .trow .lbl.dim{color:var(--t1)}
+  .trow .meta{margin-left:auto;color:var(--t2);font-size:10.5px}
+  .trow .meta .hot{color:var(--amber)}
+  .trow .meta .b{color:var(--blu)}
+  .trow .meta .g{color:var(--grn)}
+  .depth1{padding-left:26px} .depth2{padding-left:40px}
+  .led{width:6px;height:6px;flex:none}
+  .led.on{background:var(--grn)} .led.warn{background:var(--amber)}
+  .connect{margin:12px 12px 0;padding-top:9px;border-top:1px solid var(--line);
+    font:10.5px var(--mono);color:var(--t2)}
+  .connect b{color:var(--t1);font-weight:400}
+  /* ---------- work canvas (D's duo header: tabs + page bar) ---------- */
+  .canvas{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--b0)}
+  .tabbar{display:flex;align-items:center;background:var(--b1);border-bottom:1px solid var(--line);
+    font:11px var(--mono)}
+  .tab{display:flex;gap:7px;align-items:center;padding:7px 14px;color:var(--t1);cursor:pointer}
+  .tab .g{color:var(--t2)}
+  .tab.on{background:var(--b0);color:var(--t0);box-shadow:inset 0 2px var(--sel-edge)}
+  .tab .x{color:var(--t2);margin-left:2px}
+  .tab.plus{color:var(--t2);padding:7px 10px}
+  .pgbar{display:flex;gap:14px;align-items:center;padding:5px 14px;border-bottom:1px solid var(--line);
+    font:10.5px var(--mono);color:var(--t2)}
+  .pgbar b{color:var(--t1);font-weight:400}
+  .pgbar .act{margin-left:auto;display:flex;gap:12px}
+  .pgbar .act span{cursor:pointer;color:var(--t1)}
+  .view{overflow:auto;flex:1;padding:20px 22px 32px}
+  .doc{max-width:680px;font:13.5px/1.7 var(--sans)}
+  .doc h2{font:700 16px var(--sans);padding-bottom:8px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+  .doc ul{list-style:none;margin-bottom:14px}
+  .doc li{padding:3px 8px;margin:1px 0;cursor:pointer;display:flex;align-items:baseline;gap:8px}
+  .doc li::before{content:"–";color:var(--t2)}
+  .doc li:hover{background:var(--hov)}
+  .doc code{font:12px var(--mono);background:var(--b2);padding:0 5px;color:var(--blu)}
+  .ann-hl{background:#d9a3341f;box-shadow:inset 0 -1px var(--amber)}
+  .mk{font:10px var(--mono);color:#131417;background:var(--amber);padding:0 4px;margin-left:6px}
+  .selected{background:var(--sel);box-shadow:inset 0 0 0 1px var(--sel-edge)}
+  /* annotation editor */
+  .editor{width:520px;margin:10px 0 16px;border:1px solid var(--line2);background:var(--b1)}
+  .ed-bar{display:flex;align-items:center;gap:10px;padding:6px 10px;background:var(--b2);
+    font:10.5px var(--mono);color:var(--t2)}
+  .ed-bar .cap{letter-spacing:.1em}
+  .ed-bar b{color:var(--t1);font-weight:400}
+  .ed-bar .close{margin-left:auto;cursor:pointer}
+  .editor textarea{width:100%;height:60px;background:var(--b0);border:none;resize:vertical;
+    padding:8px 10px;font:12px/1.6 var(--mono);color:var(--t0);outline:none}
+  .ed-ctl{display:flex;align-items:center;gap:14px;padding:7px 10px;font:11px var(--mono)}
+  .seg{display:flex;background:var(--b0)}
+  .seg span{padding:4px 12px;color:var(--t1);cursor:pointer}
+  .seg span.on{background:var(--b3);color:var(--t0);box-shadow:inset 0 -2px var(--red)}
+  .chk{color:var(--t1);display:flex;gap:6px;align-items:center}
+  .chk .box{width:10px;height:10px;border:1px solid var(--line2)}
+  .ed-go{margin-left:auto;display:flex;gap:12px;align-items:center}
+  .ed-go .cancel{color:var(--t2);cursor:pointer}
+  .ed-go .add{background:var(--b3);color:var(--t0);padding:4px 14px;cursor:pointer;font-weight:700}
+  .ed-go .add em{font-style:normal;color:var(--t2);font-weight:400;margin-left:6px}
+  /* ---------- channel rack ---------- */
+  .rack{background:var(--b1);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+  .rhead{padding:7px 12px;font:10px var(--mono);color:var(--t2);letter-spacing:.12em}
+  .chan{padding:8px 12px;cursor:pointer}
+  .chan:hover{background:var(--hov)}
+  .chan.live{background:var(--b2);box-shadow:inset 2px 0 var(--amber)}
+  .ch-top{display:flex;align-items:center;gap:7px;font:12px var(--mono)}
+  .ch-top .nm{color:var(--t0);font-weight:700}
+  .ch-top .st{margin-left:auto;font-size:10px;color:var(--t2)}
+  .ch-top .st.w{color:var(--grn)}
+  .ch-mic{display:flex;align-items:center;gap:8px;margin-top:6px}
+  .patch{font:10px var(--mono);border:1px solid var(--line2);padding:2px 8px;cursor:pointer;color:var(--t2)}
+  .patch.on{background:var(--amber);color:#131417;border-color:var(--amber);font-weight:700}
+  .meter{flex:1;height:7px;background:var(--b0);display:flex;gap:1px;padding:1px}
+  .meter i{width:4px;background:var(--grn)}
+  .meter i.a{background:var(--amber)}
+  .ch-cap{margin-top:6px;font:10.5px/1.5 var(--mono);color:var(--t1);
+    border-left:2px solid var(--amber);padding-left:6px}
+  .ch-idle{margin-top:5px;font:10px var(--mono);color:var(--t2);display:flex;gap:10px;align-items:center}
+  .ch-idle .q{color:var(--amber)}
+  .master{margin-top:auto;padding:9px 12px;border-top:1px solid var(--line);
+    font:10.5px var(--mono);color:var(--t2)}
+  .master .row{display:flex;justify-content:space-between;margin:2px 0}
+  .master .row .v{color:var(--t1)}
+  .master .row .v.hot{color:var(--amber)}
+  /* ---------- console ---------- */
+  .console{border-top:1px solid var(--line2);background:var(--b1);display:flex;flex-direction:column;min-height:0}
+  .ctabs{display:flex;align-items:center;font:11px var(--mono)}
+  .ctab{padding:6px 16px;color:var(--t1);cursor:pointer}
+  .ctab.on{background:var(--b0);color:var(--t0);box-shadow:inset 0 2px var(--sel-edge)}
+  .ctab .n{color:var(--t2)}
+  .cfoot{margin-left:auto;padding-right:12px;font:10.5px var(--mono);color:var(--t2);display:flex;gap:18px}
+  .cfoot b{color:var(--t1);font-weight:400}
+  .cbody{flex:1;overflow:auto;background:var(--b0)}
+  table{width:100%;border-collapse:collapse;font:11.5px var(--mono)}
+  th{font:10px var(--mono);color:var(--t2);letter-spacing:.1em;text-align:left;
+    padding:5px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--b0)}
+  td{padding:6px 14px;color:var(--t1);vertical-align:top}
+  td.kind{white-space:nowrap}
+  .k-c{color:var(--red)} .k-q{color:var(--blu)} .k-n{color:var(--t2)}
+  td .blk{color:var(--amber)}
+  td.txt{color:var(--t0);font:12px var(--sans);max-width:600px}
+  td.loc{color:var(--t2)}
+  tr.done td{color:var(--t2)} tr.done td.txt{text-decoration:line-through;color:var(--t2)}
+  tr:hover td{background:var(--hov)}
+  td .x{cursor:pointer;color:var(--t2)}
+  /* ---------- status ---------- */
+  .status{display:flex;gap:20px;align-items:center;background:var(--b1);
+    border-top:1px solid var(--line);font:10.5px var(--mono);color:var(--t2);padding:0 14px}
+  .status .ok{color:var(--grn)} .status .mic{color:var(--amber)}
+  .status b{color:var(--t1);font-weight:400}
+  .status .right{margin-left:auto}
+  /* ---------- samples + tokens ---------- */
+  .samples{max-width:1340px;margin:24px auto 80px;padding:0 20px;display:grid;
+    grid-template-columns:1fr 1fr 1fr;gap:16px}
+  .sample{border:1px solid var(--line2);background:var(--b1)}
+  .sample h3{font:10px var(--mono);color:var(--t2);letter-spacing:.14em;padding:8px 12px}
+  .drow{display:grid;grid-template-columns:46px 34px 1fr;font:12px/1.65 var(--mono)}
+  .dline{color:var(--t2);text-align:right;padding-right:10px;background:var(--b0)}
+  .drow .code{padding-left:12px;white-space:pre;color:var(--t1)}
+  .drow.add .code{background:#43b58114;color:var(--t0)}
+  .drow.add .sign{color:var(--grn)}
+  .drow.del .code{background:#d95c4f14}
+  .drow.del .sign{color:var(--red)}
+  .drow.flagged .code{box-shadow:inset 2px 0 var(--amber)}
+  .sign{text-align:center}
+  .treex{font:12px/1.7 var(--mono);padding:8px 12px;color:var(--t1)}
+  .treex .sel{color:var(--blu)}
+  .treex .stat{color:var(--grn)} .treex .statd{color:var(--red)}
+  .tok{font:11px/1.9 var(--mono);padding:8px 12px;color:var(--t1)}
+  .tok i{display:inline-block;width:10px;height:10px;margin-right:8px;vertical-align:-1px}
+  .tok .r{color:var(--t2)}
+</style>
+</head>
+<body>
+<div class="note">
+  <h1>D · <span>CONSOLE mk3</span> — final assembly</h1>
+  <p>mk2's quiet body with the D details kept by decision: the cellular command bar, the
+  two-line canvas header (tabs + page bar), colored tree meta (PR/issue steel, ahead green,
+  dirty/queue/flags amber), and collapsible repo groups (▾/▸ on the group row).
+  <a href="index4.html">← mk2</a> · <a href="index2.html">D original</a></p>
+</div>
+
+<div class="deck">
+  <!-- command bar — D's cells -->
+  <div class="cmd">
+    <div class="cell"><span class="app">voco</span><span class="ok">●</span><span>127.0.0.1:7777</span></div>
+    <div class="prompt"><span class="p">&gt;</span> say "deck …" or type
+      <span class="route">route → <b>HUGO</b></span></div>
+    <div class="cell keys"><span><span class="kbd">F13</span> ptt</span><span><span class="kbd">⌘K</span> cmd</span><span>⚙</span></div>
+  </div>
+
+  <div class="mid">
+    <!-- fleet tree -->
+    <div class="tree">
+      <div class="thead">FLEET</div>
+      <div class="grp"><span class="tw">▾</span>vocodeck2 <span class="ops">+rev +agt</span></div>
+      <div class="trow depth1"><span class="tw">▾</span><span class="glyph">⌥</span><span class="lbl">workbench</span>
+        <span class="meta"><span class="b">pr#7</span> · ±3 <span class="g">↑2</span> · <span class="hot">3⚑</span></span></div>
+      <div class="trow depth2"><span class="led on"></span><span class="lbl">Hugo</span>
+        <span class="meta"><span class="hot">MIC</span> · working</span></div>
+      <div class="trow depth2"><span class="glyph">◈</span><span class="lbl dim">overview</span></div>
+      <div class="trow depth2"><span class="glyph">▤</span><span class="lbl dim">files</span></div>
+      <div class="trow depth2"><span class="glyph">±</span><span class="lbl dim">branch</span><span class="meta">r11</span></div>
+
+      <div class="grp"><span class="tw">▾</span>voco-demo <span class="ops">+rev +agt</span></div>
+      <div class="trow depth1"><span class="tw">▸</span><span class="glyph">⌥</span><span class="lbl dim">fix-pty</span><span class="meta">no agent</span></div>
+      <div class="trow depth1 sel"><span class="tw">▾</span><span class="glyph">⌥</span><span class="lbl">workbench-strip</span>
+        <span class="meta"><span class="b">#3 pr#7</span> · <span class="hot">8⚑</span></span></div>
+      <div class="trow depth2"><span class="glyph">±</span><span class="lbl dim">branch:main</span><span class="meta">r8</span></div>
+      <div class="trow depth2 sel"><span class="glyph">▦</span><span class="lbl">strip status</span><span class="meta">r4</span></div>
+
+      <div class="grp"><span class="tw">▾</span>SESSIONS</div>
+      <div class="trow depth1"><span class="led warn"></span><span class="lbl dim">Freya</span><span class="meta"><span class="hot">q4</span> · stale</span></div>
+      <div class="trow depth1"><span class="led warn"></span><span class="lbl dim">Iris</span><span class="meta"><span class="hot">q1</span> · stale</span></div>
+      <div class="connect">connect → <b>voco attach …</b></div>
+    </div>
+
+    <!-- work canvas — D's duo header -->
+    <div class="canvas">
+      <div class="tabbar">
+        <div class="tab on"><span class="g">▦</span>strip status<span class="g">@r4</span><span class="x">✕</span></div>
+        <div class="tab"><span class="g">±</span>branch:main<span class="g">@r8</span><span class="x">✕</span></div>
+        <div class="tab"><span class="g">▤</span>files<span class="x">✕</span></div>
+        <div class="tab plus">+</div>
+      </div>
+      <div class="pgbar">
+        <b>voco-demo/workbench-strip</b><span>▦ doc · rev 4 · pushed 21:58:12 by freya</span>
+        <div class="act"><span>annotate: click block · select text</span><span>export</span></div>
+      </div>
+      <div class="view">
+        <div class="doc">
+          <h2>strip status</h2>
+          <ul>
+            <li><span class="ann-hl">orb states: <b>done</b></span><span class="mk">A2</span></li>
+            <li>captions: done</li>
+            <li><span class="selected">tests: 3 green</span></li>
+          </ul>
+
+          <div class="editor">
+            <div class="ed-bar"><span class="cap">ANNOTATE</span><b>▦ "tests: 3 green"</b> · anchors survive edits<span class="close">esc ✕</span></div>
+            <textarea>3 green — but the suite gained 12 tests since r3. Re-run and re-push; stale counts read as fresh signal.</textarea>
+            <div class="ed-ctl">
+              <div class="seg"><span class="on">concern</span><span>question</span><span>nit</span></div>
+              <div class="chk"><span class="box"></span> blocking</div>
+              <div class="ed-go"><span class="cancel">cancel</span><span class="add">add <em>⏎</em></span></div>
+            </div>
+          </div>
+
+          <p>next: wire <code>speech.sentence</code> karaoke</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- channel rack -->
+    <div class="rack">
+      <div class="rhead">CHANNELS — MIC PATCHES HERE</div>
+      <div class="chan live">
+        <div class="ch-top"><span class="led on"></span><span class="nm">HUGO</span><span class="st w">working 42s</span></div>
+        <div class="ch-mic"><span class="patch on">MIC</span>
+          <div class="meter"><i></i><i></i><i></i><i></i><i class="a"></i><i class="a"></i></div></div>
+        <div class="ch-cap">"flag the orb bullet, it's stale…"</div>
+      </div>
+      <div class="chan">
+        <div class="ch-top"><span class="led warn"></span><span class="nm">FREYA</span><span class="st">stale 6m</span></div>
+        <div class="ch-idle"><span class="patch">MIC</span><span>session · <span class="q">queue 4</span></span></div>
+      </div>
+      <div class="chan">
+        <div class="ch-top"><span class="led warn"></span><span class="nm">IRIS</span><span class="st">stale 11m</span></div>
+        <div class="ch-idle"><span class="patch">MIC</span><span>session · <span class="q">queue 1</span></span></div>
+      </div>
+      <div class="master">
+        <div class="row"><span>ptt · duplex</span><span class="v">hold F13 · half</span></div>
+        <div class="row"><span>attention</span><span class="v hot">ptt_only</span></div>
+        <div class="row"><span>working / listening</span><span class="v">1 / 0</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- console -->
+  <div class="console">
+    <div class="ctabs">
+      <div class="ctab on">annotations <span class="n">3</span></div>
+      <div class="ctab">transcript <span class="n">50</span></div>
+      <div class="ctab">asks <span class="n">0</span></div>
+      <div class="ctab">log</div>
+      <div class="cfoot"><span><b>2 open</b> · 1 blocking</span><span>export ↓</span><span>scope: workbench-strip</span></div>
+    </div>
+    <div class="cbody">
+      <table>
+        <tr><th style="width:110px">KIND</th><th>TEXT</th><th style="width:260px">ANCHOR</th><th style="width:30px"></th></tr>
+        <tr>
+          <td class="kind k-c">concern <span class="blk">⚑</span></td>
+          <td class="txt">orb must reflect attention mode, not just VAD — muted should read differently from idle</td>
+          <td class="loc">± presence.mjs:4</td><td class="x">✕</td>
+        </tr>
+        <tr>
+          <td class="kind k-q">question</td>
+          <td class="txt">is "orb states: done" still true after the attention-mode rework?</td>
+          <td class="loc">▦ strip status · "orb states…"</td><td class="x">✕</td>
+        </tr>
+        <tr class="done">
+          <td class="kind k-n">nit</td>
+          <td class="txt">caption quotes render straight, should be curly</td>
+          <td class="loc">± presence.mjs:31</td><td></td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- status -->
+  <div class="status">
+    <span class="ok">● daemon 7777</span>
+    <span class="mic">MIC → HUGO</span>
+    <span>ptt_only · half_duplex</span>
+    <span><b>1</b> working · <b>0</b> listening · <b>3</b> ann</span>
+    <span class="right">22:41:07 · rev-sync ok</span>
+  </div>
+</div>
+
+<div class="samples">
+  <div class="sample">
+    <h3>DIFF · FLAGGED ROW</h3>
+    <div class="drow del"><span class="dline">33</span><span class="sign">−</span><span class="code">timeout_ms = 800</span></div>
+    <div class="drow add"><span class="dline">33</span><span class="sign">+</span><span class="code"># timeout_ms = 800</span></div>
+    <div class="drow add flagged"><span class="dline">34</span><span class="sign">+</span><span class="code"># late_window_ms = 8000</span></div>
+    <div class="drow"><span class="dline">35</span><span class="sign"></span><span class="code">stream = true</span></div>
+  </div>
+  <div class="sample">
+    <h3>FILE TREE</h3>
+    <div class="treex">
+      <div>▾ src/voco/server/</div>
+      <div>&nbsp;&nbsp;▸ adapters/</div>
+      <div class="sel">&nbsp;&nbsp;workbench.py <span class="stat">+698</span></div>
+      <div>&nbsp;&nbsp;http.py <span class="stat">+218</span> <span class="statd">−33</span></div>
+      <div>▾ static/</div>
+      <div>&nbsp;&nbsp;docview.mjs <span class="stat">+184</span></div>
+    </div>
+  </div>
+  <div class="sample">
+    <h3>TOKENS (UNCHANGED FROM D)</h3>
+    <div class="tok">
+      <div><i style="background:#131417"></i>b0 #131417 · b1 #17181c · b2 #1c1e23 · b3 #24262c</div>
+      <div><i style="background:#6ea3d8"></i>steel #6ea3d8 <span class="r">= selection · PR/issue chips</span></div>
+      <div><i style="background:#d9a334"></i>amber #d9a334 <span class="r">= mic · blocking · queue · dirty</span></div>
+      <div><i style="background:#43b581"></i>green #43b581 · <i style="background:#d95c4f"></i>red #d95c4f <span class="r">= live signal · ahead/behind</span></div>
+      <div class="r">12px mono data · 13.5px sans prose · 10px caps labels</div>
+      <div class="r">hairlines: zone seams · command-bar cells · canvas bars · table head</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
