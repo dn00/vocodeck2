@@ -208,6 +208,26 @@ mid cols: 266px fleet tree / 1fr canvas / 220px channel rack
 
 ## Journal
 
+- **2026-07-08 · M2 SHIPPED — fleet tree.** renderRail rebuilt as the
+  mk3 tree: FLEET caps header; repo groups collapsible (▾/▸ on the
+  group row, in-memory fold state) with `+rev +agt` ops replacing the
+  per-group review button and "＋ agent in a new worktree…" action row;
+  work rows are ONE line (caret · ⌥ · branch label · right-aligned meta
+  cluster: issue/PR chips steel, ±dirty ?untracked gray with the full
+  git tooltip, ↑↓ green, open-flag count amber ⚑) with client-local
+  expansion (selected work always expanded; carets hold others open);
+  agents render as LED child rows — the compact single-agent inline
+  form is retired — with amber `MIC` replacing the ⚡ bolt and `qN`
+  amber queue; strays group renamed SESSIONS, membership now by
+  identity (wsOf) so folded groups don't leak agents into it. LED/state
+  semantics remapped to mk3: green = working/listening (live), amber =
+  stale, red = blocked, gray = idle. The diff file sub-tree LEFT the
+  tree per the pinned decision — the diff view's own file index owns
+  per-file navigation (diffSubTree + its cold-load renderRail hook
+  removed). Gates: 371 pytest · ruff · tsc. Browser-verified on :7911:
+  render matches index5; caret expand, group fold/unfold, and selection
+  exercised live; console clean. NEXT: M3 — canvas tabs + page bar.
+
 - **2026-07-08 · M1 SHIPPED — command bar + status line.** presence.mjs
   rebuilt as the mk3 command bar (mount-once kept; input value/focus
   survive renders): [voco ● host] cell with daemon LED (red +

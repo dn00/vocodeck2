@@ -195,16 +195,22 @@ async function detachAgent(s) {
   } catch (e) { toast("detach failed: " + errMsg(e), true); }
 }
 
-// ---- rail: repo groups → work rows → agents + pages ----------------------------
+// ---- fleet tree (mk3 M2): groups → work rows → agents + pages -------------------
 const PAGE_ICON = { screen: "▦", diff: "±", doc: "¶", terminal: "❯", html: "▣" };
 
 function groupKey(ws) { return ws.common_dir || ws.key; }
 
+// Client-local expansion state: the selected work is always expanded;
+// carets let the reader hold other rows open or fold groups away.
+const collapsedGroups = new Set();
+const expandedWork = new Set();
+
 function renderRail() {
   const keep = rail.scrollTop; // rebuilds must not move the reader
   rail.replaceChildren();
+  rail.append(h("div", { class: "tree-head caps" }, "FLEET"));
   // Repo groups hold WORK ROWS (kind=workspace only); sessionspace
-  // agents render as bare agent rows under "elsewhere" (ADR-0001).
+  // agents render as bare agent rows under SESSIONS (ADR-0001).
   /** @type {Map<string, {name:string, works:any[]}>} */
   const groups = new Map();
   for (const ws of store.workspaces.values()) {
@@ -215,31 +221,39 @@ function renderRail() {
     g.works.push(ws);
     if (ws.repo) g.name = ws.repo;
   }
-  const placed = new Set();
-  for (const [, g] of groups) {
+  for (const [gkey, g] of groups) {
     const groupWs = () =>
       g.works.find((w) => w.key === store.selectedWorkspace) || g.works[0];
-    rail.append(h("div", { class: "repo-group" },
-      h("span", { class: "rname" }, g.name),
-      h("button", { class: "review-btn", title: "review a diff here — no agent needed",
-        onclick: () => openPickerFor(groupWs()) }, "review")));
+    const folded = collapsedGroups.has(gkey);
+    const toggle = () => {
+      if (folded) collapsedGroups.delete(gkey); else collapsedGroups.add(gkey);
+      renderRail();
+    };
+    rail.append(h("div", { class: "grp" },
+      h("span", { class: "tw", onclick: toggle }, folded ? "▸" : "▾"),
+      h("span", { class: "grp-name", onclick: toggle }, g.name),
+      h("span", { class: "grp-ops" },
+        h("span", { class: "grp-op", title: "review a diff here — no agent needed",
+          onclick: (e) => { e.stopPropagation(); openPickerFor(groupWs()); } },
+          "+rev"),
+        h("span", { class: "grp-op", title: "spawn an agent in a new worktree",
+          onclick: (e) => { e.stopPropagation();
+            openSpawn({ ...mctx(), rootHint: groupWs().root }); } },
+          "+agt"))));
+    if (folded) continue;
     const rows = g.works.map((ws) => ({ ws, agents: agentsIn(ws) }))
       .sort((a, b) => rowOrder(a) - rowOrder(b)
         || workLabel(a.ws).localeCompare(workLabel(b.ws)));
-    for (const r of rows) {
-      for (const s of r.agents) placed.add(s.session_id);
-      rail.append(workRow(r.ws, r.agents));
-    }
-    rail.append(h("div", { class: "rail-action",
-      onclick: () => openSpawn({ ...mctx(), rootHint: groupWs().root }) },
-      "＋ agent in a new worktree…"));
+    for (const r of rows) rail.append(workRow(r.ws, r.agents));
   }
-  // Agents outside any checkout (sessionspaces, pre-identity strays).
-  const stray = [...store.sessions.values()].filter((s) => !placed.has(s.session_id));
+  // Agents outside any checkout (sessionspaces, pre-identity strays) —
+  // membership by identity, so folded groups don't leak agents here.
+  const stray = [...store.sessions.values()].filter((s) => !wsOf(s));
   if (stray.length) {
-    rail.append(h("div", { class: "repo-group" },
-      h("span", { class: "rname", title:
-        "agents running outside any git checkout" }, "not in a repo")));
+    rail.append(h("div", { class: "grp" },
+      h("span", { class: "tw" }, "▾"),
+      h("span", { class: "grp-name", title:
+        "agents running outside any git checkout" }, "SESSIONS")));
     for (const s of stray) rail.append(agentRow(s, true));
   }
   if (!store.sessions.size && !store.workspaces.size)
@@ -256,61 +270,75 @@ const rowOrder = (r) =>
 
 function workRow(ws, agents) {
   const sel = store.selectedWorkspace === ws.key;
-  const single = agents.length === 1 ? agents[0] : null;
+  const expanded = sel || expandedWork.has(ws.key);
+  const meta = h("span", { class: "wr-meta" });
+  const l = ws.links || {};
+  const g = ws.git || null;
+  const parts = [];
+  if (l.issue) parts.push(linkChip("issue", l.issue));
+  if (l.pr) parts.push(linkChip("pr", l.pr));
+  const gitBits = [];
+  if (g) {
+    const changed = (g.staged || 0) + (g.unstaged || 0);
+    if (changed) gitBits.push("±" + changed);
+    if (g.untracked) gitBits.push("?" + g.untracked);
+  }
+  if (gitBits.length)
+    parts.push(h("span", { title: gitTitle(g) }, gitBits.join(" ")));
+  if (g && g.ahead)
+    parts.push(h("span", { class: "g", title: gitTitle(g) }, "↑" + g.ahead));
+  if (g && g.behind)
+    parts.push(h("span", { class: "g", title: gitTitle(g) }, "↓" + g.behind));
+  const open = openFlagCount(ws);
+  if (open)
+    parts.push(h("span", { class: "hot", title: "open annotations + asks" },
+      open + "⚑"));
+  if (!agents.length && !parts.length)
+    parts.push(h("span", {}, "no agent"));
+  parts.forEach((p, i) => { if (i) meta.append(" · "); meta.append(p); });
+  const caret = h("span", { class: "tw",
+    title: expanded ? "collapse" : "expand",
+    onclick: (e) => {
+      e.stopPropagation();
+      if (expandedWork.has(ws.key)) expandedWork.delete(ws.key);
+      else expandedWork.add(ws.key);
+      renderRail();
+    } }, expanded ? "▾" : "▸");
   const row = h("div", {
     class: "work-row" + (sel ? " sel" : "") + (agents.length ? "" : " parked"),
     onclick: () => selectWork(ws) },
-    h("div", { class: "wr-top" },
-      agents.length ? dot(agents[0]) : h("span", { class: "dot none", title: "no agent" }),
-      h("span", { class: "wr-label" }, workLabel(ws)),
-      ...linkChips(ws),
-      flaggedChip(ws)),
-    h("div", { class: "wr-sub" },
-      gitCluster(ws),
-      single ? inlineAgent(single)
-        : h("span", { class: "wr-note" }, agents.length
-          // state word rides the note: state is never color-only (a11y)
-          ? `${agents.length} agents · ${stateOf(agents[0])}`
-          : "no agent")));
-  if (!sel) return row;
+    caret,
+    h("span", { class: "glyph" }, "⌥"),
+    h("span", { class: "wr-label" }, workLabel(ws)),
+    meta);
+  if (!expanded) return row;
   const box = h("div", {}, row);
-  if (!single) for (const s of agents) box.append(agentRow(s));
+  for (const s of agents) box.append(agentRow(s));
   box.append(pagesTree(ws));
   return box;
 }
 
-/** The compact single-worker cluster ON the work row: clicking the
- * agent moves the mic; clicking anywhere else on the row is view-only. */
-function inlineAgent(s) {
-  return h("span", { class: "wr-agent",
-    title: `talk to ${s.name} (moves the mic)`,
-    onclick: (e) => { e.stopPropagation(); selectAgent(s); } },
-    h("span", { class: "ar-name" }, s.name),
-    store.activeSession === s.session_id
-      ? h("span", { class: "bolt", title: "holds the mic" }, "⚡") : "",
-    store.speaking && store.speaking.who === s.name ? speakingEq() : "",
-    h("span", { class: "ar-state " + stateOf(s) }, stateOf(s)),
-    s.queued ? h("span", { class: "chip hot" }, s.queued + " queued") : "",
-    h("span", { class: "rail-x", title: "forget this session",
-      onclick: (e) => { e.stopPropagation(); detachAgent(s); } }, "✕"));
-}
+const gitTitle = (g) => !g ? "" :
+  `${g.staged} staged · ${g.unstaged} unstaged · ${g.untracked} untracked`
+  + (g.ahead != null ? ` · ${g.ahead} ahead ${g.behind} behind upstream` : "");
 
-/** Nested (inside a selected multi-agent row) or bare (sessionspace). */
+/** Child row inside an expanded work row, or bare (SESSIONS group). */
 function agentRow(s, bare = false) {
   const sel = store.selectedAgent === s.session_id;
   const row = h("div", {
-    class: "agent-row" + (bare ? "" : " nested") + (sel ? " sel" : ""),
+    class: "agent-row" + (bare ? " bare" : "") + (sel ? " sel" : ""),
+    title: `talk to ${s.name} (moves the mic)`,
     onclick: () => selectAgent(s) },
-    h("div", { class: "ar-top" },
-      dot(s),
-      h("span", { class: "ar-name" }, s.name),
+    dot(s),
+    h("span", { class: "ar-name" }, s.name),
+    store.speaking && store.speaking.who === s.name ? speakingEq() : "",
+    h("span", { class: "ar-meta" },
       store.activeSession === s.session_id
-        ? h("span", { class: "bolt", title: "holds the mic" }, "⚡") : "",
-      store.speaking && store.speaking.who === s.name ? speakingEq() : "",
-      h("span", { class: "ar-state " + stateOf(s) }, stateOf(s)),
-      s.queued ? h("span", { class: "chip hot" }, s.queued + " queued") : "",
-      h("span", { class: "rail-x", title: "forget this session",
-        onclick: (e) => { e.stopPropagation(); detachAgent(s); } }, "✕")));
+        ? h("span", { class: "hot", title: "holds the mic" }, "MIC · ") : "",
+      s.queued ? h("span", { class: "hot" }, "q" + s.queued + " · ") : "",
+      h("span", { class: "ar-state " + stateOf(s) }, stateOf(s))),
+    h("span", { class: "rail-x", title: "forget this session",
+      onclick: (e) => { e.stopPropagation(); detachAgent(s); } }, "✕"));
   if (bare && sel) {
     const ws = wsOf(s);
     if (ws) return h("div", {}, row, pagesTree(ws));
@@ -324,34 +352,16 @@ function speakingEq() {
   return eq;
 }
 
-function flaggedChip(ws) {
-  if (!ws) return "";
-  // Unvisited rows fall back to the snapshot's counts — parked work's
-  // open annotations must be visible without selecting it first.
-  const open = store.findings.has(ws.key)
+/** Open annotations + unanswered asks for a work row (number).
+ * Unvisited rows fall back to the snapshot's counts — parked work's
+ * open annotations must be visible without selecting it first. */
+function openFlagCount(ws) {
+  if (!ws) return 0;
+  return store.findings.has(ws.key)
     ? store.findingsFor(ws.key).filter((f) => f.status === "open").length
       + store.asksFor(ws.key).filter((a) => a.answer == null).length
     : ((ws.finding_counts && ws.finding_counts.open) || 0)
       + (ws.open_asks || 0);
-  return open ? h("span", { class: "chip amber" }, open + " flagged") : "";
-}
-
-/** B1c: the work row's local git facts — only nonzero truths render.
- * ± staged+unstaged · ?untracked · ↑ahead ↓behind vs upstream. */
-function gitCluster(ws) {
-  const g = ws.git;
-  if (!g) return "";
-  const bits = [];
-  const changed = (g.staged || 0) + (g.unstaged || 0);
-  if (changed) bits.push("±" + changed);
-  if (g.untracked) bits.push("?" + g.untracked);
-  if (g.ahead) bits.push("↑" + g.ahead);
-  if (g.behind) bits.push("↓" + g.behind);
-  if (!bits.length) return "";
-  return h("span", { class: "wr-git", title:
-    `${g.staged} staged · ${g.unstaged} unstaged · ${g.untracked} untracked`
-    + (g.ahead != null ? ` · ${g.ahead} ahead ${g.behind} behind upstream` : "") },
-    bits.join(" "));
 }
 
 function linkChip(kind, link) {
@@ -373,17 +383,21 @@ function linkChips(ws) {
     l.pr ? linkChip("pr", l.pr) : null];
 }
 
+// mk3 decision (BUILD-CONSOLE.md): the diff file sub-tree left the tree —
+// the diff view's own collapsed file index owns per-file navigation.
 function pagesTree(ws) {
   const tree = h("div", { class: "pages" });
   tree.append(h("div", {
     class: "page-row" + (store.selectedPage == null ? " sel" : ""),
     onclick: (e) => { e.stopPropagation(); store.selectPage(null); } },
-    h("span", { class: "picon" }, "◈"), h("span", {}, "overview")));
+    h("span", { class: "picon" }, "◈"),
+    h("span", { class: "page-title" }, "overview")));
   if (ws && ws.kind === "workspace")
     tree.append(h("div", {
       class: "page-row" + (store.selectedPage === "__files__" ? " sel" : ""),
       onclick: (e) => { e.stopPropagation(); store.selectPage("__files__"); } },
-      h("span", { class: "picon" }, "▤"), h("span", {}, "files")));
+      h("span", { class: "picon" }, "▤"),
+      h("span", { class: "page-title" }, "files")));
   const pages = ws
     ? ws.pages.filter((p) => !p.closed)
       .sort((a, b) => (a.pinned ? 0 : 1) - (b.pinned ? 0 : 1)
@@ -402,40 +416,8 @@ function pagesTree(ws) {
       row.append(h("span", { class: "rail-x", title: "close page",
         onclick: (e) => { e.stopPropagation(); closePage(p); } }, "✕"));
     tree.append(row);
-    // The selected diff's file sub-tree (rev 4.1 rail): stats + finding
-    // dot per file; click = open that fold and jump to it.
-    if (p.type === "diff" && p.page_id === store.selectedPage) {
-      const sub = diffSubTree(ws, p);
-      if (sub) tree.append(sub);
-    }
   }
   return tree;
-}
-
-function diffSubTree(ws, p) {
-  const cached = contentCache.get(p.page_id);
-  if (!cached || cached.rev !== p.rev) return null;
-  const st = diffStats(cached.content.files || []);
-  if (!st.files) return null;
-  const flagged = new Set(store.findingsFor(ws.key)
-    .filter((f) => f.status === "open" && f.page_id === p.page_id)
-    .map((f) => (f.anchor || {}).file));
-  const box = h("div", { class: "dfiles" });
-  for (const [path, s] of st.perFile) {
-    box.append(h("div", { class: "dfile-row",
-      onclick: (e) => {
-        e.stopPropagation();
-        pendingReveal = { pageId: p.page_id, path };
-        store.selectPage(p.page_id);
-      } },
-      flagged.has(path) ? h("span", { class: "fdot", title: "open annotation" }) : "",
-      h("span", {}, path.split("/").pop()),
-      h("span", { class: "dfm" },
-        s.add ? h("span", { class: "add" }, "+" + s.add) : "",
-        s.add && s.del ? " " : "",
-        s.del ? h("span", { class: "del" }, "−" + s.del) : "")));
-  }
-  return box;
 }
 
 // Fold state per diff page — survives re-renders so the reader keeps
@@ -803,11 +785,8 @@ async function renderPage(view, page, srnote, actions) {
   if (page.type === "diff") {
     view.textContent = "…";
     try {
-      const cold = (contentCache.get(page.page_id) || {}).rev !== page.rev;
       const c = await fetchContent(page.page_id, page.rev);
       if (stale()) return;
-      // First load of this rev: the rail's file sub-tree can render now.
-      if (cold) requestAnimationFrame(renderRail);
       const findings = store.findingsFor(store.selectedWorkspace || "")
         .filter((f) => f.page_id === page.page_id && f.status !== "withdrawn");
       let fc = foldCache.get(page.page_id);
