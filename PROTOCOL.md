@@ -83,6 +83,8 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 - `page.close`
 - `page.publish`
 - `page.reopen`
+- `ptt.press`
+- `ptt.release`
 - `review.export`
 - `review.primary`
 - `say_as_user`

@@ -501,6 +501,18 @@ class Daemon:
                 self.voice.barge_in()
             self._inject_escape(self.registry.active)
             return {}
+        if cmd in ("ptt.press", "ptt.release"):
+            # Client hold-PTT (mk3.1 #7): the deck's hold button / key use
+            # the SAME machine path as the native hotkey, so attention
+            # gating and turn semantics stay identical. Headless is an
+            # honest error — there is no mic to gate.
+            if self.voice is None:
+                raise ValueError("no voice loop running")
+            if cmd == "ptt.press":
+                self.voice.ptt_press()
+            else:
+                self.voice.ptt_release()
+            return {}
         if cmd == "mic.set":
             # Two orthogonal knobs (SPEC §4.4/§4.5); legacy "mode" = duplex.
             duplex = payload.get("duplex") or payload.get("mode")

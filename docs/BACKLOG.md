@@ -7,6 +7,30 @@ Work through it top to bottom; every UI item ends browser-verified —
 green gates alone have twice claimed victory on a deck you couldn't
 scroll.
 
+## mk3 aftermath (2026-07-09) — state + deferred queue
+
+The CONSOLE mk3 rebuild (BUILD-CONSOLE.md) landed the deck skin M0–M8
+plus the mk3.1 batch: PR/issue attach UI, minimal ⌘K palette, file-line
+annotation (page-less findings), page push-timestamps + honest channel
+ages, client hold-PTT (ptt.press/release), edit-annotation, diff syntax
+highlighting + j/k + mark-reviewed, split ⚑/? tree badges, status-line
+shortcuts, fold/scroll persistence, and the rack's body=view /
+patch=mic split. Of the lists below, B1 items 11/12/13 and B2 items
+16/17/19/21 are DONE by that work; B2 18 (daemon autostart) and 20
+(OS notifications) remain the live product P0s.
+
+Deferred by explicit decision (captain, 2026-07-09):
+- Tauri shell (ADR-0002 Tier 1) — native PTT, tray, notifications
+- Streaming STT captions (stt.partial emission; the UI ticker is ready)
+- Post-review-to-PR via gh (export exists; one gh call away)
+- Settings polish: per-key help copy, a "this browser" section
+- Full ⌘K action palette (minimal nav+mic shipped; actions later)
+- Light theme (tokens make it cheap; parked until wanted)
+- In-source gutter marks for file findings in the files view (the
+  findings list + reveal work; the marks are the missing half)
+- Live verify of an agent ANSWERING an ask (needs a real bridge agent)
+- Scripted browser smoke test — NEXT UP, ordered last of the batch
+
 ## B0 — BROKEN (root-caused; fix first)
 
 1. **Center pane cannot scroll.** `styles.css` `.work` is a grid child

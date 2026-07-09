@@ -132,3 +132,50 @@ def test_export_legacy_and_sidecar(tmp_path):
     )
     assert len(anchors) == 2  # sidecar keeps withdrawn
     assert res["count"] == 1
+
+
+# ---- page-less FILE findings (mk3.1 A3: the files view is not a page) ----
+
+
+def test_add_file_finding_pageless():
+    store, ws, _page, events = store_with_diff()
+    events.clear()
+    f = store.add_finding(
+        ws.key,
+        page_id=None,
+        anchor={
+            "kind": "file",
+            "file": "src/foo.py",
+            "startLine": 3,
+            "endLine": 4,
+            "exact": "def foo",
+        },
+        text="rename this",
+        kind="nit",
+    )
+    assert f.page_id is None
+    assert f.rev == 0  # no page rev to go stale against
+    assert f.to_dict()["page_id"] is None
+    assert events and events[0][0] == "finding.added"
+    # page-less findings still ride pending_review (they are open work)
+    ids = [i["id"] for i in ws.pending_review()]
+    assert f.finding_id in ids
+
+
+def test_pageless_finding_requires_file_anchor():
+    store, ws, _page, _events = store_with_diff()
+    with pytest.raises(ValueError, match="file anchor"):
+        store.add_finding(ws.key, page_id=None, anchor={"exact": "x"}, text="t")
+    with pytest.raises(ValueError, match="file anchor"):
+        store.add_finding(
+            ws.key,
+            page_id=None,
+            anchor={"kind": "file"},  # kind right, path missing
+            text="t",
+        )
+
+
+def test_unknown_page_still_rejected():
+    store, ws, _page, _events = store_with_diff()
+    with pytest.raises(ValueError, match="unknown page"):
+        store.add_finding(ws.key, page_id="pg-nope", anchor={"file": "x"}, text="t")

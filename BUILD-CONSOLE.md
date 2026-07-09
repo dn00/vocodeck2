@@ -208,6 +208,49 @@ mid cols: 266px fleet tree / 1fr canvas / 220px channel rack
 
 ## Journal
 
+- **2026-07-09 · mk3.1 BATCH SHIPPED — all of A, plus 7/9/10/11-as-
+  decided/12/13/14/15.** Bulk pass by file, browser-verified end-to-end
+  on :7911. (A1) PR/issue attach: link editor on the work overview card
+  — paste `#N` or a GitHub URL, Enter attaches via workspace.link
+  (manual wins), ✕ detaches; verified detach `#3` → attach `#42`,
+  chips + tree meta updated everywhere. (A2) MINIMAL ⌘K palette
+  (palette.mjs): navigation + mic only — works, pages, files, view/
+  patch per agent, console tabs, export; ordered-substring fuzzy;
+  full action palette deferred. (A3) file-line annotation: select code
+  in the files source view → editor → PAGE-LESS finding (server:
+  Finding.page_id is now `str | None`, gated to `kind:"file"` anchors,
+  rev 0, tests added; workbench handler no longer smuggles the string
+  "None"); anchors render `▤ path:LN` and reveal back into the file.
+  (A4) real timestamps: Page.updated_ts already existed server-side —
+  the client store dropped it; pgbar now shows "pushed HH:MM:SS", and
+  channel ages read the event envelope's ts stamped on real state
+  transitions (observed-age stays the fallback). (A5) an unseen
+  ask.answered pulses the asks tab amber. (#7) hold-PTT: daemon
+  ptt.press/release commands ride the EXACT native-hotkey path
+  (voice.ptt_press/release; honest "no voice loop" error headless;
+  PROTOCOL.md regenerated, 33 commands); rack master "● hold to talk"
+  button (module-level held-state + document pointerup so mid-hold
+  re-renders can't strand the mic open) + Space-hold in ptt_only;
+  verified honest-disabled on the headless verify daemon — LIVE
+  audio-path verify needs the captain's real daemon. (#9) ✎ in-place
+  edit in the annotations table (finding.update). (#10) diff syntax
+  highlighting: lazy per opened file, 800-row cap, hljs. (#11 decided:
+  NO MODE) channel body = view (new focusAgent — selection without
+  switch_session), MIC patch/tree row/speech = the only mic movers.
+  (#12) tree badges split: `N⚑` findings · `?N` asks. (#13) status
+  segments act: MIC → view holder; ann count → annotations tab.
+  (#14) persistence: group folds, work expansion, files-tree dirs
+  (per workspace), console scroll per tab+scope. (#15) diff j/k walks
+  change blocks (opens folds, blinks) + ✓ mark-file-reviewed per
+  page@rev (persisted; reviewed files fold + dim). Ops lesson recorded:
+  chrome-devtools-axi had silently switched to the CAPTAIN's :7777 tab
+  — half a verification round ran against the wrong tab/old server;
+  always confirm `location.host` before trusting browser evals.
+  Deferred list moved to docs/BACKLOG.md "mk3 aftermath". Gates: 374
+  pytest (3 new) · mypy · ruff+format · tsc · PROTOCOL regen. NEXT:
+  #17 scripted browser smoke test, then B2-18 autostart / B2-20
+  notifications when the captain calls them.
+
 - **2026-07-09 · M8 (builder half) — final sweep; captain click-through
   pending.** Side-by-side vs design/index5 on seeded state: layout,
   tokens, tree, tabs+page bar, doc/diff/files views, editor, rack, and

@@ -66,8 +66,11 @@ export function seedFolds(content, findings) {
  *   added:string[], removed:string[], unchanged:string[]}}} content
  * @param {{onAnnotate:(a:Anchor, text:string, kind:string, blocking:boolean)=>void,
  *   findings:any[], rev?:number, fold:Set<string>, reveal?:?string,
- *   scrollTo?:(el:HTMLElement)=>void, onFoldChange?:()=>void}} ctx
- * @returns {{expandAll:(open:boolean)=>void, allOpen:boolean}}
+ *   scrollTo?:(el:HTMLElement)=>void, onFoldChange?:()=>void,
+ *   highlight?:(codeEl:HTMLElement, path:string)=>any,
+ *   reviewed?:Set<string>, onReviewToggle?:(path:string, on:boolean)=>void}} ctx
+ * @returns {{expandAll:(open:boolean)=>void, allOpen:boolean,
+ *   nextChange:()=>void, prevChange:()=>void}}
  */
 export function renderDiff(view, content, ctx) {
   view.replaceChildren();
@@ -75,6 +78,24 @@ export function renderDiff(view, content, ctx) {
   let anchorStart = /** @type {?{file:string, side:string, line:number}} */ (null);
   const inter = content.interdiff;
   const fold = ctx.fold;
+
+  // #10: syntax highlighting is LAZY per file (first open) and capped —
+  // a 20k-row diff must not pay hljs for folded files it never shows.
+  const HIGHLIGHT_ROW_CAP = 800;
+  /** @type {Map<string, {list:HTMLElement[], done:boolean}>} */
+  const codeByFile = new Map();
+  const highlightFile = (path) => {
+    if (!ctx.highlight) return;
+    const entry = codeByFile.get(path);
+    if (!entry || entry.done) return;
+    entry.done = true;
+    if (entry.list.length > HIGHLIGHT_ROW_CAP) return; // perf guard
+    for (const c of entry.list) ctx.highlight(c, path);
+  };
+
+  // #15: j/k targets — the first row of every changed run.
+  /** @type {{el:HTMLElement, path:string}[]} */
+  const changeBlocks = [];
 
   const fileChip = (path) => {
     if (!inter) return null;
@@ -102,11 +123,30 @@ export function renderDiff(view, content, ctx) {
     const st = stats.perFile.get(file.path) || { add: 0, del: 0 };
     const chip = fileChip(file.path);
     const openN = openByFile.get(file.path) || 0;
+    const isRev = !!(ctx.reviewed && ctx.reviewed.has(file.path));
     const section = el("div", {
-      class: "dfile" + (fold.has(file.path) ? " open" : ""),
+      class: "dfile" + (fold.has(file.path) ? " open" : "")
+        + (isRev ? " reviewed" : ""),
       "data-path": file.path,
     });
     const tri = el("span", { class: "tri", text: fold.has(file.path) ? "▾" : "▸" });
+    const rvw = el("span", { class: "rvw" + (isRev ? " on" : ""),
+      title: "mark file reviewed (per revision)",
+      text: isRev ? "✓ reviewed" : "✓" });
+    rvw.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const now = !section.classList.contains("reviewed");
+      section.classList.toggle("reviewed", now);
+      rvw.classList.toggle("on", now);
+      rvw.textContent = now ? "✓ reviewed" : "✓";
+      if (now && fold.has(file.path)) { // a reviewed file folds away
+        fold.delete(file.path);
+        section.classList.remove("open");
+        tri.textContent = "▸";
+        if (ctx.onFoldChange) ctx.onFoldChange();
+      }
+      if (ctx.onReviewToggle) ctx.onReviewToggle(file.path, now);
+    });
     const head = el("div", { class: "dfile-head" },
       tri,
       el("span", { text: file.path }),
@@ -118,20 +158,28 @@ export function renderDiff(view, content, ctx) {
         el("span", { class: "del", text: `−${st.del}` })),
       el("span", { class: "fchips" },
         openN ? el("span", { class: "tag open", text: `${openN} open` }) : null,
-        chip ? el("span", { class: "micro " + chip.cls, text: chip.label }) : null));
+        chip ? el("span", { class: "micro " + chip.cls, text: chip.label }) : null,
+        rvw));
     head.addEventListener("click", () => {
       const now = !fold.has(file.path);
       if (now) fold.add(file.path); else fold.delete(file.path);
       section.classList.toggle("open", now);
       tri.textContent = now ? "▾" : "▸";
+      if (now) highlightFile(file.path);
       if (ctx.onFoldChange) ctx.onFoldChange();
     });
     const body = el("div", { class: "dfile-body" });
+    const codes = { list: /** @type {HTMLElement[]} */ ([]), done: false };
+    codeByFile.set(file.path, codes);
+    let inChange = false;
     for (const hunk of file.hunks || []) {
       body.append(el("div", { class: "hunk-head", text: hunk.header }));
+      inChange = false;
       for (const row of hunk.rows) {
         const key = `${file.path}:${row.side}:${row.line}`;
         const mark = byLine.get(key);
+        const codeText = el("span", { class: "ct", text: row.content });
+        codes.list.push(codeText);
         const tr = el("div", {
           class: "drow " + row.kind + (mark ? " flagged" : ""),
           "data-file": file.path, "data-side": row.side,
@@ -140,8 +188,11 @@ export function renderDiff(view, content, ctx) {
           el("span", { class: "gutter old", text: row.old_line ?? "" }),
           el("span", { class: "gutter new", text: row.new_line ?? "" }),
           el("span", { class: "sign", text: row.kind === "add" ? "+" : row.kind === "del" ? "-" : " " }),
-          el("span", { class: "code", text: row.content },
+          el("span", { class: "code" }, codeText,
             mark ? el("span", { class: "fmark", text: mark.finding_id }) : null));
+        const changed = row.kind === "add" || row.kind === "del";
+        if (changed && !inChange) changeBlocks.push({ el: tr, path: file.path });
+        inChange = changed;
         if (row.line != null) {
           tr.addEventListener("click", (e) => {
             if (e.shiftKey && anchorStart && anchorStart.file === file.path
@@ -162,6 +213,7 @@ export function renderDiff(view, content, ctx) {
     section.append(head, body);
     sections.set(file.path, section);
     wrap.append(section);
+    if (fold.has(file.path)) highlightFile(file.path); // open at build
   }
   view.append(wrap);
 
@@ -172,6 +224,7 @@ export function renderDiff(view, content, ctx) {
       s.classList.add("open");
       const t = s.querySelector(".tri");
       if (t) t.textContent = "▾";
+      highlightFile(ctx.reveal);
     }
     // container-scoped: scrollIntoView would drag every ancestor along
     requestAnimationFrame(() =>
@@ -239,6 +292,29 @@ export function renderDiff(view, content, ctx) {
   }
   const cssq = (s) => String(s).replace(/["\\]/g, "\\$&");
 
+  // #15: walk change blocks; jumping into a folded file opens it.
+  let navIdx = -1;
+  function jumpTo(i) {
+    if (!changeBlocks.length) return;
+    navIdx = ((i % changeBlocks.length) + changeBlocks.length) % changeBlocks.length;
+    const b = changeBlocks[navIdx];
+    if (!fold.has(b.path)) {
+      fold.add(b.path);
+      const s = sections.get(b.path);
+      if (s) {
+        s.classList.add("open");
+        const t = s.querySelector(".tri");
+        if (t) t.textContent = "▾";
+      }
+      highlightFile(b.path);
+      if (ctx.onFoldChange) ctx.onFoldChange();
+    }
+    if (ctx.scrollTo) ctx.scrollTo(b.el); else b.el.scrollIntoView();
+    b.el.classList.remove("blink");
+    void b.el.offsetWidth; // restart the animation
+    b.el.classList.add("blink");
+  }
+
   return {
     expandAll(open) {
       for (const [path, section] of sections) {
@@ -246,11 +322,14 @@ export function renderDiff(view, content, ctx) {
         section.classList.toggle("open", open);
         const t = section.querySelector(".tri");
         if (t) t.textContent = open ? "▾" : "▸";
+        if (open) highlightFile(path);
       }
       if (ctx.onFoldChange) ctx.onFoldChange();
     },
     get allOpen() {
       return (content.files || []).every((f) => fold.has(f.path));
     },
+    nextChange() { jumpTo(navIdx + 1); },
+    prevChange() { jumpTo(navIdx - 1); },
   };
 }

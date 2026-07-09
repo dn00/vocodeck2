@@ -48,7 +48,9 @@ class Finding:
     diff-annotate's output for downstream consumers (§3.3 export)."""
 
     finding_id: str
-    page_id: str
+    # None for page-less FILE findings (mk3.1 A3: the files view is not
+    # a page); every other finding references a real page.
+    page_id: str | None
     rev: int
     anchor: dict[str, Any]
     text: str
@@ -177,7 +179,7 @@ class Workspace:
                 "workspace": self.key,
                 "finding": f.to_dict(),
             }
-            page = self.pages.get(f.page_id)
+            page = self.pages.get(f.page_id) if f.page_id else None
             if page is not None and page.scope == "agent" and page.call_name:
                 item["agent"] = page.call_name
             items.append(item)
@@ -704,7 +706,7 @@ class WorkspaceStore:
         self,
         workspace_key: str,
         *,
-        page_id: str,
+        page_id: str | None,
         anchor: dict[str, Any],
         text: str,
         kind: str = "concern",
@@ -713,22 +715,32 @@ class WorkspaceStore:
         ws = self._spaces.get(workspace_key)
         if ws is None:
             raise ValueError(f"unknown workspace: {workspace_key}")
-        page = ws.pages.get(page_id)
-        if page is None:
-            raise ValueError(f"finding references unknown page: {page_id}")
-        # annotatable:false is a SERVER contract, not a rendering hint —
-        # a stale tab or alternate client must not annotate a read-only
-        # page (xai B1a W3).
-        params = page.data.get("params") or {}
-        if params.get("annotatable") is False:
-            raise ValueError(f"page {page_id} is read-only (annotatable: false)")
+        if not page_id:
+            # Page-less FILE findings (mk3.1 A3): anchored to a tracked
+            # file — the files view is not a page. Everything else still
+            # requires a real page.
+            if (anchor or {}).get("kind") != "file" or not anchor.get("file"):
+                raise ValueError("page-less findings must carry a file anchor")
+            page_id = None
+            rev = 0  # no page rev to go stale against
+        else:
+            page = ws.pages.get(page_id)
+            if page is None:
+                raise ValueError(f"finding references unknown page: {page_id}")
+            # annotatable:false is a SERVER contract, not a rendering hint —
+            # a stale tab or alternate client must not annotate a read-only
+            # page (xai B1a W3).
+            params = page.data.get("params") or {}
+            if params.get("annotatable") is False:
+                raise ValueError(f"page {page_id} is read-only (annotatable: false)")
+            rev = page.rev  # stamped at creation; staleness rides page.rev
         if kind not in ("concern", "question", "nit"):
             raise ValueError(f"bad finding kind: {kind}")
         fid = "f-" + secrets.token_hex(4)
         f = Finding(
             finding_id=fid,
             page_id=page_id,
-            rev=page.rev,  # stamped at creation; staleness rides page.rev
+            rev=rev,
             anchor=dict(anchor),
             text=text,
             kind=kind,  # type: ignore[arg-type]

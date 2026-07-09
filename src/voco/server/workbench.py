@@ -101,9 +101,12 @@ def handle_workbench_command(store, cmd: str, payload: dict, *, data_dir):
     if cmd == "finding.list":
         return {"findings": store.findings_for(str(payload.get("workspace", "")))}
     if cmd == "finding.add":
+        # page_id may be json-null for page-less FILE findings (mk3.1 A3)
+        # — str(None) would smuggle the literal "None" past validation.
+        pid = payload.get("page_id")
         f = store.add_finding(
             str(payload.get("workspace", "")),
-            page_id=str(payload.get("page_id", "")),
+            page_id=str(pid) if pid else None,
             anchor=payload.get("anchor") or {},
             text=str(payload.get("text", "")),
             kind=str(payload.get("kind", "concern")),

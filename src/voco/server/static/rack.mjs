@@ -33,19 +33,33 @@ const el = (tag, attrs = {}, ...kids) => {
 const ATTENTION_CYCLE = ["muted", "wake", "always"];
 const HEARING = new Set(["capturing", "holding", "routing"]);
 
-// session_id -> {state, since} — observed transitions only.
-const seen = new Map();
+// Hold-PTT state is MODULE-level: the rack re-renders on voice events
+// mid-hold, so pointerup can land on a dead element — the document
+// listener below is the release that always fires.
+let pttHeld = false;
+let pttReleaseFn = /** @type {?()=>void} */ (null);
+document.addEventListener("pointerup", () => {
+  if (pttHeld && pttReleaseFn) pttReleaseFn();
+});
+
+// Ages: the store's state_ts (the event envelope's honest transition
+// time) wins; the observed map is the fallback for sessions whose
+// state never changed since this tab loaded.
+const seen = new Map(); // session_id -> {state, since}
+function fmtAge(secs) {
+  if (secs < 5) return null;
+  if (secs < 120) return Math.floor(secs) + "s";
+  if (secs < 7200) return Math.floor(secs / 60) + "m";
+  return Math.floor(secs / 3600) + "h";
+}
 function observedAge(s, state) {
+  if (s.state_ts) return fmtAge(Date.now() / 1000 - s.state_ts);
   const rec = seen.get(s.session_id);
   if (!rec || rec.state !== state) {
     seen.set(s.session_id, { state, since: Date.now() });
     return rec ? "0s" : null; // fresh transition; unknown on first sight
   }
-  const secs = Math.floor((Date.now() - rec.since) / 1000);
-  if (secs < 5) return null;
-  if (secs < 120) return secs + "s";
-  if (secs < 7200) return Math.floor(secs / 60) + "m";
-  return Math.floor(secs / 3600) + "h";
+  return fmtAge((Date.now() - rec.since) / 1000);
 }
 
 function meter(liveLevel) {
@@ -59,7 +73,8 @@ function meter(liveLevel) {
  * @param {HTMLElement} rack
  * @param {import("./store.mjs").Store} store
  * @param {{command:(cmd:string, payload?:object)=>Promise<any>,
- *   selectAgent:(s:any)=>void, stateOf:(s:any)=>string,
+ *   selectAgent:(s:any)=>void, focusAgent:(s:any)=>void,
+ *   stateOf:(s:any)=>string,
  *   onFull:(target:"you"|"agent")=>void,
  *   toast:(msg:string, sticky?:boolean)=>void}} ctx
  */
@@ -78,9 +93,12 @@ export function renderRack(rack, store, ctx) {
     const speaking = store.speaking && store.speaking.who === s.name
       ? store.speaking : null;
     const age = observedAge(s, state);
+    // mk3.1 #11 (no mode, distinct affordances): the channel BODY views
+    // the agent's work — the mic stays put; only the MIC patch (or the
+    // tree's agent row / a spoken phrase) moves the mic.
     const chan = el("div", { class: "chan" + (isMic ? " live" : ""),
-      title: `talk to ${s.name} (moves the mic)`,
-      onclick: () => ctx.selectAgent(s) });
+      title: `view ${s.name}'s work — the mic stays put`,
+      onclick: () => ctx.focusAgent(s) });
     chan.append(el("div", { class: "ch-top" },
       el("span", { class: "dot " + state }),
       el("span", { class: "nm", text: s.name }),
@@ -155,7 +173,35 @@ export function renderRack(rack, store, ctx) {
     attn.title = "no voice loop (daemon started without audio)";
     attn.classList.remove("hot");
   }
+  // #7: hold-to-talk — rides the daemon's ptt.press/release (the same
+  // machine path as the native hotkey; muted/headless disables it).
+  const canPtt = !!mic.attention && mic.attention !== "muted";
+  const hold = el("span", { class: "v ptt-hold" + (canPtt ? "" : " none")
+    + (pttHeld ? " held" : ""),
+    text: pttHeld ? "● open — release to send" : "● hold to talk",
+    title: canPtt
+      ? "hold to open the mic (Space works too, in ptt_only)"
+      : "needs a voice loop, not muted" });
+  if (canPtt) {
+    pttReleaseFn = () => {
+      if (!pttHeld) return;
+      pttHeld = false;
+      hold.classList.remove("held");
+      hold.textContent = "● hold to talk";
+      ctx.command("ptt.release").catch(() => {});
+    };
+    hold.addEventListener("pointerdown", (e) => {
+      e.stopPropagation();
+      if (pttHeld) return;
+      pttHeld = true;
+      hold.classList.add("held");
+      hold.textContent = "● open — release to send";
+      ctx.command("ptt.press")
+        .catch((err) => { ctx.toast("ptt: " + msg(err), true); pttHeld = false; });
+    });
+  }
   rack.append(el("div", { class: "master" },
+    el("div", { class: "row" }, el("span", { text: "ptt" }), hold),
     el("div", { class: "row" }, el("span", { text: "duplex" }),
       el("span", { class: "v", text: mic.duplex || "—" })),
     el("div", { class: "row" }, el("span", { text: "attention" }), attn),

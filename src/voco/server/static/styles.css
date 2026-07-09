@@ -672,6 +672,58 @@ td.x span:hover { color: var(--bad); }
 .hljs-emphasis { font-style: italic; }
 .hljs-strong { font-weight: 700; }
 
+/* ---- mk3.1 batch ------------------------------------------------------------ */
+/* A2: the minimal ⌘K palette */
+.pal-scrim { position: fixed; inset: 0; background: rgba(6, 7, 9, .5);
+  display: flex; align-items: flex-start; justify-content: center;
+  z-index: 60; }
+.pal-box { margin-top: 110px; width: 480px; background: var(--l1);
+  border: 1px solid var(--edge2); }
+.pal-input { width: 100%; padding: 9px 12px; background: var(--l0);
+  border: none; border-bottom: 1px solid var(--edge); color: var(--ink);
+  font: 12.5px var(--mono); outline: none; }
+.pal-input::placeholder { color: var(--ink3); }
+.pal-list { max-height: 340px; overflow-y: auto; }
+.pal-item { display: flex; gap: 10px; align-items: baseline;
+  padding: 6px 12px; font: 12px var(--mono); color: var(--ink2);
+  cursor: pointer; }
+.pal-item.on, .pal-item:hover { background: var(--l3); color: var(--ink); }
+.pal-item.none { color: var(--ink3); cursor: default; }
+.pal-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal-hint { margin-left: auto; flex: none; font-size: 10px; color: var(--ink3); }
+/* A5: an unseen ask answer pulses the tab */
+.ctab.pulse { color: var(--voice); }
+/* A1: attach PR/issue on the work card */
+.link-editor { display: flex; flex-direction: column; gap: 4px; }
+.le-row { display: flex; gap: 10px; align-items: center;
+  font: 11px var(--mono); color: var(--ink3); }
+.le-k { width: 42px; flex: none; }
+.le-input { flex: 0 1 300px; background: var(--l0);
+  border: 1px solid var(--edge); color: var(--ink);
+  font: 11.5px var(--mono); padding: 4px 8px; }
+.le-input::placeholder { color: var(--ink3); }
+.le-x { cursor: pointer; color: var(--ink3); }
+.le-x:hover { color: var(--bad); }
+/* #9: in-place annotation edit */
+.edit-ta { width: 100%; min-height: 48px; resize: vertical;
+  background: var(--l0); border: 1px solid var(--edge);
+  color: var(--ink); font: 12px/1.6 var(--mono); padding: 6px 8px; }
+/* #13: status segments that act */
+.statusline .sc { cursor: pointer; }
+.statusline .sc:hover { color: var(--ink); }
+/* #7: hold-to-talk in the rack's master block */
+.ptt-hold { cursor: pointer; user-select: none; color: var(--ink2); }
+.ptt-hold:hover { color: var(--ink); }
+.ptt-hold.held { color: var(--l0); background: var(--voice);
+  padding: 0 6px; font-weight: 700; }
+.ptt-hold.none { color: var(--ink3); cursor: default; }
+/* #15: reviewed diff files */
+.rvw { font-size: 10px; color: var(--ink3); cursor: pointer;
+  padding: 0 5px; }
+.rvw:hover { color: var(--ink); }
+.rvw.on { color: var(--ok); }
+.dfile.reviewed .dfile-head { opacity: .55; }
+
 /* ---- B1b: html artifacts --------------------------------------------------- */
 .artifact-bar { display: flex; align-items: center; gap: 12px;
   margin: 0 0 8px; }

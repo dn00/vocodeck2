@@ -474,6 +474,14 @@ class VoiceLoop:
         self.machine.ptt_released()
         self._kick_deadline()
 
+    # Client-initiated hold-PTT (mk3.1 #7): the deck's hold button / key
+    # ride the exact hotkey path, so attention gating stays identical.
+    def ptt_press(self) -> None:
+        self._on_ptt_press()
+
+    def ptt_release(self) -> None:
+        self._on_ptt_release()
+
     # ---- turn machine listeners -----------------------------------------------------
 
     def _on_capture_started(self, key: int, reopened: bool) -> None:

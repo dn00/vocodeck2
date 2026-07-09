@@ -25,6 +25,17 @@ import { renderRack } from "./rack.mjs";
 import { renderTerminal } from "./term.mjs";
 import { openPicker, openRepo, openSpawn, openConnect, openSettings,
   confirmDanger } from "./modals.mjs";
+import { openPalette, paletteOpen, closePalette } from "./palette.mjs";
+
+// ---- tiny persistence helpers (client-local UI state) --------------------------
+const persisted = (key, fallback) => {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) || "null");
+    return v ?? fallback;
+  } catch { return fallback; }
+};
+const persistSet = (key, set) =>
+  localStorage.setItem(key, JSON.stringify([...set]));
 
 const store = new Store();
 // Console log tab (M6): a bounded ring of every bus event.
@@ -33,6 +44,10 @@ function logBusEvent(env) {
   eventLog.push({ ts: env.ts || Date.now() / 1000, seq: env.seq ?? "",
     type: env.type || "?", payload: env.payload });
   if (eventLog.length > 300) eventLog.shift();
+  if (env.type === "ask.answered" && dockTab !== "asks") {
+    askPulse = true; // an answer landed unseen — pulse the asks tab (A5)
+    renderDock();
+  }
   if (dockTab === "log") renderDock();
 }
 const bus = connectBus(store, { onEvent: logBusEvent });
@@ -178,8 +193,10 @@ function selectWork(ws) {
   lazyDetectLinks(ws);
 }
 
-/** The ONLY mic-mover in the deck (besides spoken switch phrases). */
-async function selectAgent(s) {
+/** View an agent's work WITHOUT moving the mic (mk3.1 #11: the rack's
+ * channel body is view-only; only the MIC patch, the tree's agent row,
+ * and spoken switch phrases move the mic). */
+function focusAgent(s) {
   store.selectedAgent = s.session_id;
   const ws = wsOf(s);
   store.selectedWorkspace = ws ? ws.key : null;
@@ -190,6 +207,12 @@ async function selectAgent(s) {
   store._notify("selection");
   loadTranscript(s);
   lazyDetectLinks(ws);
+  return ws;
+}
+
+/** The ONLY mic-mover in the deck (besides spoken switch phrases). */
+async function selectAgent(s) {
+  const ws = focusAgent(s);
   try { await bus.command("switch_session", { name: s.name }); }
   catch (e) { toast("activate failed: " + errMsg(e), true); }
   if (ws && (!Array.isArray(s.capabilities) || s.capabilities.includes("review"))) {
@@ -214,8 +237,9 @@ function groupKey(ws) { return ws.common_dir || ws.key; }
 
 // Client-local expansion state: the selected work is always expanded;
 // carets let the reader hold other rows open or fold groups away.
-const collapsedGroups = new Set();
-const expandedWork = new Set();
+// Both persist across loads (mk3.1 batch #14).
+const collapsedGroups = new Set(persisted("voco.grpFold", []));
+const expandedWork = new Set(persisted("voco.workOpen", []));
 
 function renderRail() {
   const keep = rail.scrollTop; // rebuilds must not move the reader
@@ -239,6 +263,7 @@ function renderRail() {
     const folded = collapsedGroups.has(gkey);
     const toggle = () => {
       if (folded) collapsedGroups.delete(gkey); else collapsedGroups.add(gkey);
+      persistSet("voco.grpFold", collapsedGroups);
       renderRail();
     };
     rail.append(h("div", { class: "grp" },
@@ -301,10 +326,14 @@ function workRow(ws, agents) {
     parts.push(h("span", { class: "g", title: gitTitle(g) }, "↑" + g.ahead));
   if (g && g.behind)
     parts.push(h("span", { class: "g", title: gitTitle(g) }, "↓" + g.behind));
-  const open = openFlagCount(ws);
-  if (open)
-    parts.push(h("span", { class: "hot", title: "open annotations + asks" },
-      open + "⚑"));
+  const flags = openFindingCount(ws);
+  if (flags)
+    parts.push(h("span", { class: "hot", title: "open annotations" },
+      flags + "⚑"));
+  const asksN = openAskCount(ws);
+  if (asksN)
+    parts.push(h("span", { class: "hot", title: "unanswered asks" },
+      "?" + asksN));
   if (!agents.length && !parts.length)
     parts.push(h("span", {}, "no agent"));
   parts.forEach((p, i) => { if (i) meta.append(" · "); meta.append(p); });
@@ -314,6 +343,7 @@ function workRow(ws, agents) {
       e.stopPropagation();
       if (expandedWork.has(ws.key)) expandedWork.delete(ws.key);
       else expandedWork.add(ws.key);
+      persistSet("voco.workOpen", expandedWork);
       renderRail();
     } }, expanded ? "▾" : "▸");
   const row = h("div", {
@@ -364,16 +394,20 @@ function speakingEq() {
   return eq;
 }
 
-/** Open annotations + unanswered asks for a work row (number).
- * Unvisited rows fall back to the snapshot's counts — parked work's
- * open annotations must be visible without selecting it first. */
-function openFlagCount(ws) {
+/** Open findings / unanswered asks for a work row — SEPARATE badges
+ * (⚑N annotations · ?N asks — mk3.1 batch #12). Unvisited rows fall
+ * back to the snapshot's counts, so parked work stays visible. */
+function openFindingCount(ws) {
   if (!ws) return 0;
   return store.findings.has(ws.key)
     ? store.findingsFor(ws.key).filter((f) => f.status === "open").length
-      + store.asksFor(ws.key).filter((a) => a.answer == null).length
-    : ((ws.finding_counts && ws.finding_counts.open) || 0)
-      + (ws.open_asks || 0);
+    : ((ws.finding_counts && ws.finding_counts.open) || 0);
+}
+function openAskCount(ws) {
+  if (!ws) return 0;
+  return store.asks.has(ws.key)
+    ? store.asksFor(ws.key).filter((a) => a.answer == null).length
+    : (ws.open_asks || 0);
 }
 
 function linkChip(kind, link) {
@@ -529,6 +563,7 @@ function renderWork(force = false) {
   // triggers the deferred rebuild.
   if (!force && work.querySelector(".annot-editor")) return;
   lastWorkKey = key;
+  currentDiffApi = null; // re-set by the diff branch when a diff shows
   work.replaceChildren();
   const agent = selectedAgent();
   const ws = store.selectedWs();
@@ -573,7 +608,9 @@ function renderWork(force = false) {
     page
       ? h("span", {}, ` · ${PAGE_ICON[page.type] || "·"} ${page.type}`
         + ` · rev ${page.rev}`
-        + (page.call_name ? ` · by ${page.call_name}` : ""))
+        + (page.updated_ts ? " · pushed "
+          + new Date(page.updated_ts * 1000).toTimeString().slice(0, 8) : "")
+        + (page.call_name ? ` by ${page.call_name}` : ""))
       : h("span", {}, isFiles ? " · ▤ files" : " · overview"));
   if (page && page.rev > 1)
     prov.title = `republished ${page.rev - 1}× — annotations from older`
@@ -618,8 +655,8 @@ function fstate(wsKey) {
   if (!filesState.has(wsKey)) {
     if (filesState.size > 20) // bounded: drop the oldest browsed workspace
       filesState.delete(filesState.keys().next().value);
-    filesState.set(wsKey,
-      { path: null, filter: "", list: null, truncated: 0, open: new Set() });
+    filesState.set(wsKey, { path: null, filter: "", list: null, truncated: 0,
+      open: new Set(persisted("voco.ftree." + wsKey, [])) });
   }
   return filesState.get(wsKey);
 }
@@ -705,6 +742,7 @@ async function renderFilesView(view, ws) {
         style: pad(depth),
         onclick: () => {
           if (open) st.open.delete(path); else st.open.add(path);
+          persistSet("voco.ftree." + ws.key, st.open);
           renderList();
         } },
         h("span", { class: "tw" }, open ? "▾" : "▸"),
@@ -746,6 +784,14 @@ async function renderFilesView(view, ws) {
       `${st.truncated} more file(s) beyond the listing cap`));
 }
 
+/** Absolute character offset of (node, nodeOffset) within root's text. */
+function offsetIn(root, node, nodeOffset) {
+  const r = document.createRange();
+  r.selectNodeContents(root);
+  try { r.setEnd(node, nodeOffset); } catch { return 0; }
+  return r.toString().length;
+}
+
 async function renderFileSource(view, ws, st) {
   view.textContent = "…";
   const back = () => { st.path = null; renderWork(true); };
@@ -759,19 +805,92 @@ async function renderFileSource(view, ws, st) {
     const ext = (st.path.match(/\.([a-z0-9]+)$/i) || [""])[1] || "";
     const code = h("code", { class: ext ? "language-" + ext : "" },
       body.content);
-    view.replaceChildren(
-      h("div", { class: "file-head" },
-        h("button", { class: "whbtn", onclick: back }, "← files"),
-        h("span", { class: "mono" }, st.path)),
-      h("pre", { class: "file-src" }, code));
+    const pre = h("pre", { class: "file-src" }, code);
+    const head = h("div", { class: "file-head" },
+      h("button", { class: "whbtn", onclick: back }, "← files"),
+      h("span", { class: "mono" }, st.path),
+      h("span", { class: "micro" }, "select code to annotate"));
+    view.replaceChildren(head, pre);
     highlightCode(/** @type {HTMLElement} */ (code),
       LANG_BY_EXT[ext.toLowerCase()] || "");
+    // A3: select code → file finding ({kind:"file"} anchor, page-less;
+    // reference note-bar concept on voco's finding seam)
+    pre.addEventListener("mouseup", (e) => {
+      if (/** @type {Element} */ (e.target).closest(".annot-editor")) return;
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      if (!code.contains(range.startContainer)
+        || !code.contains(range.endContainer)) return;
+      const exact = sel.toString();
+      if (!exact.trim()) return;
+      const full = code.textContent || "";
+      const start = offsetIn(code, range.startContainer, range.startOffset);
+      const end = offsetIn(code, range.endContainer, range.endOffset);
+      openFileEditor(view, head, {
+        kind: "file", file: st.path, exact,
+        prefix: full.slice(Math.max(0, start - 40), start),
+        suffix: full.slice(end, end + 40),
+        startLine: full.slice(0, start).split("\n").length,
+        endLine: full.slice(0, end).split("\n").length,
+      });
+    });
   } catch (e) {
     view.replaceChildren(
       h("div", { class: "file-head" },
         h("button", { class: "whbtn", onclick: back }, "← files")),
       h("div", { class: "empty-note" }, "could not read: " + errMsg(e)));
   }
+}
+
+function openFileEditor(view, afterEl, anchor) {
+  view.querySelectorAll(".annot-editor").forEach((n) => n.remove());
+  let kind = "concern";
+  const short = anchor.file.split("/").pop();
+  const lines = anchor.startLine === anchor.endLine
+    ? "L" + anchor.startLine : `L${anchor.startLine}–L${anchor.endLine}`;
+  const excerpt = anchor.exact.length > 60
+    ? anchor.exact.slice(0, 57) + "…" : anchor.exact;
+  const ta = /** @type {HTMLTextAreaElement} */ (h("textarea", {
+    placeholder: "note or question about this code…" }));
+  const pills = h("div", { class: "finding-controls" });
+  const pillEls = [];
+  for (const k of ["concern", "question", "nit"]) {
+    const p = h("button", { class: "fpill" + (k === kind ? " active" : ""),
+      onclick: () => {
+        kind = k;
+        for (const q of pillEls) q.classList.toggle("active", q.textContent === k);
+      } }, k);
+    pillEls.push(p);
+    pills.append(p);
+  }
+  const blocking = /** @type {HTMLInputElement} */ (h("input", { type: "checkbox" }));
+  pills.append(h("label", { class: "fblock" }, blocking, "blocking"));
+  const box = h("div", { class: "doc-editor annot-editor" },
+    h("div", { class: "editor-target" }, `${short} ${lines}: “${excerpt}”`),
+    ta, pills,
+    h("div", { class: "editor-actions" },
+      h("button", { class: "tbtn primary", onclick: commit }, "add annotation"),
+      h("button", { class: "tbtn", onclick: () => box.remove() }, "cancel")));
+  async function commit() {
+    const text = ta.value.trim();
+    if (!text) { ta.focus(); return; }
+    try {
+      await bus.command("finding.add", {
+        workspace: store.selectedWorkspace, page_id: null,
+        anchor, text, kind, blocking: blocking.checked,
+      });
+      box.remove();
+      const s = window.getSelection();
+      if (s && s.removeAllRanges) s.removeAllRanges();
+    } catch (e) { toast("annotation failed: " + errMsg(e), true); }
+  }
+  ta.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); commit(); }
+    if (e.key === "Escape") { e.preventDefault(); box.remove(); }
+  });
+  afterEl.after(box);
+  ta.focus();
 }
 
 /** Scroll WITHIN the center view only — scrollIntoView walks every
@@ -821,10 +940,61 @@ function renderWorkCard(view, ws) {
     kv("root", ws.root),
     kv("agents", agents.length ? agents.map((a) => a.name).join(" ") : "none"),
     kv("open", String(open))));
+  card.append(linkEditor(ws));
   card.append(h("div", { class: "empty-note" }, agents.length
     ? "select a page in the rail — or click an agent to talk to it"
     : "review-only: no agent attached — diffs and annotations still work"));
   view.append(card);
+}
+
+/** A1: attach a PR / issue to this work. Manual always works (paste a
+ * number or GitHub URL; Enter attaches); ✕ clears. gh detection stays
+ * lazy and silent, and a manual set always wins over it (daemon rule).
+ * The workspace.updated event re-renders chips everywhere. */
+function parseLinkInput(raw) {
+  const s = raw.trim();
+  if (!s) return null;
+  const mUrl = /^https?:\/\/\S*\/(?:pull|issues)\/(\d+)/.exec(s);
+  if (mUrl) return { number: Number(mUrl[1]), url: s };
+  const mNum = /^#?(\d+)$/.exec(s);
+  if (mNum) return { number: Number(mNum[1]) };
+  return null;
+}
+
+function linkEditor(ws) {
+  const box = h("div", { class: "link-editor" });
+  const row = (kind, label) => {
+    const l = (ws.links || {})[kind];
+    const line = h("div", { class: "le-row" },
+      h("span", { class: "le-k" }, label));
+    if (l) {
+      line.append(linkChip(kind, l),
+        h("span", { class: "le-x", title: "detach " + label,
+          onclick: async () => {
+            try {
+              await bus.command("workspace.link",
+                { workspace: ws.key, [kind]: null });
+            } catch (e) { toast("detach failed: " + errMsg(e), true); }
+          } }, "✕"));
+      return line;
+    }
+    const input = /** @type {HTMLInputElement} */ (h("input", {
+      class: "le-input", type: "text",
+      placeholder: `#123 or ${label} URL — Enter attaches` }));
+    input.addEventListener("keydown", async (e) => {
+      if (e.key !== "Enter") return;
+      const parsed = parseLinkInput(input.value);
+      if (!parsed) { toast("need a number or a GitHub URL", true); return; }
+      try {
+        await bus.command("workspace.link",
+          { workspace: ws.key, [kind]: parsed });
+      } catch (err) { toast("attach failed: " + errMsg(err), true); }
+    });
+    line.append(input);
+    return line;
+  };
+  box.append(row("pr", "pr"), row("issue", "issue"));
+  return box;
 }
 
 function welcomeView() {
@@ -950,6 +1120,10 @@ async function renderPage(view, page, srnote, actions) {
         pendingReveal = null;
       }
       view.replaceChildren();
+      // #15: reviewed marks are client-local per page@rev (a new rev is
+      // a new review); #10: rows highlight lazily per opened file.
+      const revKey = `voco.reviewed.${page.page_id}@${page.rev}`;
+      const reviewed = new Set(persisted(revKey, []));
       const api = renderDiff(view, c, {
         rev: page.rev,
         findings,
@@ -959,7 +1133,17 @@ async function renderPage(view, page, srnote, actions) {
         onAnnotate: (anchor, text, kind, blocking) =>
           addFinding(page, anchor, text, kind, blocking),
         onFoldChange: () => syncExpand(),
+        highlight: (codeEl, path) => {
+          const ext = (path.match(/\.([a-z0-9]+)$/i) || [""])[1] || "";
+          return highlightCode(codeEl, LANG_BY_EXT[ext.toLowerCase()] || "");
+        },
+        reviewed,
+        onReviewToggle: (path, on) => {
+          if (on) reviewed.add(path); else reviewed.delete(path);
+          persistSet(revKey, reviewed);
+        },
       });
+      currentDiffApi = api;
       if (!reveal) restoreScroll(view);
       // Head: totals + expand/collapse-all + the since-rev note.
       if (actions) {
@@ -1023,6 +1207,8 @@ async function renderPage(view, page, srnote, actions) {
 // The expand-all button's label lives across renders via this seam.
 let expandSync = () => {};
 function syncExpand() { expandSync(); }
+// The showing diff's api (j/k navigation); null on any other view.
+let currentDiffApi = /** @type {?{nextChange:()=>void, prevChange:()=>void}} */ (null);
 
 async function addFinding(page, anchor, text, kind, blocking) {
   try {
@@ -1040,8 +1226,16 @@ async function closePage(p) {
 
 // ---- console (mk3 M6): annotations table · transcript · asks · log --------------
 let dockTab = "annotations";
+// A5: an agent answered while the asks tab wasn't showing — pulse it.
+let askPulse = false;
+// #14: console scroll survives tab/scope switches.
+const dockScrollMemo = new Map();
 
-function setDockTab(name) { dockTab = name; renderDock(); }
+function setDockTab(name) {
+  dockTab = name;
+  if (name === "asks") askPulse = false;
+  renderDock();
+}
 
 /** Human-readable anchor location for the table's ANCHOR column. */
 function anchorLabel(f) {
@@ -1049,6 +1243,8 @@ function anchorLabel(f) {
   const ws = store.selectedWs();
   const p = ws && ws.pages.find((x) => x.page_id === f.page_id);
   const icon = p ? (PAGE_ICON[p.type] || "·") : "·";
+  if (a.kind === "file" && a.file)
+    return `▤ ${a.file}` + (a.startLine != null ? ":L" + a.startLine : "");
   if (a.file)
     return `± ${a.file}` + (a.startLine != null ? ":" + a.startLine : "");
   if (a.kind === "element" && a.selector)
@@ -1092,8 +1288,6 @@ function annotationsEmptyText(ws) {
 }
 
 function renderDock() {
-  const scroller = dock.querySelector(".cbody");
-  const keep = scroller ? scroller.scrollTop : 0;
   dock.replaceChildren();
   const wsKey = store.selectedWorkspace || "";
   const ws = store.selectedWs();
@@ -1103,9 +1297,12 @@ function renderDock() {
   const openF = findings.filter((f) => f.status === "open");
   const blockingN = openF.filter((f) => f.blocking).length;
   const openAsks = asks.filter((a) => a.answer == null).length;
+  const memoKey = dockTab + ":" + wsKey;
+  const keep = dockScrollMemo.get(memoKey) ?? 0;
 
   const tab = (name, count, hot) => h("div",
-    { class: "ctab" + (dockTab === name ? " on" : ""),
+    { class: "ctab" + (dockTab === name ? " on" : "")
+      + (name === "asks" && askPulse ? " pulse" : ""),
       onclick: () => setDockTab(name) },
     name, count != null && count > 0
       ? h("span", { class: "n" + (hot ? " hot" : "") }, " " + count) : "");
@@ -1124,6 +1321,8 @@ function renderDock() {
         "export ↓"),
       h("span", {}, "scope: " + scopeTxt))));
   const body = h("div", { class: "cbody" });
+  body.addEventListener("scroll",
+    () => dockScrollMemo.set(memoKey, body.scrollTop), { passive: true });
   dock.append(body);
 
   if (dockTab === "transcript") {
@@ -1190,16 +1389,48 @@ function renderDock() {
     if (f.note)
       textCell.append(h("div", { class: "freply" }, f.note));
     table.append(h("tr", { class: done ? "done" : "",
-      onclick: () => revealFinding(f) },
+      onclick: (e) => {
+        // an in-place edit owns the row — clicks in it never reveal
+        if (/** @type {Element} */ (e.target).closest(".edit-ta, .editor-actions"))
+          return;
+        revealFinding(f);
+      } },
       kindCell, textCell,
       h("td", { class: "loc" }, anchorLabel(f)),
-      h("td", { class: "x" }, f.status === "open"
-        ? h("span", { title: "withdraw (undoable)",
+      h("td", { class: "x" }, ...(f.status === "open" ? [
+        h("span", { title: "edit",
+          onclick: (e) => { e.stopPropagation(); editFindingInline(textCell, wsKey, f); } },
+        "✎"), " ",
+        h("span", { title: "withdraw (undoable)",
           onclick: (e) => { e.stopPropagation(); withdrawFinding(wsKey, f); } },
-        "✕") : "")));
+        "✕")] : []))));
   }
   body.append(table);
   body.scrollTop = keep;
+}
+
+/** #9: edit an annotation's text in place (finding.update exists
+ * server-side; the finding.updated event repaints the table). */
+function editFindingInline(textCell, wsKey, f) {
+  textCell.replaceChildren();
+  const ta = /** @type {HTMLTextAreaElement} */ (h("textarea", { class: "edit-ta" }));
+  ta.value = f.text || "";
+  const save = async () => {
+    const text = ta.value.trim();
+    if (!text) { ta.focus(); return; }
+    try {
+      await bus.command("finding.update",
+        { workspace: wsKey, finding_id: f.finding_id, text });
+    } catch (e) { toast("edit failed: " + errMsg(e), true); }
+  };
+  ta.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); save(); }
+    if (e.key === "Escape") { e.preventDefault(); renderDock(); }
+  });
+  textCell.append(ta, h("div", { class: "editor-actions" },
+    h("button", { class: "tbtn primary", onclick: save }, "save"),
+    h("button", { class: "tbtn", onclick: () => renderDock() }, "cancel")));
+  ta.focus();
 }
 
 /** Asks: questions YOU send the work's agents (ask.create); agents
@@ -1258,6 +1489,12 @@ async function loadTranscript(agent) {
 
 function revealFinding(f) {
   const a = f.anchor || {};
+  // File findings are page-less: open the files view at that file.
+  if (a.kind === "file" && a.file) {
+    const ws = store.selectedWs();
+    if (ws) { fstate(ws.key).path = a.file; store.selectPage("__files__"); }
+    return;
+  }
   // Diff anchors open the fold + blink the row; text anchors (docs)
   // flash the passage — both ride pendingReveal through the async
   // render (B1a: one reveal path for every surface).
@@ -1339,6 +1576,7 @@ function renderRackPanel() {
   renderRack(rack, store, {
     command: (cmd, payload) => bus.command(cmd, payload),
     selectAgent,
+    focusAgent,
     stateOf,
     onFull: jumpToTranscript,
     toast,
@@ -1363,10 +1601,14 @@ function renderStatus() {
   }
   const openCount = store.findingsFor(store.selectedWorkspace || "")
     .filter((f) => f.status === "open").length;
+  // segments double as shortcuts (mk3.1 batch #13): mic → view the
+  // holder's work; ann count → open the console's annotations tab
   statusline.replaceChildren(
     h("span", { class: "conn-cell " + (store.connected ? "on" : "off") },
       store.connected ? "● " + location.host : "○ reconnecting"),
-    h("span", { class: "status-mic" + (active ? "" : " none") },
+    h("span", { class: "status-mic sc" + (active ? "" : " none"),
+      title: active ? "view " + active.name + "'s work" : "",
+      onclick: () => { if (active) focusAgent(active); } },
       active ? "MIC → " + active.name : "mic → nobody"),
     h("span", {}, [mic.attention, mic.duplex].filter(Boolean).join(" · ") || "headless"),
     h("span", { class: "spacer" }),
@@ -1374,7 +1616,8 @@ function renderStatus() {
       counts.blocked ? h("span", { class: "bad" }, counts.blocked + " blocked · ") : "",
       h("span", {}, h("b", {}, String(counts.working)), " working · ",
         h("b", {}, String(counts.listening)), " listening")),
-    openCount ? h("span", { class: "amber" }, openCount + " ann") : "",
+    openCount ? h("span", { class: "amber sc", title: "open the annotations tab",
+      onclick: () => setDockTab("annotations") }, openCount + " ann") : "",
     statusClock);
 }
 
@@ -1392,13 +1635,77 @@ function renderConn() {
 }
 
 // ---- keyboard floor -------------------------------------------------------------
+/** A2: the minimal palette's items — navigation + mic, rebuilt fresh
+ * from the store on every open. */
+function paletteItems() {
+  const items = [];
+  for (const ws of store.workspaces.values()) {
+    if (ws.kind !== "workspace") continue;
+    const wl = (ws.repo || ws.name) + "/" + workLabel(ws);
+    items.push({ label: "go: " + wl, hint: "work",
+      run: () => selectWork(ws) });
+    for (const p of ws.pages.filter((x) => !x.closed))
+      items.push({ label: `open: ${workLabel(ws)} · ${p.title}`, hint: p.type,
+        run: () => { selectWork(ws); store.selectPage(p.page_id); } });
+    items.push({ label: `open: ${workLabel(ws)} · files`, hint: "files",
+      run: () => { selectWork(ws); store.selectPage("__files__"); } });
+  }
+  for (const s of store.sessions.values()) {
+    items.push({ label: "view: " + s.name, hint: stateOf(s),
+      run: () => focusAgent(s) });
+    items.push({ label: "mic → " + s.name, hint: "patch",
+      run: () => selectAgent(s) });
+  }
+  for (const t of ["annotations", "transcript", "asks", "log"])
+    items.push({ label: "console: " + t, hint: "tab",
+      run: () => setDockTab(t) });
+  items.push({ label: "export review", hint: "action",
+    run: () => exportReview() });
+  return items;
+}
+
+const typing = () => {
+  const a = document.activeElement;
+  return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA");
+};
+
+// #7: Space is hold-PTT while attention is ptt_only (never while typing).
+let spaceHeld = false;
+document.addEventListener("keyup", (e) => {
+  if (e.code === "Space" && spaceHeld) {
+    spaceHeld = false;
+    bus.command("ptt.release").catch(() => {});
+  }
+});
+
 document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    if (paletteOpen()) closePalette();
+    else openPalette({ items: paletteItems() });
+    return;
+  }
+  if (e.code === "Space" && !typing() && !paletteOpen()
+      && store.mic && store.mic.attention === "ptt_only") {
+    e.preventDefault(); // Space is the mic here, not page-scroll
+    if (!e.repeat && !spaceHeld) {
+      spaceHeld = true;
+      bus.command("ptt.press").catch(() => { spaceHeld = false; });
+    }
+    return;
+  }
   if (e.key === "Escape") {
     document.querySelectorAll(".annot-editor").forEach((n) => n.remove());
     // the editor's range highlight dies with it (self-review: Esc used
     // to strand .selected rows)
     document.querySelectorAll(".drow.selected")
       .forEach((n) => n.classList.remove("selected"));
+    return;
+  }
+  // #15: j/k walk a diff's change blocks (never while typing)
+  if (!typing() && currentDiffApi && (e.key === "j" || e.key === "k")) {
+    e.preventDefault();
+    if (e.key === "j") currentDiffApi.nextChange(); else currentDiffApi.prevChange();
   }
 });
 

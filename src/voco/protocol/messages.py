@@ -73,6 +73,10 @@ COMMAND_TYPES = {
     "switch_session",
     "interrupt",
     "mic.set",
+    # mk3.1: client hold-PTT — the deck's hold button / key ride the
+    # same turn-machine path as the native hotkey.
+    "ptt.press",
+    "ptt.release",
     "session.spawn",
     "session.kill",
     "session.panes",

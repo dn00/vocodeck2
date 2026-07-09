@@ -19,12 +19,13 @@
  *   pages:PageMeta[]}} Workspace
  * @typedef {{page_id:string, type:string, ref:string, title:string,
  *   scope:string, rev:number, pinned:boolean, closed:boolean,
- *   session_id:?string, call_name:?string}} PageMeta
+ *   session_id:?string, call_name:?string, updated_ts?:number}} PageMeta
  * @typedef {{session_id:string, name:string, display_name:string,
  *   state:string, display_state?:DisplayState, unread_digest:number,
  *   capabilities?:string[], host?:?string, root?:?string,
  *   queued?:number, say_tail?:{ts:number, text:string}[],
- *   screen_title?:?string, screen_markdown?:string}} Session
+ *   screen_title?:?string, screen_markdown?:string,
+ *   state_ts?:number}} Session
  */
 
 /** @typedef {"workspaces"|"sessions"|"selection"|"mic"|"conn"|"ticker"|"findings"|"asks"|"voice"|"speaking"|"transcript"} Kind */
@@ -169,7 +170,7 @@ export class Store {
       case "session.activated":
       case "digest.updated":
       case "pane.hint": // carries a fresh display_state (dot precedence)
-        this._applySessionEvent(env.type, p);
+        this._applySessionEvent(env.type, p, env.ts);
         this._notify("sessions");
         break;
       case "mic.state":
@@ -231,6 +232,7 @@ export class Store {
       page_id: p.page_id, type: p.type, ref: p.ref, title: p.title,
       scope: p.scope, rev: p.rev, pinned: p.pinned, closed: p.closed,
       session_id: p.session_id, call_name: p.call_name,
+      updated_ts: p.updated_ts,
     };
     const i = ws.pages.findIndex((x) => x.page_id === p.page_id);
     if (i >= 0) ws.pages[i] = meta; else ws.pages.push(meta);
@@ -261,7 +263,7 @@ export class Store {
     this._notify("transcript");
   }
 
-  _applySessionEvent(type, p) {
+  _applySessionEvent(type, p, ts) {
     if (type === "session.detached") {
       this.sessions.delete(p.session_id);
       this.transcripts.delete(p.session_id);
@@ -273,8 +275,12 @@ export class Store {
       session_id: p.session_id, name: p.name || "?", display_name: p.name || "?",
       state: "idle", unread_digest: 0,
     });
+    const before = s.display_state || s.state;
     if (p.state) s.state = p.state;
     if (p.display_state) s.display_state = p.display_state;
+    // the event envelope's ts is the honest state-change time — stamp it
+    // only on a real transition (channel ages read from this)
+    if (ts && (s.display_state || s.state) !== before) s.state_ts = ts;
     if (typeof p.unread === "number") s.unread_digest = p.unread;
     // session.attached carries capabilities + home identity (host/root)
     // so workspace-scoped checks stay live between snapshots.
