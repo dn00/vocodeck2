@@ -169,7 +169,9 @@ class VoiceLoop:
         tts_cfg = cfg.get(
             "tts",
             {
-                "base_url": "http://127.0.0.1:8000/v1",
+                # the bundled floor's own default port (P3 unification —
+                # 8000 was a mismatch nothing listened on)
+                "base_url": "http://127.0.0.1:8880/v1",
                 "model": "kokoro",
                 "voice": "af_heart",
             },

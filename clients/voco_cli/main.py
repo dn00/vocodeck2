@@ -591,8 +591,9 @@ def cmd_doctor(client: Client) -> int:
     def probe_tts(tts_cfg: dict) -> str | None:
         """POST a real tiny synth and require audio bytes back — a random
         HTTP listener squatting the port (OrbStack does) must not read ok."""
-        # Default mirrors the daemon's built-in (voice_loop): port 8000.
-        url = f"{tts_cfg.get('base_url', 'http://127.0.0.1:8000/v1').rstrip('/')}"
+        # Default mirrors the daemon's built-in (voice_loop): port 8880,
+        # the bundled floor's own default (P3 unification).
+        url = f"{tts_cfg.get('base_url', 'http://127.0.0.1:8880/v1').rstrip('/')}"
         body = json.dumps(
             {
                 "model": tts_cfg.get("model", "kokoro"),

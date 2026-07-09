@@ -127,6 +127,8 @@ class Daemon:
             cfg.get("workbench", {}).get("allow_artifact_urls", False)
         )
         self.voice: VoiceLoop | None = None
+        # P3: the managed TTS floor (FloorSupervisor | None)
+        self._floor: Any = None
         self._tmux_mgr: TmuxManager | None = None
         # tmux session -> worktree path, for the sessions THIS run spawned
         # with --worktree (in-memory by design: after a restart we no longer
@@ -1437,6 +1439,23 @@ class Daemon:
 
         self.bus.subscribe(on_event)
 
+    async def _maybe_start_floor(self) -> None:
+        """P3: supervise the bundled TTS floor when the config points at
+        it (decision: floor_supervisor.should_manage — loopback:8880 by
+        default, manage_floor overrides; foreign engines never touched)."""
+        from voco.adapters.floor_supervisor import (
+            FloorSupervisor,
+            floor_argv,
+            should_manage,
+        )
+
+        port = should_manage(self.cfg.get("tts") or {})
+        if port is None:
+            return
+        self._floor = FloorSupervisor(floor_argv(port), emit=self.bus.emit)
+        await self._floor.start()
+        print(f"voco-d: tts floor managed on 127.0.0.1:{port}")
+
     # ---- run ---------------------------------------------------------------
 
     async def run(self, host: str = "127.0.0.1", port: int = 7777) -> None:
@@ -1466,15 +1485,27 @@ class Daemon:
                 "is another voco-d running?"
             ) from e
         if not self.no_audio:
+            from voco import assets
             from voco.voice_loop import VoiceLoop
 
             try:
+                # P2: the VAD model must exist BEFORE the loop builds —
+                # configured paths resolve against the config file's dir
+                # (never the cwd), the default downloads the pinned asset.
+                audio_cfg = self.cfg.setdefault("audio", {})
+                audio_cfg["silero_model"] = str(
+                    assets.ensure_silero(
+                        audio_cfg.get("silero_model"),
+                        config_dir=self._config_path.parent,
+                    )
+                )
                 self.voice = VoiceLoop(self.cfg, self.bus, host=self)
                 await self.voice.start(loop)
             except Exception as e:
                 self.voice = None
                 self.bus.emit("daemon.error", {"error": f"voice loop unavailable: {e}"})
                 print(f"voco-d: voice loop unavailable ({e}); running headless")
+            await self._maybe_start_floor()
         print(
             f"voco-d listening on {host}:{port}"
             + (" (no audio)" if self.voice is None else "")
@@ -1503,6 +1534,8 @@ class Daemon:
                 self._dirty_workspaces.update(self.workspaces.dirty_keys())
                 self._flush_manifests()
                 self._manifest.release()
+            if self._floor is not None:
+                await self._floor.stop()  # the floor dies with its daemon
             if self.voice is not None:
                 self.voice.stop()
             try:

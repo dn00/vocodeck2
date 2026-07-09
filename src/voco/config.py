@@ -56,6 +56,9 @@ SCHEMA: dict[str, dict[str, tuple[type, ...]]] = {
         "voice": (str,),
         "sample_rate": (int,),
         "api_key": (str,),
+        # P3: supervise the bundled floor (default: auto — managed
+        # exactly when base_url is loopback:8880, the floor's port)
+        "manage_floor": (bool,),
     },
     "stt": {"provider": (str,)},
     "first_mate": {

@@ -88,6 +88,41 @@ Order: P1 → P2+P3 → P4+P5 → B by risk → C → D. UI work is paused.
 
 ## Journal
 
+- **2026-07-09 · P2+P3 SHIPPED — assets + TTS floor supervision (xai
+  round included).** P2: new voco.assets — pinned model downloads
+  (silero VAD pinned to snakers4/silero-vad@b163605, the EXACT master
+  bytes the local VAD tuning runs on — provenance hunted by hashing
+  releases: v5.1.2/v5.1/v4.0 all ship different bytes; kokoro model +
+  voices pinned to the model-files-v1.0 release, hashes taken from the
+  captain's proven local files). Downloads stream to per-process temp
+  files, fsync, verify the ON-DISK bytes, then atomically publish —
+  the xai BLOCKER was two daemons sharing one .part inode, where a
+  peer could keep writing through its open fd AFTER a verified rename
+  (published file mutates post-verification). Configured paths resolve
+  against the CONFIG FILE's dir (the relative `models/…` default only
+  worked from the repo root); explicit-but-missing paths error rather
+  than silently fall back. Daemon resolves the VAD model before
+  VoiceLoop builds (failure → the existing honest headless path);
+  tts_floor's bare urlretrieve (no checksum, torn-download loadable,
+  relative default) replaced by assets. LIVE: real download from the
+  pinned URL into a fresh cache, hash True; captain's real config
+  resolves unchanged. P3: FloorSupervisor — voco-d spawns/supervises
+  voco-tts-floor (same-venv argv), crash restarts with capped backoff
+  (healthy-hour reset, >= boundary per review), TRANSIENT spawn
+  failures retry with a 5-strike terminal give-up (EMFILE can heal;
+  a broken install cannot), clean stop on daemon shutdown; decision is
+  the pure should_manage(): loopback:8880 by default (voice_loop's
+  dead :8000 default unified to 8880, doctor probe too),
+  [tts].manage_floor overrides, remote engines never touched.
+  Supervisor tests spawn real child processes (stop, crash-restart,
+  give-up). Deferred with reasons: richer download-error taxonomy +
+  log rotation (P4), doctor deep-verify of cached assets (P5), Windows
+  process-tree/replace semantics (POSIX-first posture, journaled).
+  Gates: 396 pytest · mypy · ruff+format. Captain adoption note: on
+  next daemon restart the floor becomes managed IF tts.base_url is
+  loopback:8880 — the hand-run July-3 floor process should be killed
+  once (`pkill -f voco-tts-floor`) so the daemon owns it.
+
 - **2026-07-09 · P1 HARDENED — the /xai round (now standing policy:
   every phase gets one).** Codex adversarial review found 5 real
   blockers; all fixed same-slice: (1) plist built via f-string XML was
