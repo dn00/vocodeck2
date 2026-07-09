@@ -208,6 +208,27 @@ mid cols: 266px fleet tree / 1fr canvas / 220px channel rack
 
 ## Journal
 
+- **2026-07-09 · M5 SHIPPED — channel rack + the final layout.** New
+  rack.mjs: agents as channel strips (LED · name · state, with ages
+  shown only once a transition is OBSERVED client-side — no fabricated
+  durations; the protocol carries no state timestamps). The mic is a
+  patch: amber MIC on the holder, clicking an idle channel's patch is
+  exactly selectAgent (the one mic-mover; verified live — patching Iris
+  updated live channel, cmd-bar route, and status line together). The
+  live channel runs the machinery: level meter (animates on
+  capturing/holding/routing or speech), live caption (ticker /
+  last-routed + full); a speaking agent's channel gets the karaoke
+  sentence + ■ stop wherever the mic is. Master block: duplex ·
+  attention (click-cycles; honest "headless" when no voice loop) ·
+  working/listening. The GRID flipped to its final mk3 shape: mid =
+  tree | canvas | rack (rack grip, voco.rackw), and the dock moved to
+  the full-width bottom console row (M6 rebuilds its body — functions
+  intact meanwhile). Command bar slimmed to final form ([voco ● host]
+  [prompt·route] [■ ⚙]); interim caption/speaking/attention cells and
+  their CSS removed; offline dim now covers the console row too.
+  Gates: 371 pytest · ruff · tsc. Browser-verified on :7911. NEXT: M6 —
+  console body (annotations table · transcript · ASKS UI · log).
+
 - **2026-07-09 · M4 SHIPPED — views + editor: the annotation fix, files
   tree + syntax highlighting.** (1) THE FIX: `renderPage` now routes
   `screen` pages through `renderDocView` exactly like `doc` pages —

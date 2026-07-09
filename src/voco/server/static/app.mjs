@@ -22,6 +22,7 @@ import { renderTranscript, flashEntry } from "./transcript.mjs";
 import { renderDocView } from "./docview.mjs";
 import { renderHtmlView } from "./htmlview.mjs";
 import { renderPresence } from "./presence.mjs";
+import { renderRack } from "./rack.mjs";
 import { renderTerminal } from "./term.mjs";
 import { openPicker, openRepo, openSpawn, openConnect, openSettings,
   confirmDanger } from "./modals.mjs";
@@ -49,12 +50,14 @@ const rail = h("div", { class: "rail" });
 const gripRail = h("div", { class: "grip", role: "separator", tabindex: "0",
   "aria-label": "resize rail" });
 const work = h("div", { class: "work" });
-const gripDock = h("div", { class: "grip", role: "separator", tabindex: "0",
-  "aria-label": "resize dock" });
+const gripRack = h("div", { class: "grip", role: "separator", tabindex: "0",
+  "aria-label": "resize channel rack" });
+const rack = h("div", { class: "rack" });
+// The dock is the full-width bottom console row (M6 rebuilds its body).
 const dock = h("div", { class: "dock" });
 const statusline = h("div", { class: "statusline" });
-const body = h("div", { class: "deck-body" }, rail, gripRail, work, gripDock, dock);
-app.append(presence, body, statusline);
+const body = h("div", { class: "deck-body" }, rail, gripRail, work, gripRack, rack);
+app.append(presence, body, dock, statusline);
 
 // ---- toasts (policy: errors persist w/ dismiss; successes fade) ---------------
 function toast(msg, sticky = false) {
@@ -1189,13 +1192,23 @@ function jumpToTranscript(target) {
   requestAnimationFrame(() => flashEntry(dock, target));
 }
 
-// ---- presence strip -------------------------------------------------------------
+// ---- command bar + channel rack ---------------------------------------------
 function renderStrip() {
   renderPresence(presence, store, {
     command: (cmd, payload) => bus.command(cmd, payload),
     onFull: jumpToTranscript,
     toast,
     onSettings: () => openSettings(mctx()),
+  });
+}
+
+function renderRackPanel() {
+  renderRack(rack, store, {
+    command: (cmd, payload) => bus.command(cmd, payload),
+    selectAgent,
+    stateOf,
+    onFull: jumpToTranscript,
+    toast,
   });
 }
 
@@ -1235,7 +1248,8 @@ function renderStatus() {
 // ---- disconnected: a designed state -------------------------------------------
 function renderConn() {
   body.classList.toggle("offline", !store.connected);
-  renderStrip(); renderStatus();
+  dock.classList.toggle("offline", !store.connected);
+  renderStrip(); renderRackPanel(); renderStatus();
   if (store.connected) {
     loadFindings(store.selectedWorkspace || "");
     loadAsks(store.selectedWorkspace || "");
@@ -1281,11 +1295,12 @@ function grip(el, cssVar, min, max, fromRight, storeKey) {
   });
 }
 grip(gripRail, "--railw", 180, 400, false, "voco.railw");
-grip(gripDock, "--dockw", 240, 520, true, "voco.dockw");
+grip(gripRack, "--rackw", 180, 320, true, "voco.rackw");
 
 // ---- wire subscriptions -----------------------------------------------------
 store.subscribe("workspaces", () => { renderRail(); renderWork(); renderDock(); });
-store.subscribe("sessions", () => { renderRail(); renderWork(); renderStrip(); renderStatus(); });
+store.subscribe("sessions", () => { renderRail(); renderWork(); renderStrip();
+  renderRackPanel(); renderStatus(); });
 store.subscribe("selection", () => {
   renderRail(); renderWork(); renderDock();
   loadFindings(store.selectedWorkspace || "");
@@ -1293,20 +1308,22 @@ store.subscribe("selection", () => {
 });
 store.subscribe("findings", () => { renderDock(); renderWork(); renderRail(); renderStatus(); });
 store.subscribe("asks", () => { renderDock(); renderRail(); });
-store.subscribe("voice", renderStrip);
-// speech.sentence fires per sentence — the strip updates every time,
+// voice presence lives in the rack now (the live channel's meter + caption)
+store.subscribe("voice", renderRackPanel);
+// speech.sentence fires per sentence — the rack updates every time,
 // but the rail only cares WHO is speaking (eq marker), and the dock
 // only when the transcript is showing (karaoke lives there).
 let lastSpeakerWho = null;
 store.subscribe("speaking", () => {
-  renderStrip();
+  renderRackPanel();
   const who = store.speaking && store.speaking.who;
   if (who !== lastSpeakerWho) { lastSpeakerWho = who; renderRail(); }
   if (dockTab === "transcript") renderDock();
 });
 store.subscribe("transcript", () => { if (dockTab === "transcript") renderDock(); });
-store.subscribe("mic", () => { renderStrip(); renderStatus(); });
+store.subscribe("mic", () => { renderRackPanel(); renderStatus(); });
 store.subscribe("conn", renderConn);
-store.subscribe("ticker", renderStrip);
+store.subscribe("ticker", renderRackPanel);
 
-renderStrip(); renderRail(); renderWork(); renderDock(); renderStatus();
+renderStrip(); renderRail(); renderWork(); renderRackPanel(); renderDock();
+renderStatus();
