@@ -851,7 +851,8 @@ def main() -> None:
     p_up.add_argument(
         "--wait", type=float, default=20.0, help="seconds to wait for health"
     )
-    sub.add_parser("down", help="stop the managed daemon")
+    p_down = sub.add_parser("down", help="stop the managed daemon")
+    p_down.add_argument("--port", type=int, default=7777)
     p_logs = sub.add_parser("logs", help="show the managed daemon's log")
     p_logs.add_argument("-n", "--lines", type=int, default=50)
     p_logs.add_argument("-f", "--follow", action="store_true")
@@ -868,20 +869,18 @@ def main() -> None:
     args = parser.parse_args()
 
     # Lifecycle commands manage the daemon PROCESS — they never need a
-    # session and must work while the daemon is down.
+    # session, must work while the daemon is down, and are LOCAL by
+    # nature (they ignore VOCO_URL: that aims clients, never signals).
     if args.cmd in ("up", "down", "logs", "autostart"):
         from voco_cli import lifecycle
 
-        base = os.environ.get("VOCO_URL") or (
-            f"http://127.0.0.1:{getattr(args, 'port', 7777)}"
-        )
         if args.cmd == "up":
-            raise SystemExit(lifecycle.cmd_up(args, base))
+            raise SystemExit(lifecycle.cmd_up(args))
         if args.cmd == "down":
-            raise SystemExit(lifecycle.cmd_down(base))
+            raise SystemExit(lifecycle.cmd_down(args))
         if args.cmd == "logs":
             raise SystemExit(lifecycle.cmd_logs(args))
-        raise SystemExit(lifecycle.cmd_autostart(args, base))
+        raise SystemExit(lifecycle.cmd_autostart(args))
 
     client = Client()
     if args.cmd == "say":

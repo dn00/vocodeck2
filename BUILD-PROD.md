@@ -6,6 +6,11 @@ a local-first voice control plane (ADR-0002 Tier 0/1 posture, minus
 the Tauri shell which stays deferred).
 
 Ground rules (best practice, non-negotiable):
+- **Every phase ends with an /xai adversarial review** (Codex,
+  hostile mode) BEFORE its commit; blockers fixed in the same slice,
+  deferrals journaled with reasons. (Captain's standing order,
+  2026-07-09 — P1's review found 5 real blockers incl. a plist
+  injection and a PID-reuse kill hazard.)
 - Every slice: gates green (pytest · mypy · ruff+format · tsc ·
   protocol drift) + a LIVE verification of the actual behavior
   (process really restarts, model really downloads, log really
@@ -82,6 +87,34 @@ post-review-to-PR · settings polish · light theme · full palette.
 Order: P1 → P2+P3 → P4+P5 → B by risk → C → D. UI work is paused.
 
 ## Journal
+
+- **2026-07-09 · P1 HARDENED — the /xai round (now standing policy:
+  every phase gets one).** Codex adversarial review found 5 real
+  blockers; all fixed same-slice: (1) plist built via f-string XML was
+  an INJECTION (config paths with XML metacharacters) → plistlib +
+  atomic tmp-replace write, injection round-trip test; (2) PID reuse
+  could SIGKILL an innocent process → pidfile pids are only trusted
+  after `ps` confirms a voco-d identity (token-basename match — the
+  first substring version let `vim voco-design.md` pass [unit test
+  caught it], the second argv0-only version disowned our own daemon
+  because console-script shims run as `python …/voco-d` [LIVE drill
+  caught it — gates alone would have shipped both]); (3) PermissionError
+  on kill now degrades honestly instead of tracebacking; (4) concurrent
+  `voco up` double-spawn → exclusive spawn lock (O_EXCL, 60s stale
+  expiry); (5) stale-pidfile deadlock → identity-based staleness with
+  one more live-drill lesson folded in: an UNKNOWN probe (ps itself
+  failing) keeps the pidfile — a transient hiccup must never orphan a
+  healthy daemon (the pre-fix version deleted the record and stranded
+  a live daemon). Also from the review: up failure paths clean the
+  pidfile; health requires a voco-signed body (random 200 ≠ daemon;
+  /v1/health endpoint queued for P4); lifecycle URLs are always local
+  — VOCO_URL aims clients, never signals (down gained --port); systemd
+  guidance shlex-quotes; launchd bootout errors surface on uninstall
+  of a loaded job; seek-based log tail; --wait clamped; Windows gets
+  an honest unsupported message. Deferred to P4 with reasons: log
+  rotation + rotation-aware `logs -f` + real health endpoint. Tests
+  9 (383 total); full live cycle re-drilled clean (up → managed stop →
+  port freed). Ground rules updated: /xai every phase.
 
 - **2026-07-09 · P1 SHIPPED — lifecycle ownership.** New
   clients/voco_cli/lifecycle.py (pure helpers split from I/O for

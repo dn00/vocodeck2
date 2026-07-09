@@ -1,31 +1,33 @@
 """voco lifecycle — `voco up|down|logs|autostart` (BUILD-PROD P1).
 
 ROLE: own the daemon PROCESS so nobody hand-runs `uv run voco-d` in a
-forgotten terminal again. Design:
+forgotten terminal again. Hardened per the P1 adversarial review:
 
-- `voco up`: idempotent start. Health-probe first; spawn `voco-d`
-  detached (own session, output to the managed log), write a pidfile,
-  wait for health, report honestly (on failure: the log tail).
-- `voco down`: pidfile → SIGTERM → bounded wait → SIGKILL only as a
-  loudly-reported last resort. Refuses to guess when it finds a daemon
-  it didn't start.
-- `voco logs [-f]`: the managed log, tail or follow.
-- `voco autostart install|uninstall|status`: launchd agent on macOS
-  (KeepAlive on crash, RunAtLoad); prints a systemd --user unit as
-  guidance elsewhere.
+- pid identity: a pidfile number is only trusted after `ps` confirms
+  the process actually looks like voco-d (PID reuse after crash/reboot
+  must never get an unrelated process SIGKILLed).
+- `voco up` takes an exclusive spawn lock (O_EXCL, stale after 60s) so
+  two concurrent ups can't double-spawn; failure paths clean the
+  pidfile; success requires OUR child alive AND a voco-signed health
+  response (a random 200 on the port must not read as success).
+- plists are built with plistlib (never f-string XML — config paths
+  with XML metacharacters were an injection) and written atomically;
+  the systemd guidance uses shlex quoting.
+- POSIX-only, honestly: on Windows these commands say so and exit.
+- Lifecycle URLs are always local (127.0.0.1:port): VOCO_URL points
+  clients at daemons, possibly remote — it must never aim `down`.
 
 Lifecycle files live in the DEFAULT state dir (~/.local/state/voco or
-$VOCO_STATE_DIR): the pidfile/log are per-machine service facts, not
-per-config state, so a custom [state].dir never orphans them.
-
-Pure helpers (argv/plist/pid parsing) are separated from I/O so tests
-cover the logic without spawning processes.
+$VOCO_STATE_DIR): pidfile/log are per-machine service facts, not
+per-config state. Log rotation + a real /v1/health endpoint are P4.
 """
 
 from __future__ import annotations
 
 import os
 import platform
+import plistlib
+import shlex
 import shutil
 import signal
 import subprocess
@@ -35,6 +37,7 @@ import urllib.request
 from pathlib import Path
 
 LAUNCHD_LABEL = "io.voco.daemon"
+UP_LOCK_STALE_S = 60
 
 
 def state_dir() -> Path:
@@ -52,6 +55,22 @@ def log_path() -> Path:
 
 def launchd_plist_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
+
+
+def local_url(port: int) -> str:
+    """Lifecycle is local by nature — deliberately ignores VOCO_URL."""
+    return f"http://127.0.0.1:{port}"
+
+
+def _posix_or_explain() -> bool:
+    if os.name == "posix":
+        return True
+    print(
+        "voco: managed lifecycle (up/down/logs) is POSIX-only for now —"
+        " on Windows run voco-d directly; a service wrapper is on the"
+        " roadmap (BUILD-PROD)."
+    )
+    return False
 
 
 # ---- pure helpers (unit-tested) ------------------------------------------------
@@ -81,55 +100,79 @@ def read_pidfile(path: Path) -> int | None:
         return None
 
 
-def pid_alive(pid: int) -> bool:
+def looks_like_voco(cmdline: str) -> bool:
+    """Identity test for a pidfile pid: the command must actually be
+    voco-d (binary or `python -m voco.daemon`). Token-exact on argv0's
+    basename — a substring test let `vim voco-design.md` read as the
+    daemon (caught by our own test). PID reuse must never aim a signal
+    at an innocent process."""
+    parts = cmdline.split()
+    # console-script shims run as `python /venv/bin/voco-d …`, so the
+    # voco-d token can be argv0 OR argv1 (live drill caught argv0-only)
+    if any(Path(tok).name == "voco-d" for tok in parts[:2]):
+        return True
+    return "voco.daemon" in parts  # the `python -m voco.daemon` form
+
+
+def pid_cmdline(pid: int) -> str | None:
+    """`ps` read of the process command. None = the process does not
+    exist; "" = the PROBE failed (ps unavailable/timed out) — unknown
+    is not the same as gone, and callers must not destroy state on it."""
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True  # exists, someone else's — still alive
-    return True
+        out = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if out.returncode != 0:
+        return None
+    return out.stdout.strip() or None
 
 
-def build_launchd_plist(argv: list[str], log: Path) -> str:
-    """KeepAlive on crash (not on clean exit — `voco down` must stick),
-    RunAtLoad, both output streams to the managed log."""
-    args_xml = "\n".join(f"      <string>{a}</string>" for a in argv)
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-  <dict>
-    <key>Label</key>
-    <string>{LAUNCHD_LABEL}</string>
-    <key>ProgramArguments</key>
-    <array>
-{args_xml}
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <dict>
-      <key>SuccessfulExit</key>
-      <false/>
-    </dict>
-    <key>StandardOutPath</key>
-    <string>{log}</string>
-    <key>StandardErrorPath</key>
-    <string>{log}</string>
-  </dict>
-</plist>
-"""
+def managed_pid() -> int | None:
+    """The pidfile pid IF it is alive and provably voco. A stale or
+    hijacked-by-reuse pidfile is cleaned; an UNKNOWN read (probe
+    failure) keeps the pidfile — a transient ps hiccup must never
+    orphan a healthy daemon (live drill lesson)."""
+    pid = read_pidfile(pidfile_path())
+    if pid is None:
+        return None
+    cmd = pid_cmdline(pid)
+    if cmd == "":
+        return None  # unknown — act unmanaged, but keep the record
+    if cmd is None or not looks_like_voco(cmd):
+        pidfile_path().unlink(missing_ok=True)  # stale — never trust again
+        return None
+    return pid
+
+
+def build_launchd_plist(argv: list[str], log: Path) -> bytes:
+    """plistlib, not string XML: argv/paths are user-controlled and XML
+    metacharacters in a config path were an injection. KeepAlive on
+    crash only (clean exits stick, so `voco down` sticks)."""
+    return plistlib.dumps(
+        {
+            "Label": LAUNCHD_LABEL,
+            "ProgramArguments": list(argv),
+            "RunAtLoad": True,
+            "KeepAlive": {"SuccessfulExit": False},
+            "StandardOutPath": str(log),
+            "StandardErrorPath": str(log),
+        }
+    )
 
 
 def systemd_unit(argv: list[str], log: Path) -> str:
-    """Printed as guidance on non-macOS (P1 documents; a managed
-    install can follow when a Linux daily-driver exists)."""
+    """Printed as guidance on non-macOS; shlex-quoted so paths with
+    spaces produce a valid ExecStart."""
     return f"""[Unit]
 Description=voco daemon
 
 [Service]
-ExecStart={" ".join(argv)}
+ExecStart={shlex.join(argv)}
 Restart=on-failure
 StandardOutput=append:{log}
 StandardError=append:{log}
@@ -139,88 +182,162 @@ WantedBy=default.target
 """
 
 
+def tail_text(path: Path, n: int) -> str:
+    """Last n lines without reading the whole file (the log can be
+    large until P4 brings rotation)."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - 131072))
+            data = f.read().decode(errors="replace")
+    except OSError:
+        return "(no log yet)"
+    lines = data.splitlines()
+    return "\n".join(lines[-n:])
+
+
 # ---- health ---------------------------------------------------------------------
 
 
 def healthy(base_url: str, timeout: float = 2.0) -> bool:
+    """200 AND a voco signature in the body — a random HTTP listener
+    squatting the port must not read as a running daemon. (A dedicated
+    /v1/health endpoint is the P4 upgrade for this heuristic.)"""
     try:
         with urllib.request.urlopen(base_url + "/", timeout=timeout) as r:
-            return r.status == 200
+            if r.status != 200:
+                return False
+            body = r.read(4096).decode(errors="replace")
+            return "voco" in body
     except Exception:
         return False
-
-
-def _tail(path: Path, n: int = 15) -> str:
-    try:
-        lines = path.read_text(errors="replace").splitlines()
-        return "\n".join(lines[-n:])
-    except OSError:
-        return "(no log yet)"
 
 
 # ---- commands -------------------------------------------------------------------
 
 
-def cmd_up(args, base_url: str) -> int:
+def cmd_up(args) -> int:
+    if not _posix_or_explain():
+        return 1
+    base_url = local_url(args.port)
     sd = state_dir()
     sd.mkdir(parents=True, exist_ok=True)
     if healthy(base_url):
         print(f"voco: daemon already running at {base_url}")
         return 0
-    pid = read_pidfile(pidfile_path())
-    if pid is not None and pid_alive(pid):
+    pid = managed_pid()
+    if pid is not None:
         print(
-            f"voco: pid {pid} is alive but {base_url} is not answering —"
-            " it may still be starting; `voco logs` to look"
+            f"voco: managed daemon (pid {pid}) is alive but {base_url} is"
+            " not answering — it may still be starting, or it runs on a"
+            " different --port; `voco logs` to look"
         )
         return 1
-    argv = daemon_argv(config=args.config, port=args.port, no_audio=args.no_audio)
-    log = log_path()
-    with open(log, "a", encoding="utf-8") as lf:
-        lf.write(f"\n--- voco up · {time.strftime('%F %T')} ---\n")
-        lf.flush()
-        proc = subprocess.Popen(
-            argv,
-            stdout=lf,
-            stderr=lf,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,  # survives this CLI and its terminal
+    # Exclusive spawn lock: two concurrent `voco up` must not double-
+    # spawn. Stale locks (crashed CLI) expire after UP_LOCK_STALE_S.
+    lock = sd / "up.lock"
+    try:
+        if lock.exists() and time.time() - lock.stat().st_mtime > UP_LOCK_STALE_S:
+            lock.unlink(missing_ok=True)
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+    except FileExistsError:
+        print("voco: another `voco up` is already running — waiting is safer")
+        return 1
+    except OSError as e:
+        print(f"voco: cannot take the spawn lock: {e}")
+        return 1
+    try:
+        argv = daemon_argv(config=args.config, port=args.port, no_audio=args.no_audio)
+        log = log_path()
+        with open(log, "a", encoding="utf-8") as lf:
+            lf.write(f"\n--- voco up · {time.strftime('%F %T')} ---\n")
+            lf.flush()
+            proc = subprocess.Popen(
+                argv,
+                stdout=lf,
+                stderr=lf,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,  # survives this CLI and its terminal
+            )
+        pidfile_path().write_text(str(proc.pid))
+        deadline = time.time() + max(1.0, float(args.wait))
+        while time.time() < deadline:
+            # success = OUR child alive AND a voco-signed answer — a 200
+            # from something else must not claim this pid succeeded
+            if proc.poll() is not None:
+                break
+            if healthy(base_url):
+                print(f"voco: daemon up at {base_url} (pid {proc.pid}, log: {log})")
+                return 0
+            time.sleep(0.3)
+        pidfile_path().unlink(missing_ok=True)  # failed boot: never leave bait
+        print(
+            f"voco: daemon did not become healthy — last log lines:\n"
+            f"{tail_text(log, 15)}"
         )
-    pidfile_path().write_text(str(proc.pid))
-    deadline = time.time() + float(args.wait)
-    while time.time() < deadline:
-        if healthy(base_url):
-            print(f"voco: daemon up at {base_url} (pid {proc.pid}, log: {log})")
-            return 0
-        if proc.poll() is not None:
-            break  # died during boot — report the log, don't spin
-        time.sleep(0.3)
-    print(f"voco: daemon did not become healthy — last log lines:\n{_tail(log)}")
-    return 1
+        return 1
+    finally:
+        lock.unlink(missing_ok=True)
 
 
-def cmd_down(base_url: str) -> int:
-    pid = read_pidfile(pidfile_path())
-    if pid is None or not pid_alive(pid):
+def _launchd_loaded() -> bool:
+    if platform.system() != "Darwin":
+        return False
+    return (
+        subprocess.run(
+            ["launchctl", "list", LAUNCHD_LABEL], capture_output=True
+        ).returncode
+        == 0
+    )
+
+
+def cmd_down(args) -> int:
+    if not _posix_or_explain():
+        return 1
+    base_url = local_url(args.port)
+    pid = managed_pid()
+    if pid is None:
+        if _launchd_loaded():
+            print(
+                "voco: launchd owns the daemon — `voco autostart uninstall`"
+                " stops and removes it (or `launchctl bootout"
+                f" gui/{os.getuid()}/{LAUNCHD_LABEL}` to stop once)"
+            )
+            return 1
         if healthy(base_url):
             print(
                 "voco: a daemon answers but was not started by `voco up`"
-                " (no live pidfile) — stop it where it was started,"
-                " or use `voco autostart uninstall` if launchd owns it"
+                " — stop it where it was started"
             )
             return 1
         print("voco: no daemon running")
-        pidfile_path().unlink(missing_ok=True)
         return 0
-    os.kill(pid, signal.SIGTERM)
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except PermissionError:
+        print(
+            f"voco: pid {pid} exists but belongs to another user — not"
+            " touching it; remove the pidfile yourself if it is stale:"
+            f" {pidfile_path()}"
+        )
+        return 1
+    except ProcessLookupError:
+        pidfile_path().unlink(missing_ok=True)
+        print("voco: daemon already gone")
+        return 0
     deadline = time.time() + 15
     while time.time() < deadline:
-        if not pid_alive(pid):
+        if pid_cmdline(pid) is None:
             pidfile_path().unlink(missing_ok=True)
             print(f"voco: daemon stopped (pid {pid})")
             return 0
         time.sleep(0.3)
-    os.kill(pid, signal.SIGKILL)  # loud last resort — never silent
+    try:
+        os.kill(pid, signal.SIGKILL)  # loud last resort — never silent
+    except (ProcessLookupError, PermissionError):
+        pass
     pidfile_path().unlink(missing_ok=True)
     print(
         f"voco: daemon (pid {pid}) ignored SIGTERM for 15s — killed."
@@ -230,11 +347,13 @@ def cmd_down(base_url: str) -> int:
 
 
 def cmd_logs(args) -> int:
+    if not _posix_or_explain():
+        return 1
     log = log_path()
     if not log.exists():
         print(f"voco: no log yet at {log}")
         return 1
-    print(_tail(log, args.lines))
+    print(tail_text(log, args.lines))
     if not args.follow:
         return 0
     with open(log, encoding="utf-8", errors="replace") as f:
@@ -250,7 +369,7 @@ def cmd_logs(args) -> int:
             return 0
 
 
-def cmd_autostart(args, base_url: str) -> int:
+def cmd_autostart(args) -> int:
     argv = daemon_argv(config=args.config, port=args.port, no_audio=False)
     if platform.system() != "Darwin":
         print("voco: managed autostart is macOS/launchd for now;")
@@ -259,23 +378,19 @@ def cmd_autostart(args, base_url: str) -> int:
         return 1
     plist = launchd_plist_path()
     if args.action == "status":
-        loaded = (
-            subprocess.run(
-                ["launchctl", "list", LAUNCHD_LABEL],
-                capture_output=True,
-            ).returncode
-            == 0
-        )
         print(
             f"voco: autostart {'installed' if plist.exists() else 'not installed'}"
-            f" · {'loaded' if loaded else 'not loaded'} · {plist}"
+            f" · {'loaded' if _launchd_loaded() else 'not loaded'} · {plist}"
         )
         return 0
     if args.action == "install":
         state_dir().mkdir(parents=True, exist_ok=True)
         plist.parent.mkdir(parents=True, exist_ok=True)
-        plist.write_text(build_launchd_plist(argv, log_path()))
-        # bootout first = idempotent reinstall picks up argv changes
+        tmp = plist.with_suffix(".plist.tmp")
+        tmp.write_bytes(build_launchd_plist(argv, log_path()))
+        tmp.replace(plist)  # atomic — a half-written plist must not load
+        # bootout first = idempotent reinstall picks up argv changes;
+        # its failure is EXPECTED when nothing was loaded, so quiet.
         subprocess.run(
             ["launchctl", "bootout", f"gui/{os.getuid()}", str(plist)],
             capture_output=True,
@@ -294,15 +409,18 @@ def cmd_autostart(args, base_url: str) -> int:
         )
         return 0
     if args.action == "uninstall":
-        subprocess.run(
+        was_loaded = _launchd_loaded()
+        r = subprocess.run(
             ["launchctl", "bootout", f"gui/{os.getuid()}", str(plist)],
             capture_output=True,
+            text=True,
         )
+        if was_loaded and r.returncode != 0:
+            # a loaded job that refuses to unload is a real failure
+            print(f"voco: launchctl bootout failed: {r.stderr.strip()}")
+            return 1
         plist.unlink(missing_ok=True)
-        print(
-            "voco: autostart uninstalled (a running daemon keeps running;"
-            " `voco down` stops it)"
-        )
+        print("voco: autostart uninstalled")
         return 0
     print(f"voco: unknown autostart action {args.action!r}")
     return 2
