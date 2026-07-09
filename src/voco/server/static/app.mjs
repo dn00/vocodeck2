@@ -1775,6 +1775,7 @@ store.subscribe("sessions", () => { renderRail(); renderWork(); renderStrip();
   renderRackPanel(); renderStatus(); });
 store.subscribe("selection", () => {
   renderRail(); renderWork(); renderDock();
+  renderRackPanel(); // the deck marks the VIEWED agent's card (steel)
   loadFindings(store.selectedWorkspace || "");
   loadAsks(store.selectedWorkspace || "");
 });

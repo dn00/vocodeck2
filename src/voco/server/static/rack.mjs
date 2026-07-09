@@ -130,9 +130,10 @@ export function renderRack(deck, store, ctx) {
   if (deckMin) {
     for (const s of sessions) {
       const isMic = s.session_id === store.activeSession;
+      const isSel = s.session_id === store.selectedAgent;
       const state = ctx.stateOf(s);
       cards.append(el("span", {
-        class: "chipcard" + (isMic ? " live" : ""),
+        class: "chipcard" + (isMic ? " live" : "") + (isSel ? " sel" : ""),
         title: `view ${s.name}'s work — the mic stays put`,
         onclick: () => ctx.focusAgent(s) },
         el("span", { class: "dot " + state }),
@@ -207,11 +208,16 @@ export function renderRack(deck, store, ctx) {
   // agent cards ---------------------------------------------------------------
   for (const s of sessions) {
     const isMic = s.session_id === store.activeSession;
+    const isSel = s.session_id === store.selectedAgent;
     const state = ctx.stateOf(s);
     const speaking = store.speaking && store.speaking.who === s.name
       ? store.speaking : null;
     const age = observedAge(s, state);
-    const card = el("div", { class: "card" + (isMic ? " live" : ""),
+    // sel = the VIEWED agent (steel, like the tree); live = the mic
+    // holder (amber). Both can be true; amber declares later and wins
+    // the border.
+    const card = el("div", { class: "card" + (isSel ? " sel" : "")
+      + (isMic ? " live" : ""),
       title: `view ${s.name}'s work — the mic stays put`,
       onclick: () => ctx.focusAgent(s) });
     card.append(el("div", { class: "c-top" },
