@@ -477,6 +477,9 @@ function workFingerprint() {
   const page = pages.find((p) => p.page_id === store.selectedPage);
   const parts = [store.selectedWorkspace, store.selectedPage,
     store.connected ? 1 : 0];
+  // the tab strip shows EVERY open page — new/republished/closed pages
+  // must rebuild the canvas even when the selected page didn't change
+  parts.push(pages.map((p) => p.page_id + ":" + p.rev).join(","));
   if (store.selectedPage === "__files__" && ws) {
     // the file browser is client-local state — agent churn must not
     // rebuild it (the filter box would lose focus mid-typing)
@@ -525,20 +528,57 @@ function renderWork(force = false) {
   const page = pages.find((p) => p.page_id === store.selectedPage);
   const isFiles = store.selectedPage === "__files__" && ws
     && ws.kind === "workspace";
-  const crumb = h("div", { class: "crumb" });
-  crumb.append(
-    h("span", { class: "crumb-who" }, ws ? workLabel(ws) : (agent ? agent.name : "")),
-    h("span", { class: "sep" }, " / "),
-    h("span", {}, isFiles ? "files" : page ? page.title : "overview"));
+  // mk3 M3: the tab strip — open pages as tabs (the tree's page rows,
+  // mirrored; no new state). ✕ shows on hover/active only (mk3.1 #1).
+  const tabbar = h("div", { class: "tabbar" });
+  const sorted = [...pages].sort((a, b) =>
+    (a.pinned ? 0 : 1) - (b.pinned ? 0 : 1)
+    || a.page_id.localeCompare(b.page_id));
+  for (const p of sorted) {
+    const on = p.page_id === store.selectedPage;
+    const t = h("div", { class: "tab" + (on ? " on" : ""),
+      onclick: () => store.selectPage(p.page_id) },
+      h("span", { class: "g" }, PAGE_ICON[p.type] || "·"),
+      h("span", { class: "tab-title" }, p.title),
+      p.rev > 1 ? h("span", { class: "g" }, "@r" + p.rev) : "");
+    if (!p.pinned)
+      t.append(h("span", { class: "tab-x", title: "close page",
+        onclick: (e) => { e.stopPropagation(); closePage(p); } }, "✕"));
+    tabbar.append(t);
+  }
+  if (ws && ws.kind === "workspace")
+    tabbar.append(h("div", { class: "tab" + (isFiles ? " on" : ""),
+      onclick: () => store.selectPage("__files__") },
+      h("span", { class: "g" }, "▤"),
+      h("span", { class: "tab-title" }, "files")));
+  if (ws)
+    tabbar.append(h("div", { class: "tab plus", title: "open a review diff",
+      onclick: () => openPickerFor(ws) }, "+"));
+  // page bar: provenance · since-rev note · annotate hint · page actions
+  const prov = h("span", { class: "pg-prov" },
+    h("b", {}, ws ? (ws.repo || ws.name) + "/" + workLabel(ws)
+      : (agent ? agent.name : "")),
+    page
+      ? h("span", {}, ` · ${PAGE_ICON[page.type] || "·"} ${page.type}`
+        + ` · rev ${page.rev}`
+        + (page.call_name ? ` · by ${page.call_name}` : ""))
+      : h("span", {}, isFiles ? " · ▤ files" : " · overview"));
   if (page && page.rev > 1)
-    crumb.append(h("span", { class: "sep" }, " · "),
-      h("span", { class: "micro rev",
-        title: `republished ${page.rev - 1}× — annotations from older` +
-          " revisions are marked stale, never dropped" },
-        "rev " + page.rev));
+    prov.title = `republished ${page.rev - 1}× — annotations from older`
+      + " revisions are marked stale, never dropped";
   const srnote = h("span", { class: "sr-note" });
   const actions = h("div", { class: "work-actions" });
-  work.append(h("div", { class: "work-head" }, crumb, srnote, actions));
+  const hint = page && (page.type === "doc" || page.type === "screen")
+    ? "annotate: click block · select text"
+    : page && page.type === "diff" ? "annotate: click a line"
+      : page && page.type === "html" ? "annotate: toggle, then click an element"
+        : "";
+  work.append(tabbar,
+    h("div", { class: "pgbar" }, prov, srnote,
+      hint ? h("span", { class: "pg-hint" }, hint) : "",
+      actions,
+      ws ? h("button", { class: "whbtn", title: "export this work's review",
+        onclick: () => exportReview() }, "export") : ""));
   const view = h("div", { class: "view" });
   // Capture the key this view was RENDERED for: saving under a live
   // pageKey() re-keyed page A's offset onto page B when the selection

@@ -208,6 +208,29 @@ mid cols: 266px fleet tree / 1fr canvas / 220px channel rack
 
 ## Journal
 
+- **2026-07-08 · M3 SHIPPED — canvas tabs + page bar.** The crumb head
+  is gone; the canvas now opens with the mk3 duo: a tab strip (the
+  selected work's open pages as tabs — no new state, the tree's page
+  rows mirrored; pinned-first order; `@rN` on republished pages; ✕ on
+  hover/active only per mk3.1 #1; `▤ files` pseudo-tab; `+` opens the
+  review picker) and a page bar carrying provenance (`repo/work · type
+  glyph · rev N · by <agent>` — no fabricated timestamp: PageMeta has
+  no push time; server-side `updated_ts` filed as a post-skin nicety),
+  the interdiff since-rev note, a page-type-aware annotate hint (block/
+  select on docs+screens, line on diffs, toggle+element on html — the
+  page-bar half of the wrong-hint bug), the diff expand-all + stats
+  actions, terminal live/kill, and an export button. workFingerprint
+  now includes every open page's id:rev so new/republished/closed pages
+  rebuild the tab strip even when the selection didn't change. Layout
+  hardening from live verify: pgbar children are flex:none with only
+  the provenance shrinking (ellipsis) and the bar scrolls horizontally
+  — squeezed nowrap flex children paint over their neighbors otherwise.
+  Gates: 371 pytest · mypy · ruff · tsc. Browser-verified on :7911:
+  tabs render and switch (screen page provenance "· ▦ screen · rev 1 ·
+  by Freya"), ✕ hover behavior, narrow-width overflow behavior.
+  NEXT: M4 — views + editor (screen-annotation fix, files tree +
+  syntax highlighting, html survive-check).
+
 - **2026-07-08 · M2 SHIPPED — fleet tree.** renderRail rebuilt as the
   mk3 tree: FLEET caps header; repo groups collapsible (▾/▸ on the
   group row, in-memory fold state) with `+rev +agt` ops replacing the
