@@ -44,7 +44,7 @@ const h = (tag, attrs = {}, ...kids) => {
 
 // ---- shell ------------------------------------------------------------------
 const app = /** @type {HTMLElement} */ (document.getElementById("app"));
-const presence = h("div", { class: "presence" });
+const presence = h("div", { class: "cmd" });
 const rail = h("div", { class: "rail" });
 const gripRail = h("div", { class: "grip", role: "separator", tabindex: "0",
   "aria-label": "resize rail" });
@@ -1091,7 +1091,14 @@ function renderStrip() {
   });
 }
 
-// ---- status line: ambient truth ---------------------------------------------
+// ---- status line: ambient truth (mk3 M1) --------------------------------------
+// The clock is one persistent node ticked by an interval — never a
+// full status re-render per second.
+const statusClock = h("span", {}, new Date().toTimeString().slice(0, 8));
+setInterval(() => {
+  statusClock.textContent = new Date().toTimeString().slice(0, 8);
+}, 1000);
+
 function renderStatus() {
   const mic = store.mic || {};
   const active = store.activeSession && store.sessions.get(store.activeSession);
@@ -1105,14 +1112,16 @@ function renderStatus() {
   statusline.replaceChildren(
     h("span", { class: "conn-cell " + (store.connected ? "on" : "off") },
       store.connected ? "● " + location.host : "○ reconnecting"),
-    h("span", {}, active ? "mic → " + active.name : "mic → nobody"),
+    h("span", { class: "status-mic" + (active ? "" : " none") },
+      active ? "MIC → " + active.name : "mic → nobody"),
     h("span", {}, [mic.attention, mic.duplex].filter(Boolean).join(" · ") || "headless"),
     h("span", { class: "spacer" }),
     h("span", {},
       counts.blocked ? h("span", { class: "bad" }, counts.blocked + " blocked · ") : "",
-      h("span", { class: "warn" }, counts.working + " working"),
-      " · " + counts.listening + " listening"),
-    openCount ? h("span", { class: "amber" }, openCount + " open") : "");
+      h("span", {}, h("b", {}, String(counts.working)), " working · ",
+        h("b", {}, String(counts.listening)), " listening")),
+    openCount ? h("span", { class: "amber" }, openCount + " ann") : "",
+    statusClock);
 }
 
 // ---- disconnected: a designed state -------------------------------------------

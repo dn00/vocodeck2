@@ -1,19 +1,20 @@
 // @ts-check
 /**
- * The presence strip (DESIGN-DECK U1; U2R mount-once rebuild) — the
- * voice's permanent home: orb (attention ring; click cycles), the
- * mic-holder cell (ALWAYS named — ADR-0001), the caption slot, the ONE
- * input, the agent-speaking slot, ■ interrupt, ⚙ settings.
+ * The command bar (CONSOLE mk3, M1; BUILD-CONSOLE.md) — one 36px row of
+ * cells: [voco ● host] [caption*] [> the ONE input · route → holder]
+ * [speaking*] [keys: attention · ■ interrupt · ⚙].
  *
- * MOUNT-ONCE (reference architecture, diff-annotate): the strip's DOM
- * is built exactly once; every later render UPDATES slots in place.
- * The layout is a fixed grid, so slots appearing/emptying never shift
- * their neighbors — and the input is a persistent element, so typing
- * survives every voice event (a rebuild used to eat the user's text).
+ * MOUNT-ONCE (kept from U1): the bar's DOM is built exactly once; every
+ * later render updates slots in place, so the input's value and focus
+ * survive every voice event.
  *
- * Hold-for-PTT is deliberately NOT wired: the daemon has no
- * ptt.press/release command yet — faking it in the UI would violate
- * the honest-signal rule. It lands with that command.
+ * (*) Interim cells: the live caption and the agent-speaking slot move
+ * to the channel rack when M5 lands; they ride here until then so the
+ * functions never disappear between milestones.
+ *
+ * Deliberately absent (honest-signal rule): no ⌘K hint until the
+ * palette exists (M9); no PTT hold/key hint until the daemon grows
+ * ptt.press/release (post-skin backlog).
  */
 
 const el = (tag, attrs = {}, ...kids) => {
@@ -31,27 +32,24 @@ const el = (tag, attrs = {}, ...kids) => {
 const ATTENTION_CYCLE = ["muted", "wake", "always"];
 const HEARING = new Set(["capturing", "holding", "routing"]);
 
-/** @type {?{orb:HTMLElement, orbLabel:HTMLElement, micHolder:HTMLElement,
- *   caption:HTMLElement, input:HTMLInputElement, speaking:HTMLElement}} */
+/** @type {?{led:HTMLElement, host:HTMLElement, caption:HTMLElement,
+ *   input:HTMLInputElement, route:HTMLElement, attn:HTMLElement,
+ *   speaking:HTMLElement}} */
 let dom = null;
 /** Latest render context — persistent handlers read through this. */
 let live = /** @type {any} */ (null);
 
-function buildOnce(strip) {
-  const orb = el("div", { class: "orb" });
-  orb.addEventListener("click", async () => {
-    const attention = (live.store.mic || {}).attention || "wake";
-    const next = ATTENTION_CYCLE[
-      (ATTENTION_CYCLE.indexOf(attention) + 1) % ATTENTION_CYCLE.length];
-    try { await live.ctx.command("mic.set", { attention: next }); }
-    catch (e) { live.ctx.toast("attention: " + msg(e), true); }
-  });
-  const orbLabel = el("span", { class: "orb-label" });
-  const micHolder = el("span", { class: "mic-holder",
-    title: "who hears you — click an agent in the rail to move the mic" });
-  const caption = el("div", { class: "caption", "aria-live": "polite" });
+function buildOnce(bar) {
+  const led = el("span", { class: "cmd-led" });
+  const host = el("span", { class: "cmd-host", text: location.host });
+  const idcell = el("div", { class: "cmd-cell cmd-id" },
+    el("span", { class: "cmd-app", text: "voco" }), led, host);
+
+  const caption = el("div", { class: "cmd-cell cmd-caption",
+    "aria-live": "polite" });
+
   const input = /** @type {HTMLInputElement} */ (el("input", {
-    class: "deck-input", type: "text", "aria-label": "type as speech" }));
+    class: "cmd-input", type: "text", "aria-label": "type as speech" }));
   input.addEventListener("keydown", async (e) => {
     if (e.key !== "Enter") return;
     const text = input.value.trim();
@@ -66,100 +64,114 @@ function buildOnce(strip) {
       store._notify("voice", "transcript");
     } catch (err) { live.ctx.toast("send failed: " + msg(err), true); }
   });
-  const speaking = el("div", { class: "speaking-slot" });
-  const ctl = el("div", { class: "pctl" },
-    el("button", { class: "warm", text: "■",
+  const route = el("span", { class: "cmd-route",
+    title: "who hears you — click an agent in the tree to move the mic" });
+  const prompt = el("div", { class: "cmd-prompt" },
+    el("span", { class: "cmd-gt", text: ">" }), input, route);
+
+  const speaking = el("div", { class: "cmd-cell cmd-speaking" });
+
+  const attn = el("span", { class: "cmd-attn" });
+  attn.addEventListener("click", async () => {
+    const attention = (live.store.mic || {}).attention || "wake";
+    const next = ATTENTION_CYCLE[
+      (ATTENTION_CYCLE.indexOf(attention) + 1) % ATTENTION_CYCLE.length];
+    try { await live.ctx.command("mic.set", { attention: next }); }
+    catch (e) { live.ctx.toast("attention: " + msg(e), true); }
+  });
+  const keys = el("div", { class: "cmd-cell cmd-keys" },
+    attn,
+    el("button", { class: "cmd-btn warm", text: "■",
       title: "interrupt: barge-in + Escape to the active agent",
       onclick: async () => {
         try { await live.ctx.command("interrupt", {}); }
         catch (e) { live.ctx.toast("interrupt: " + msg(e), true); }
       } }),
-    el("button", { text: "⚙", title: "settings",
+    el("button", { class: "cmd-btn", text: "⚙", title: "settings",
       onclick: () => live.ctx.onSettings() }));
-  strip.append(
-    el("div", { class: "orb-wrap" }, orb, orbLabel),
-    micHolder, caption, input, speaking, ctl);
-  return { orb, orbLabel, micHolder, caption, input, speaking };
+
+  bar.append(idcell, caption, prompt, speaking, keys);
+  return { led, host, caption, input, route, attn, speaking };
 }
 
 /**
- * @param {HTMLElement} strip
+ * @param {HTMLElement} bar
  * @param {import("./store.mjs").Store} store
  * @param {{command:(cmd:string, payload?:object)=>Promise<any>,
  *   onFull:(target:"you"|"agent")=>void, toast:(msg:string, sticky?:boolean)=>void,
  *   onSettings:()=>void}} ctx
  */
-export function renderPresence(strip, store, ctx) {
+export function renderPresence(bar, store, ctx) {
   live = { store, ctx };
-  if (!dom || !strip.contains(dom.orb)) {
-    strip.replaceChildren();
-    dom = buildOnce(strip);
+  if (!dom || !bar.contains(dom.input)) {
+    bar.replaceChildren();
+    dom = buildOnce(bar);
   }
   const mic = store.mic || {};
-  const attention = mic.attention || "wake";
+  const attention = mic.attention || null;
   const offline = !store.connected;
   const hearing = HEARING.has(store.turnState);
   const activeName = store._nameOf(store.activeSession);
 
-  // orb + label: class/text updates only — never rebuilt
-  dom.orb.className = "orb a-" + attention
-    + (hearing ? " hearing" : "") + (offline ? " off" : "");
-  dom.orb.title =
-    `attention: ${attention} — click cycles muted → wake → always`;
-  dom.orbLabel.textContent = attention;
+  // identity cell: the LED is the daemon truth
+  dom.led.className = "cmd-led " + (offline ? "off" : "on");
+  dom.host.textContent = offline ? "reconnecting…" : location.host;
+  dom.host.classList.toggle("down", offline);
 
-  dom.micHolder.textContent = "→ " + (activeName || "—");
-
-  // caption slot: the one slot whose CONTENT is replaced (it is the
-  // live region; everything around it stays put)
+  // caption (interim; live region): listening / last routed / empty
   const cap = dom.caption;
   cap.replaceChildren();
-  if (offline) {
-    cap.append(el("span", { class: "cap-off" },
-      el("span", { class: "rdot" }),
-      el("span", { text: "daemon unreachable — reconnecting" })));
-  } else if (hearing) {
+  if (!offline && hearing) {
     const bars = el("span", { class: "bars" });
     for (let i = 0; i < 5; i++) bars.append(el("i"));
     cap.append(bars, el("span", { class: "lstn", text: "listening" }));
     if (store.ticker)
       cap.append(el("span", { class: "cap-text", text: store.ticker }));
-  } else if (store.lastRouted) {
+  } else if (!offline && store.lastRouted) {
     const r = store.lastRouted;
     cap.append(
       el("span", { class: "cap-text", text: "“" + r.text + "”" }),
       el("button", { class: "cap-more", text: "full",
         onclick: () => live.ctx.onFull("you") }),
-      r.route ? el("span", { class: "route-chip", text: "→ " + r.route }) : null);
+      r.route ? el("span", { class: "cap-route", text: "→ " + r.route }) : null);
   }
+  cap.classList.toggle("empty", !cap.childElementCount);
 
   // the ONE input: placeholder/disabled only — value and focus SURVIVE
-  dom.input.placeholder = activeName
-    ? `say “deck …” or type — routes to ${activeName}`
-    : "say “deck …” or type";
+  dom.input.placeholder = "say “deck …” or type";
   dom.input.disabled = offline;
+  dom.route.textContent = activeName ? "route → " + activeName : "route → —";
+  dom.route.classList.toggle("none", !activeName);
 
-  // speaking slot: a permanent grid cell — content toggles, layout doesn't
+  // attention word: mic truth; click cycles (master block takes over in M5)
+  dom.attn.textContent = attention || "headless";
+  dom.attn.className = "cmd-attn" + (attention ? "" : " none")
+    + (attention === "muted" ? " muted" : "");
+  dom.attn.title = attention
+    ? `attention: ${attention} — click cycles muted → wake → always`
+    : "no voice loop (daemon started without audio)";
+
+  // speaking (interim): who + sentence + full + stop
   const sp = store.speaking;
   dom.speaking.replaceChildren();
   if (sp && sp.who) {
     const eq = el("span", { class: "eq" });
     for (let i = 0; i < 3; i++) eq.append(el("i"));
-    dom.speaking.append(el("div", { class: "speaking",
-      title: "click to jump to the speaker" },
+    dom.speaking.append(
       eq,
       el("span", { class: "speak-who", text: sp.who }),
       el("span", { class: "speak-text",
         text: "“" + (sp.sentence || sp.text || "") + "”" }),
       el("button", { class: "cap-more", text: "full",
-        onclick: (e) => { e.stopPropagation(); live.ctx.onFull("agent"); } }),
-      el("button", { class: "stopbtn", text: "■ stop",
-        onclick: async (e) => {
-          e.stopPropagation();
+        onclick: () => live.ctx.onFull("agent") }),
+      el("button", { class: "cmd-btn stop", text: "■",
+        title: "stop speaking",
+        onclick: async () => {
           try { await live.ctx.command("interrupt", {}); }
           catch (err) { live.ctx.toast("stop: " + msg(err), true); }
-        } })));
+        } }));
   }
+  dom.speaking.classList.toggle("empty", !sp || !sp.who);
 }
 
 const msg = (e) => (e instanceof Error ? e.message : String(e));

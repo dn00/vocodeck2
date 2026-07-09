@@ -208,6 +208,25 @@ mid cols: 266px fleet tree / 1fr canvas / 220px channel rack
 
 ## Journal
 
+- **2026-07-08 · M1 SHIPPED — command bar + status line.** presence.mjs
+  rebuilt as the mk3 command bar (mount-once kept; input value/focus
+  survive renders): [voco ● host] cell with daemon LED (red +
+  "reconnecting…" absorbs the offline state), the ONE input behind a
+  steel `>` with `route → <holder>` in amber, and a keys cell carrying
+  the attention word (click-cycles muted→wake→always — the old orb's
+  function; master block takes over in M5), ■ interrupt, ⚙ settings.
+  The orb is gone. Interim cells (collapse when empty, move to the rack
+  in M5): live caption (bars + ticker / last-routed + full + →route)
+  and agent-speaking (eq + who + sentence + full + ■ stop). Status line
+  restyled to 10.5px mono: conn LED cell, amber `MIC → name`,
+  attention·duplex, counts with emphasized numbers, open-annotation
+  count, and a live clock (one persistent node on a 1s interval, never
+  a re-render). Honest-signal deviations from the mockup, by decision:
+  no ⌘K hint until the palette exists (M9); no PTT key hint until
+  ptt.press/release lands; no "rev-sync ok" (nothing measures that) —
+  the clock stands alone. Gates: 371 pytest · mypy · ruff · tsc.
+  Browser-verified on :7911. NEXT: M2 — fleet tree.
+
 - **2026-07-08 · M0 SHIPPED — tokens + instrument floor.** styles.css
   token block swapped to mk3: gunmetal b0–b3 (+ --hov, --edge2), steel
   #6ea3d8, amber #d9a334 (--warn folded into amber per mk3's one-amber
