@@ -208,6 +208,27 @@ mid cols: 266px fleet tree / 1fr canvas / 220px channel rack
 
 ## Journal
 
+- **2026-07-09 · M7 SHIPPED — states + modals + the restart self-heal.**
+  Disconnected is now fully designed: command-bar LED goes red and the
+  host cell counts down honestly from the bus's real retryAt ("daemon
+  unreachable — retry in Ns"), surfaces + console dim read-only.
+  BIG one found by the live drill, not by reading: the wb token is
+  minted PER DAEMON BOOT, so a restart stranded every open tab in a
+  forever-retry loop with a dead token. Fix in bus.mjs: a socket that
+  dies without ever delivering a snapshot while HTTP still answers is
+  the stale-token signature → reload once (fresh shell = fresh token),
+  sessionStorage-stamped so it can never loop; if reload didn't help
+  the bar says "daemon restarted — reload this tab". Drilled live:
+  kill + restart the daemon → the tab self-healed to green within one
+  retry cycle, zero clicks. (Daemon restarts were THE recurring pain
+  this whole build week — old tabs silently running old code; that
+  failure mode is dead for connected tabs.) Console got a height grip
+  (--dockh, voco.dockh; grip() generalized to a vertical axis + target)
+  and modals got the mk3 frame (edge2 border, mono title). Keyboard/
+  focus/reduced-motion floor was already in from M0. Gates: 371 pytest
+  · ruff · tsc. Settings modal opened + Esc-closed live. NEXT: M8 —
+  final side-by-side vs design/index5 + captain click-through.
+
 - **2026-07-09 · M6 SHIPPED — console body: annotations table ·
   transcript · ASKS · log.** renderDock rebuilt as the mk3 console
   (findings.mjs retired; its withdraw-with-undo and reveal behavior

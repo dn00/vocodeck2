@@ -60,11 +60,13 @@ const work = h("div", { class: "work" });
 const gripRack = h("div", { class: "grip", role: "separator", tabindex: "0",
   "aria-label": "resize channel rack" });
 const rack = h("div", { class: "rack" });
-// The dock is the full-width bottom console row (M6 rebuilds its body).
+// The dock is the full-width bottom console row.
 const dock = h("div", { class: "dock" });
+const gripConsole = h("div", { class: "grip h", role: "separator",
+  tabindex: "0", "aria-label": "resize console" });
 const statusline = h("div", { class: "statusline" });
 const body = h("div", { class: "deck-body" }, rail, gripRail, work, gripRack, rack);
-app.append(presence, body, dock, statusline);
+app.append(presence, body, gripConsole, dock, statusline);
 
 // ---- toasts (policy: errors persist w/ dismiss; successes fade) ---------------
 function toast(msg, sticky = false) {
@@ -1401,19 +1403,21 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ---- panel resize (persisted) ----------------------------------------------------
-function grip(el, cssVar, min, max, fromRight, storeKey) {
+function grip(el, cssVar, min, max, invert, storeKey, opts = {}) {
+  const target = opts.target || body;
+  const axis = opts.vertical ? "clientY" : "clientX";
   const saved = localStorage.getItem(storeKey);
-  if (saved) body.style.setProperty(cssVar, saved + "px");
+  if (saved) target.style.setProperty(cssVar, saved + "px");
   el.addEventListener("pointerdown", (down) => {
     down.preventDefault();
     el.setPointerCapture(down.pointerId);
     el.classList.add("dragging");
-    const start = down.clientX;
-    const startW = parseFloat(getComputedStyle(body).getPropertyValue(cssVar));
+    const start = down[axis];
+    const startW = parseFloat(getComputedStyle(target).getPropertyValue(cssVar));
     const move = (mv) => {
-      const d = fromRight ? start - mv.clientX : mv.clientX - start;
+      const d = invert ? start - mv[axis] : mv[axis] - start;
       const w = Math.min(max, Math.max(min, startW + d));
-      body.style.setProperty(cssVar, w + "px");
+      target.style.setProperty(cssVar, w + "px");
       localStorage.setItem(storeKey, String(w));
     };
     const up = () => {
@@ -1427,6 +1431,8 @@ function grip(el, cssVar, min, max, fromRight, storeKey) {
 }
 grip(gripRail, "--railw", 180, 400, false, "voco.railw");
 grip(gripRack, "--rackw", 180, 320, true, "voco.rackw");
+grip(gripConsole, "--dockh", 120, 420, true, "voco.dockh",
+  { vertical: true, target: document.documentElement });
 
 // ---- wire subscriptions -----------------------------------------------------
 store.subscribe("workspaces", () => { renderRail(); renderWork(); renderDock(); });

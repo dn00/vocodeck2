@@ -33,6 +33,8 @@ const el = (tag, attrs = {}, ...kids) => {
 let dom = null;
 /** Latest render context — persistent handlers read through this. */
 let live = /** @type {any} */ (null);
+/** Offline countdown ticker (runs only while disconnected). */
+let retryTick = /** @type {any} */ (null);
 
 function buildOnce(bar) {
   const led = el("span", { class: "cmd-led" });
@@ -91,10 +93,25 @@ export function renderPresence(bar, store, ctx) {
   const offline = !store.connected;
   const activeName = store._nameOf(store.activeSession);
 
-  // identity cell: the LED is the daemon truth
+  // identity cell: the LED is the daemon truth; while offline the host
+  // cell carries the honest reconnect countdown (bus retryAt)
   dom.led.className = "cmd-led " + (offline ? "off" : "on");
-  dom.host.textContent = offline ? "reconnecting…" : location.host;
   dom.host.classList.toggle("down", offline);
+  clearInterval(retryTick);
+  const host = dom.host;
+  if (offline && store.staleToken) {
+    host.textContent = "daemon restarted — reload this tab";
+  } else if (offline) {
+    const update = () => {
+      const s = Math.max(0, Math.ceil(((live.store.retryAt || 0) - Date.now()) / 1000));
+      host.textContent = s > 0
+        ? `daemon unreachable — retry in ${s}s` : "reconnecting…";
+    };
+    update();
+    retryTick = setInterval(update, 500);
+  } else {
+    host.textContent = location.host;
+  }
 
   // the ONE input: placeholder/disabled only — value and focus SURVIVE
   dom.input.placeholder = "say “deck …” or type";

@@ -117,6 +117,8 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 .grip { cursor: col-resize; background: transparent; position: relative; }
 .grip:hover::after, .grip.dragging::after { content: ""; position: absolute;
   inset: 0 1.5px; background: var(--sel); opacity: .5; }
+.grip.h { cursor: row-resize; height: 5px; flex: none; }
+.grip.h:hover::after, .grip.h.dragging::after { inset: 1.5px 0; }
 .deck-body.offline { opacity: .55; pointer-events: none; }
 
 /* ---- fleet tree (mk3 M2): groups → work rows → agents + pages ------------------- */
@@ -259,9 +261,10 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 .md blockquote { border-left: 2px solid var(--edge); margin: 0;
   padding-left: 12px; color: var(--ink2); }
 
-/* ---- console row (mk3 M5: the dock moved to the bottom; M6 rebuilds it) -------- */
+/* ---- console row (mk3): full-width bottom, height via the grip ----------------- */
+:root { --dockh: 210px; }
 .dock { background: var(--l1); border-top: 1px solid var(--edge2);
-  height: 210px; flex: none; display: flex; flex-direction: column;
+  height: var(--dockh); flex: none; display: flex; flex-direction: column;
   min-height: 0; overflow: hidden; }
 .dock.offline { opacity: .55; pointer-events: none; }
 .ctabs { display: flex; align-items: center; flex: none;
@@ -572,8 +575,10 @@ td.x span:hover { color: var(--bad); }
   align-items: flex-start; justify-content: center; z-index: 40; }
 .scrim.on { display: flex; }
 .modal { margin-top: 92px; width: 460px; background: var(--l1);
-  border: 1px solid var(--edge); padding: 18px 20px; max-height: 540px; overflow-y: auto; }
-.modal h4 { margin: 0 0 2px; font-size: 13.5px; font-weight: 600; }
+  border: 1px solid var(--edge2); padding: 16px 18px; max-height: 560px;
+  overflow-y: auto; }
+.modal h4 { margin: 0 0 2px; font: 700 12px var(--mono);
+  letter-spacing: .04em; }
 .modal .pwhere { font-size: 11px; color: var(--ink3); margin-bottom: 14px; }
 .seg { display: flex; background: var(--l2); border: 1px solid var(--edge); margin-bottom: 12px; }
 .seg button { flex: 1; font-size: 12.5px; padding: 7px 0; border: none; background: none; }

@@ -43,6 +43,12 @@ export class Store {
     this.selectedPage = /** @type {?string} */ (null);
     this.mic = /** @type {any} */ ({});
     this.connected = false;
+    // When disconnected: epoch-ms of the next reconnect attempt (the
+    // command bar renders the honest countdown from it).
+    this.retryAt = 0;
+    // True when the daemon restarted and even a reload didn't mint a
+    // working token — the command bar tells the human to reload.
+    this.staleToken = false;
     this.ticker = "";
     // ---- voice presence (U1) ------------------------------------------------
     // The turn machine's public state: idle|capturing|holding|routing|reopenable.
