@@ -843,11 +843,45 @@ def main() -> None:
     p_input.add_argument("text")
     sub.add_parser("attach-cmd")
     sub.add_parser("doctor")
+    # lifecycle (BUILD-PROD P1): the daemon as a managed process
+    p_up = sub.add_parser("up", help="start the daemon (managed, detached)")
+    p_up.add_argument("--config", default=None)
+    p_up.add_argument("--port", type=int, default=7777)
+    p_up.add_argument("--no-audio", action="store_true")
+    p_up.add_argument(
+        "--wait", type=float, default=20.0, help="seconds to wait for health"
+    )
+    sub.add_parser("down", help="stop the managed daemon")
+    p_logs = sub.add_parser("logs", help="show the managed daemon's log")
+    p_logs.add_argument("-n", "--lines", type=int, default=50)
+    p_logs.add_argument("-f", "--follow", action="store_true")
+    p_auto = sub.add_parser(
+        "autostart", help="run the daemon at login (launchd on macOS)"
+    )
+    p_auto.add_argument("action", choices=["install", "uninstall", "status"])
+    p_auto.add_argument("--config", default=None)
+    p_auto.add_argument("--port", type=int, default=7777)
     p_cfg = sub.add_parser("config")
     p_cfg.add_argument("action", choices=["get", "set"])
     p_cfg.add_argument("key", nargs="?", help="section.key (set only)")
     p_cfg.add_argument("value", nargs="?", help="value; JSON parsed, else string")
     args = parser.parse_args()
+
+    # Lifecycle commands manage the daemon PROCESS — they never need a
+    # session and must work while the daemon is down.
+    if args.cmd in ("up", "down", "logs", "autostart"):
+        from voco_cli import lifecycle
+
+        base = os.environ.get("VOCO_URL") or (
+            f"http://127.0.0.1:{getattr(args, 'port', 7777)}"
+        )
+        if args.cmd == "up":
+            raise SystemExit(lifecycle.cmd_up(args, base))
+        if args.cmd == "down":
+            raise SystemExit(lifecycle.cmd_down(base))
+        if args.cmd == "logs":
+            raise SystemExit(lifecycle.cmd_logs(args))
+        raise SystemExit(lifecycle.cmd_autostart(args, base))
 
     client = Client()
     if args.cmd == "say":

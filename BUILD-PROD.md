@@ -83,4 +83,33 @@ Order: P1 → P2+P3 → P4+P5 → B by risk → C → D. UI work is paused.
 
 ## Journal
 
-- (campaign opened 2026-07-09; P1 next)
+- **2026-07-09 · P1 SHIPPED — lifecycle ownership.** New
+  clients/voco_cli/lifecycle.py (pure helpers split from I/O for
+  testability) + `voco up|down|logs|autostart` wired into the CLI
+  (they run without a session — must work while the daemon is down).
+  `up`: health-probe first (idempotent), spawn voco-d detached
+  (start_new_session, output → managed log with a dated banner),
+  pidfile, bounded health wait, log-tail on failure; prefers the
+  venv's voco-d, falls back to `python -m voco.daemon` for source
+  checkouts. `down`: pidfile → SIGTERM → 15s wait → loud SIGKILL last
+  resort; refuses to guess about daemons it didn't start (points at
+  launchd/terminal instead). `logs`: tail + -f follow. `autostart`:
+  launchd agent (RunAtLoad; KeepAlive.SuccessfulExit=false so crashes
+  restart but `voco down`/clean exits stick; bootout-then-bootstrap =
+  idempotent reinstall); non-macOS prints a systemd --user unit as
+  guidance. Lifecycle files live in the DEFAULT state dir
+  (~/.local/state/voco, $VOCO_STATE_DIR override — added for hermetic
+  testing) because pidfile/log are per-machine service facts, not
+  per-config state. XDG config discovery already existed
+  (~/.config/voco/config.toml) — audit assumption corrected. Tests:
+  6 new (argv shapes, env override, garbage-pidfile-is-stale,
+  pid_alive, plist contract incl. crash-restart semantics, systemd
+  unit). LIVE drill on :7913 hermetic: up → healthy; second up →
+  "already running"; logs (incidentally proving the workspace-lock
+  guard: my scratch config shared voco-wb with the :7911 verify
+  daemon and persistence refused correctly); down → stopped; double
+  down → clean no-op; port freed. autostart exercised read-only
+  (status) — install/uninstall touches the captain's login items, so
+  the live install drill is deferred to the captain's first real use.
+  Gates: 380 pytest · mypy · ruff+format. NEXT: P2 (assets) + P3
+  (TTS floor supervision).
