@@ -7,7 +7,7 @@
 
 /**
  * @param {import("./store.mjs").Store} store
- * @param {{onCommandReply?: (m:any)=>void}} [opts]
+ * @param {{onCommandReply?: (m:any)=>void, onEvent?: (env:any)=>void}} [opts]
  */
 export function connectBus(store, opts = {}) {
   const onCommandReply = opts.onCommandReply;
@@ -37,8 +37,16 @@ export function connectBus(store, opts = {}) {
     ws.onerror = () => ws && ws.close();
     ws.onmessage = (ev) => {
       let msg; try { msg = JSON.parse(ev.data); } catch { return; }
-      if (msg.type === "snapshot") { store.applySnapshot(msg.payload); return; }
-      if (msg.type) { store.applyEvent(msg); return; }
+      if (msg.type === "snapshot") {
+        store.applySnapshot(msg.payload);
+        if (opts.onEvent) opts.onEvent(msg);
+        return;
+      }
+      if (msg.type) {
+        store.applyEvent(msg);
+        if (opts.onEvent) opts.onEvent(msg); // console log tab tap (M6)
+        return;
+      }
       // Command reply: {id, ok, payload|error}
       const waiter = msg.id != null ? pending.get(msg.id) : undefined;
       if (waiter) {

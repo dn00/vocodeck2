@@ -17,7 +17,6 @@ import { Store } from "./store.mjs";
 import { connectBus } from "./bus.mjs";
 import { renderMarkdown, highlightCode } from "./markdown.mjs";
 import { renderDiff, diffStats, seedFolds } from "./diff.mjs";
-import { renderFindings } from "./findings.mjs";
 import { renderTranscript, flashEntry } from "./transcript.mjs";
 import { renderDocView } from "./docview.mjs";
 import { renderHtmlView } from "./htmlview.mjs";
@@ -28,7 +27,15 @@ import { openPicker, openRepo, openSpawn, openConnect, openSettings,
   confirmDanger } from "./modals.mjs";
 
 const store = new Store();
-const bus = connectBus(store);
+// Console log tab (M6): a bounded ring of every bus event.
+const eventLog = [];
+function logBusEvent(env) {
+  eventLog.push({ ts: env.ts || Date.now() / 1000, seq: env.seq ?? "",
+    type: env.type || "?", payload: env.payload });
+  if (eventLog.length > 300) eventLog.shift();
+  if (dockTab === "log") renderDock();
+}
+const bus = connectBus(store, { onEvent: logBusEvent });
 
 const h = (tag, attrs = {}, ...kids) => {
   const el = document.createElement(tag);
@@ -1029,45 +1036,94 @@ async function closePage(p) {
   catch (e) { toast("close failed: " + errMsg(e), true); }
 }
 
-// ---- dock: scope header + annotations | transcript ------------------------------
+// ---- console (mk3 M6): annotations table · transcript · asks · log --------------
 let dockTab = "annotations";
 
 function setDockTab(name) { dockTab = name; renderDock(); }
 
+/** Human-readable anchor location for the table's ANCHOR column. */
+function anchorLabel(f) {
+  const a = f.anchor || {};
+  const ws = store.selectedWs();
+  const p = ws && ws.pages.find((x) => x.page_id === f.page_id);
+  const icon = p ? (PAGE_ICON[p.type] || "·") : "·";
+  if (a.file)
+    return `± ${a.file}` + (a.startLine != null ? ":" + a.startLine : "");
+  if (a.kind === "element" && a.selector)
+    return `${icon} ${p ? p.title : ""} · ${a.selector}`;
+  if (a.exact) {
+    const q = a.exact.length > 26 ? a.exact.slice(0, 23) + "…" : a.exact;
+    return `${icon} ${p ? p.title : ""} · “${q}”`;
+  }
+  return p ? `${icon} ${p.title}` : "";
+}
+
+async function withdrawFinding(wsKey, f) {
+  try {
+    await bus.command("finding.withdraw",
+      { workspace: wsKey, finding_id: f.finding_id });
+    // Undo-over-confirm: withdraw is reversible, so no dialog —
+    // the toast carries the way back (re-open via finding.status).
+    toastUndo("annotation withdrawn —", async () => {
+      try {
+        await bus.command("finding.status",
+          { workspace: wsKey, finding_id: f.finding_id, status: "open" });
+      } catch (e) { toast("undo failed: " + errMsg(e), true); }
+    });
+  } catch (e) { toast("withdraw failed: " + errMsg(e), true); }
+}
+
+function annotationsEmptyText(ws) {
+  // page-type-aware (the "click a diff line" hint on a doc page was a
+  // reported wart) — say what THIS page annotates by.
+  const page = ws && ws.pages.find(
+    (p) => p.page_id === store.selectedPage && !p.closed);
+  if (page && (page.type === "doc" || page.type === "screen"))
+    return "no annotations — click a block or select text to flag one";
+  if (page && page.type === "html")
+    return "no annotations — toggle annotate, then click an element";
+  if (page && page.type === "diff")
+    return "no annotations — click a diff line to flag one";
+  return (ws && ws.pages.some((p) => p.type === "diff" && !p.closed))
+    ? "no annotations — click a diff line to flag one"
+    : "no annotations — open a diff or a doc, then flag what you see";
+}
+
 function renderDock() {
-  const scroller = dock.querySelector(".dock-scroll");
+  const scroller = dock.querySelector(".cbody");
   const keep = scroller ? scroller.scrollTop : 0;
   dock.replaceChildren();
   const wsKey = store.selectedWorkspace || "";
   const ws = store.selectedWs();
   const agent = selectedAgent();
+  const findings = store.findingsFor(wsKey);
+  const asks = store.asksFor(wsKey);
+  const openF = findings.filter((f) => f.status === "open");
+  const blockingN = openF.filter((f) => f.blocking).length;
+  const openAsks = asks.filter((a) => a.answer == null).length;
 
-  const scope = h("div", { class: "dock-scope" });
-  if (agent) scope.append(h("span", { class: "who" }, agent.name));
-  if (ws) {
-    scope.append(h("span", { class: "where" },
-      (agent ? " · " : "") + (ws.repo || ws.name)
-      + (ws.branch ? " · " + ws.branch : "")));
-    for (const c of linkChips(ws)) if (c) scope.append(" ", c);
-    if (!agent && !agentsIn(ws).length)
-      scope.append(h("span", { class: "where" }, " · no agent"));
-  }
-  if (!agent && !ws) scope.append(h("span", { class: "where" }, "nothing selected"));
-  dock.append(scope);
-
-  const openCount = store.findingsFor(wsKey)
-    .filter((f) => f.status === "open").length;
-  const tab = (name, label) => h("div",
-    { class: "dock-tab" + (dockTab === name ? " on" : ""),
-      onclick: () => setDockTab(name) }, label);
-  const tabs = h("div", { class: "dock-tabs" },
-    tab("annotations", openCount ? `annotations (${openCount})` : "annotations"),
-    tab("transcript", "transcript"),
-    h("button", { class: "dock-export", onclick: () => exportReview() }, "export ↓"));
-  dock.append(tabs);
-
-  const body = h("div", { class: "dock-body" });
+  const tab = (name, count, hot) => h("div",
+    { class: "ctab" + (dockTab === name ? " on" : ""),
+      onclick: () => setDockTab(name) },
+    name, count != null && count > 0
+      ? h("span", { class: "n" + (hot ? " hot" : "") }, " " + count) : "");
+  const scopeTxt = agent
+    ? agent.name + (ws ? " · " + workLabel(ws) : "")
+    : ws ? (ws.repo || ws.name) + "/" + workLabel(ws) : "nothing selected";
+  dock.append(h("div", { class: "ctabs" },
+    tab("annotations", openF.length, false),
+    tab("transcript", null, false),
+    tab("asks", openAsks, true), // amber when a question is outstanding
+    tab("log", null, false),
+    h("div", { class: "cfoot" },
+      h("span", {}, h("b", {}, openF.length + " open"),
+        blockingN ? ` · ${blockingN} blocking` : ""),
+      h("span", { class: "cfoot-btn", onclick: () => exportReview() },
+        "export ↓"),
+      h("span", {}, "scope: " + scopeTxt))));
+  const body = h("div", { class: "cbody" });
   dock.append(body);
+
   if (dockTab === "transcript") {
     if (agent) {
       renderTranscript(body, store.transcriptFor(agent.session_id),
@@ -1076,42 +1132,117 @@ function renderDock() {
     } else {
       const n = ws ? agentsIn(ws).length : 0;
       body.append(h("div", { class: "empty-note" }, n
-        ? "click an agent in the rail to focus its conversation"
+        ? "click an agent in the tree to focus its conversation"
         : "no agent attached here — transcripts appear when one connects"));
     }
+    body.scrollTop = keep;
     return;
   }
-  const diffOpen = (ws?.pages || []).some((p) => p.type === "diff" && !p.closed);
-  const items = [
-    ...store.findingsFor(wsKey),
-    // asks render in the same ledger: a question is an annotation
-    // without a line (findings.mjs shows them via the answer field).
-  ];
-  renderFindings(body, items, {
-    restoreScroll: keep,
-    emptyText: diffOpen
-      ? "no annotations — click a diff line to flag one"
-      : "no annotations — publish a diff first, then click a line to flag one",
-    onWithdraw: async (id) => {
-      try {
-        await bus.command("finding.withdraw", { workspace: wsKey, finding_id: id });
-        // Undo-over-confirm: withdraw is reversible, so no dialog —
-        // the toast carries the way back (re-open via finding.status).
-        toastUndo("annotation withdrawn —", async () => {
-          try {
-            await bus.command("finding.status",
-              { workspace: wsKey, finding_id: id, status: "open" });
-          } catch (e) { toast("undo failed: " + errMsg(e), true); }
-        });
-      } catch (e) { toast("withdraw failed: " + errMsg(e), true); }
-    },
-    onReveal: (f) => revealFinding(f),
-    pageRev: (pageId) => {
-      const w = store.workspaces.get(wsKey);
-      const p = w && w.pages.find((x) => x.page_id === pageId);
-      return p ? p.rev : null;
-    },
+
+  if (dockTab === "asks") {
+    renderAsksTab(body, ws, wsKey, asks);
+    return;
+  }
+
+  if (dockTab === "log") {
+    for (const e of eventLog) {
+      let pl = "";
+      try { pl = JSON.stringify(e.payload || {}); } catch { pl = ""; }
+      if (pl.length > 140) pl = pl.slice(0, 140) + "…";
+      body.append(h("div", { class: "logln" },
+        h("span", { class: "lg-ts" },
+          new Date(e.ts * 1000).toTimeString().slice(0, 8)),
+        h("span", { class: "lg-seq" }, String(e.seq)),
+        h("span", { class: "lg-ty" }, e.type),
+        h("span", { class: "lg-pl" }, pl)));
+    }
+    if (!eventLog.length)
+      body.append(h("div", { class: "empty-note" }, "no events yet"));
+    body.scrollTop = body.scrollHeight; // a log tails
+    return;
+  }
+
+  // annotations: the mk3 table -------------------------------------------------
+  if (!findings.length) {
+    body.append(h("div", { class: "empty-note" }, annotationsEmptyText(ws)));
+    body.scrollTop = keep;
+    return;
+  }
+  const kindCls = { concern: "k-c", question: "k-q", nit: "k-n" };
+  const table = h("table", {},
+    h("tr", {},
+      h("th", { style: "width:110px" }, "KIND"),
+      h("th", {}, "TEXT"),
+      h("th", { style: "width:240px" }, "ANCHOR"),
+      h("th", { style: "width:30px" }, "")));
+  for (const f of findings) {
+    const done = f.status !== "open";
+    const kindCell = h("td", { class: "kind " + (kindCls[f.kind] || "k-n") },
+      f.kind, f.blocking ? h("span", { class: "blk" }, " ⚑") : "");
+    if (done)
+      kindCell.append(h("div", { class: "fstate s-" + f.status }, f.status));
+    const textCell = h("td", { class: "txt" }, f.text || "");
+    if (f.answer)
+      textCell.append(h("div", { class: "freply" },
+        h("b", {}, "agent"), " — " + f.answer));
+    if (f.note)
+      textCell.append(h("div", { class: "freply" }, f.note));
+    table.append(h("tr", { class: done ? "done" : "",
+      onclick: () => revealFinding(f) },
+      kindCell, textCell,
+      h("td", { class: "loc" }, anchorLabel(f)),
+      h("td", { class: "x" }, f.status === "open"
+        ? h("span", { title: "withdraw (undoable)",
+          onclick: (e) => { e.stopPropagation(); withdrawFinding(wsKey, f); } },
+        "✕") : "")));
+  }
+  body.append(table);
+  body.scrollTop = keep;
+}
+
+/** Asks: questions YOU send the work's agents (ask.create); agents
+ * answer through the bridge and ask.answered lands here. */
+function renderAsksTab(body, ws, wsKey, asks) {
+  if (!ws || ws.kind !== "workspace") {
+    body.append(h("div", { class: "empty-note" },
+      "asks are per work — select a work row first"));
+    return;
+  }
+  const input = /** @type {HTMLInputElement} */ (h("input", {
+    class: "ask-input", type: "text",
+    placeholder: `ask ${agentsIn(ws).map((a) => a.name).join(", ") || "the agents here"}…` }));
+  input.addEventListener("keydown", async (e) => {
+    if (e.key !== "Enter") return;
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    try { await bus.command("ask.create", { workspace: wsKey, text }); }
+    catch (err) { toast("ask failed: " + errMsg(err), true); }
   });
+  body.append(h("div", { class: "ask-composer" },
+    h("span", { class: "cmd-gt" }, "?"), input));
+  if (!asks.length) {
+    body.append(h("div", { class: "empty-note" },
+      "no asks — questions you send the work's agents land here, with their answers"));
+    return;
+  }
+  for (const a of asks) {
+    const open = a.answer == null;
+    const when = a.created_ts
+      ? new Date(a.created_ts * 1000).toTimeString().slice(0, 5) : "";
+    const row = h("div", { class: "ask" + (open ? " waiting" : "") },
+      h("div", { class: "ask-head" },
+        h("b", {}, "you"), h("span", { class: "lg-ts" }, when),
+        open ? h("span", { class: "hot" }, "unanswered") : ""),
+      h("div", { class: "ask-text" }, a.text || ""));
+    if (a.answer) {
+      const ans = h("div", { class: "ask-answer" });
+      renderMarkdown(ans, a.answer);
+      row.append(ans);
+    }
+    body.append(row);
+  }
+  body.scrollTop = body.scrollHeight; // a thread reads newest-last
 }
 
 async function loadTranscript(agent) {

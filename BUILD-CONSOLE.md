@@ -208,6 +208,32 @@ mid cols: 266px fleet tree / 1fr canvas / 220px channel rack
 
 ## Journal
 
+- **2026-07-09 · M6 SHIPPED — console body: annotations table ·
+  transcript · ASKS · log.** renderDock rebuilt as the mk3 console
+  (findings.mjs retired; its withdraw-with-undo and reveal behavior
+  moved into the table): tabs with counts (asks count amber when a
+  question is outstanding — mk3.1 #2 as re-scoped below), footer
+  `N open · N blocking · export ↓ · scope`. Annotations = a real table
+  (KIND+⚑ / TEXT / ANCHOR / ✕): kinds colored, non-open status rides
+  under the kind, agent answers/notes ride under the text, done rows
+  struck, row click reveals at the anchor, ✕ withdraws with undo.
+  Empty state is finally page-type-aware ("click a block or select
+  text" on docs/screens — the reported wrong-hint wart is dead).
+  ASK DIRECTION CLARIFIED from the protocol: asks flow YOU → AGENT
+  (`ask.create` control command; agents answer via /v1/bridge/ask_reply
+  → ask.answered; open ≡ unanswered) — so the asks tab is a composer
+  ("? ask <agents>…" → ask.create) plus the thread of your questions
+  with answers rendered inline (markdown, sanitized); "needs-you"
+  amber = outstanding questions. Log tab: a bounded (300) ring of every
+  bus event via a new `onEvent` tap in bus.mjs — ts · seq · type ·
+  payload tail, autoscrolled. Verified live on :7911: composer
+  round-tripped a real ask (count 1→2, waiting state), log tails
+  snapshot + ask.created, table renders all finding states. NOT yet
+  live-verified: an agent ANSWER arriving (needs a real agent on the
+  bridge; the ask.answered→store path is the same last-writer-wins as
+  findings) — M8 covers it. Gates: 371 pytest · ruff · tsc. NEXT: M7 —
+  states + modals.
+
 - **2026-07-09 · M5 SHIPPED — channel rack + the final layout.** New
   rack.mjs: agents as channel strips (LED · name · state, with ages
   shown only once a transition is OBSERVED client-side — no fabricated

@@ -264,44 +264,69 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
   height: 210px; flex: none; display: flex; flex-direction: column;
   min-height: 0; overflow: hidden; }
 .dock.offline { opacity: .55; pointer-events: none; }
-.dock-scope { padding: 9px 14px 2px; flex: none; }
-.dock-scope .who { font-size: 13px; font-weight: 600; }
-.dock-scope .where { font-size: 11px; color: var(--ink3); }
-.dock-tabs { display: flex; align-items: center; padding: 4px 6px 0;
-  flex: none; }
-.dock-tab { font-size: 12.5px; color: var(--ink2); padding: 6px 10px;
-  cursor: pointer; }
-.dock-tab:hover { color: var(--ink); }
-.dock-tab.on { color: var(--ink); box-shadow: inset 0 -2px 0 var(--sel); }
-.dock-export { margin-left: auto; margin-right: 8px; font-size: 11px; }
-.dock-body { flex: 1; overflow-y: auto; min-height: 0; padding: 6px 0;
-  display: flex; flex-direction: column; }
-
-/* ---- annotations (findings.mjs classes, quiet skin) ---------------------------- */
-.finding { padding: 9px 14px; }
-.finding:hover { background: var(--l2); }
-.finding-head { display: flex; align-items: center; gap: 6px;
-  margin-bottom: 3px; }
-.finding-kind { font-size: 11px; color: var(--ink2); }
-.kind-question .finding-kind { color: var(--sel); }
-.kind-nit .finding-kind { color: var(--ink2); }
-.finding-blocking { font-size: 11px; color: var(--bad);
-  background: color-mix(in srgb, var(--bad) 12%, transparent); padding: 0 5px; }
-.finding-status { margin-left: auto; font-size: 11px; padding: 0 6px;
-  background: var(--l2); color: var(--ink2); }
-.finding-status.s-addressed { color: var(--ok);
-  background: color-mix(in srgb, var(--ok) 12%, transparent); }
-.finding-status.s-disputed { color: var(--warn);
-  background: color-mix(in srgb, var(--warn) 12%, transparent); }
-.finding-status.s-wont-fix { color: var(--ink2); }
-.finding-stale { font-size: 11px; color: var(--warn);
-  background: color-mix(in srgb, var(--warn) 12%, transparent); padding: 0 5px; }
-.finding-loc { color: var(--ink3); font: 11px var(--mono); cursor: pointer; }
-.finding-loc:hover { color: var(--sel); }
-.finding-text { margin: 3px 0; font-size: 12.5px; }
-.finding-note, .finding-answer { font-size: 12px; color: var(--ink2);
-  border-left: 2px solid var(--edge); padding-left: 8px; margin-top: 4px; }
-.finding-actions { display: flex; justify-content: flex-end; margin-top: 4px; }
+.ctabs { display: flex; align-items: center; flex: none;
+  font: 11px var(--mono); }
+.ctab { padding: 6px 16px; color: var(--ink2); cursor: pointer; }
+.ctab:hover { color: var(--ink); }
+.ctab.on { background: var(--l0); color: var(--ink);
+  box-shadow: inset 0 2px 0 var(--sel); }
+.ctab .n { color: var(--ink3); }
+.ctab .n.hot { color: var(--voice); }
+.cfoot { margin-left: auto; padding-right: 14px; font: 10.5px var(--mono);
+  color: var(--ink3); display: flex; gap: 18px; align-items: center; }
+.cfoot b { color: var(--ink2); font-weight: 400; }
+.cfoot-btn { cursor: pointer; color: var(--ink2); }
+.cfoot-btn:hover { color: var(--ink); }
+.cbody { flex: 1; overflow-y: auto; min-height: 0; background: var(--l0); }
+/* the annotations table */
+.cbody table { width: 100%; border-collapse: collapse;
+  font: 11.5px var(--mono); }
+.cbody th { font: 10px var(--mono); color: var(--ink3);
+  letter-spacing: .1em; text-align: left; padding: 5px 14px;
+  border-bottom: 1px solid var(--edge); position: sticky; top: 0;
+  background: var(--l1); z-index: 1; }
+.cbody td { padding: 6px 14px; color: var(--ink2); vertical-align: top; }
+.cbody tr { cursor: pointer; }
+.cbody tr:hover td { background: var(--hov); }
+td.kind { white-space: nowrap; }
+.k-c { color: var(--bad); } .k-q { color: var(--sel); }
+.k-n { color: var(--ink3); }
+td.kind .blk { color: var(--voice); }
+.fstate { font-size: 9.5px; color: var(--ink3); margin-top: 2px;
+  letter-spacing: .06em; }
+.fstate.s-addressed { color: var(--ok); }
+.fstate.s-disputed { color: var(--voice); }
+td.txt { color: var(--ink); font: 12px var(--sans); max-width: 640px; }
+td.loc { color: var(--ink3); }
+tr.done td { color: var(--ink3); }
+tr.done td.txt { text-decoration: line-through; color: var(--ink3); }
+td.x span { cursor: pointer; color: var(--ink3); }
+td.x span:hover { color: var(--bad); }
+/* asks: you → the work's agents; answers land inline */
+.ask-composer { display: flex; gap: 9px; align-items: center;
+  padding: 8px 14px; border-bottom: 1px solid var(--edge);
+  position: sticky; top: 0; background: var(--l0); z-index: 1; }
+.ask-input { flex: 1; background: transparent; border: none;
+  color: var(--ink); font: 12px var(--mono); outline: none; }
+.ask-input::placeholder { color: var(--ink3); }
+.ask { padding: 8px 14px; }
+.ask + .ask { border-top: 1px solid var(--edge); }
+.ask-head { display: flex; gap: 9px; align-items: baseline;
+  font: 10.5px var(--mono); color: var(--ink3); }
+.ask-head b { color: var(--voice); font-weight: 700; }
+.ask-head .hot { color: var(--voice); }
+.ask-text { margin-top: 3px; font: 12.5px/1.55 var(--sans);
+  color: var(--ink); }
+.ask-answer { margin-top: 6px; padding-left: 10px;
+  box-shadow: inset 2px 0 0 var(--edge2); font-size: 12px;
+  color: var(--ink2); }
+.ask-answer p { margin: 4px 0; }
+/* log: the daemon event tail */
+.logln { display: flex; gap: 10px; padding: 1.5px 14px;
+  font: 11px var(--mono); white-space: nowrap; }
+.lg-ts, .lg-seq { color: var(--ink3); flex: none; }
+.lg-ty { color: var(--ink2); flex: none; min-width: 150px; }
+.lg-pl { color: var(--ink3); overflow: hidden; text-overflow: ellipsis; }
 
 /* ---- transcript: a radio log, not a messenger ---------------------------------- */
 .t-scroll { flex: 1; overflow-y: auto; min-height: 0; }
@@ -524,18 +549,11 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 .tbtn.primary:hover { border-color: var(--sel); }
 .flow-note { font: 10px var(--mono); color: var(--ink3); }
 
-/* dock annotations: fitem rows */
-.fitem { padding: 9px 14px; }
-.fitem:hover { background: var(--l2); }
-.fitem .fhead { display: flex; align-items: center; gap: 6px; }
-.fitem .loc { margin-left: auto; font: 11px var(--mono); color: var(--ink3); cursor: pointer; }
-.fitem .loc:hover { color: var(--sel); }
-.fx { font-size: 11px; padding: 0 5px; }
-.fitem .ftext { font-size: 12.5px; margin-top: 5px; color: var(--ink); }
-.freply { margin-top: 7px; padding-left: 10px; box-shadow: inset 1px 0 0 var(--edge);
-  font-size: 12px; color: var(--ink2); }
+/* agent replies riding table rows (answers, status notes) */
+.freply { margin-top: 6px; padding-left: 10px;
+  box-shadow: inset 1px 0 0 var(--edge); font-size: 12px;
+  color: var(--ink2); }
 .freply b { color: var(--sel); font-size: 11px; font-weight: 600; }
-.dock-body .dock-scroll { overflow-y: auto; flex: 1; padding: 6px 0; }
 
 /* empty state */
 .empty-card { max-width: 480px; margin: 60px auto; padding: 34px 38px; }
