@@ -83,16 +83,16 @@ function lastSayOf(s) {
   return t && t.text ? t.text : null;
 }
 
-/** ADR-0003: the holder always wears the MIC badge; the explicit patch
- * button appears on OTHER cards only while the mic is LOCKED (clicks
- * are view-only then, so the override needs its own affordance). */
+/** ADR-0003: every card keeps its patch (stable layout — captain). The
+ * holder wears MIC; on others it's the explicit mover, which also
+ * works while the mic is locked. */
 function patchBtn(s, isMic, ctx) {
   if (isMic)
     return el("span", { class: "patch on", title: "your mic is patched here",
       text: "MIC" });
-  if (!ctx.micLocked()) return null; // unlocked: clicking the card talks
   return el("span", { class: "patch",
-    title: `re-route the locked mic to ${s.name}`,
+    title: `patch the mic to ${s.name}`
+      + (ctx.micLocked() ? " (overrides the lock)" : ""),
     text: "mic",
     onclick: (e) => { e.stopPropagation();
       ctx.selectAgent(s, { force: true }); } });
@@ -204,9 +204,10 @@ export function renderRack(deck, store, ctx) {
     if (st in counts) counts[st]++;
   }
   // ADR-0003 lock: pins the mic so agent clicks become view-only.
+  // A bordered BUTTON, not a value — it must read as clickable.
   const locked = ctx.micLocked();
-  const lockEl = el("span", { class: "v cyc" + (locked ? " hot" : ""),
-    text: locked ? "locked 🔒" : "follows selection",
+  const lockEl = el("span", { class: "lockbtn" + (locked ? " on" : ""),
+    text: locked ? "🔒 locked" : "🔓 follows selection",
     title: locked
       ? "mic is pinned — agent clicks are view-only; click to unlock"
       : "mic follows your selection; click to pin it in place",

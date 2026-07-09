@@ -413,6 +413,12 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 .m-row .v.hot { color: var(--voice); }
 .m-row .v.cyc { cursor: pointer; }
 .m-row .v.cyc:hover { color: var(--ink); }
+.lockbtn { font: 10px var(--mono); border: 1px solid var(--edge2);
+  background: var(--l2); color: var(--ink2); padding: 2px 8px;
+  cursor: pointer; user-select: none; }
+.lockbtn:hover { color: var(--ink); }
+.lockbtn.on { background: var(--voice); color: var(--l0);
+  border-color: var(--voice); font-weight: 700; }
 .hold { font: 10px var(--mono); border: 1px solid var(--edge2);
   background: var(--l2); color: var(--ink2); text-align: center;
   padding: 4px 0; cursor: pointer; user-select: none; }
