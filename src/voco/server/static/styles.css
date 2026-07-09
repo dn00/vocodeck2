@@ -470,22 +470,33 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 .tag.q { color: var(--sel); background: color-mix(in srgb, var(--sel) 12%, transparent); }
 .tag.stale { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
 
-/* inline editor — diff-annotate reference structure */
-.inline-editor { margin: 0; background: var(--l0); padding: 10px 16px 12px 100px; }
-.editor-target { font: 11px var(--sans); color: var(--ink2); margin-bottom: 7px; }
+/* inline editor — diff-annotate reference structure, mk3 flat-form skin */
+.inline-editor { margin: 0; background: var(--l1);
+  border-top: 1px solid var(--edge2); border-bottom: 1px solid var(--edge2);
+  padding: 10px 16px 12px 100px; }
+.editor-target { font: 10.5px var(--mono); color: var(--ink2);
+  margin-bottom: 7px; }
 .inline-editor textarea { width: 100%; max-width: 640px; min-height: 52px;
-  resize: vertical; padding: 8px 10px; font: 12.5px/1.5 var(--mono); }
-.inline-editor textarea:focus { outline: none; box-shadow: inset 0 -1px 0 var(--voice); }
-.finding-controls { display: flex; align-items: center; gap: 6px; margin: 8px 0; }
-.fpill { font-size: 12px; padding: 3px 11px; }
-.fpill.active { color: var(--l0); background: var(--voice); border-color: var(--voice); }
-.fblock { display: flex; align-items: center; gap: 5px; font-size: 12px;
-  color: var(--ink2); margin-left: 8px; }
+  resize: vertical; padding: 8px 10px; font: 12px/1.6 var(--mono);
+  background: var(--l0); border: 1px solid var(--edge); }
+.inline-editor textarea:focus { outline: none;
+  box-shadow: inset 0 -1px 0 var(--voice); }
+.finding-controls { display: flex; align-items: center; gap: 0; margin: 8px 0; }
+.fpill { font: 11px var(--mono); padding: 4px 12px; background: var(--l0);
+  border: 1px solid var(--edge); border-right: none; color: var(--ink2); }
+.fpill:last-of-type { border-right: 1px solid var(--edge); }
+.fpill.active { color: var(--ink); background: var(--l3);
+  box-shadow: inset 0 -2px 0 var(--bad); }
+.fblock { display: flex; align-items: center; gap: 5px;
+  font: 11px var(--mono); color: var(--ink2); margin-left: 12px; }
 .editor-actions { display: flex; gap: 8px; margin: 6px 0 4px; }
-.tbtn { font-size: 12.5px; padding: 5px 13px; background: var(--l2); color: var(--ink); }
-.tbtn.primary { color: var(--l0); background: var(--voice); border-color: var(--voice); }
-.tbtn.primary:hover { background: var(--voice); opacity: .9; }
-.flow-note { font-size: 11px; color: var(--ink3); }
+.tbtn { font: 11.5px var(--mono); padding: 5px 13px; background: var(--l2);
+  color: var(--ink2); border: 1px solid var(--edge); }
+.tbtn:hover { color: var(--ink); background: var(--l3); }
+.tbtn.primary { color: var(--ink); background: var(--l3);
+  border-color: var(--edge2); font-weight: 700; }
+.tbtn.primary:hover { border-color: var(--sel); }
+.flow-note { font: 10px var(--mono); color: var(--ink3); }
 
 /* dock annotations: fitem rows */
 .fitem { padding: 9px 14px; }
@@ -555,12 +566,13 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 .review-doc:not(.no-annotate) .review-prose
   :is(p, li, h1, h2, h3, h4, h5, h6, pre, blockquote, td, th):hover {
   background: color-mix(in srgb, var(--voice) 6%, transparent); }
-.doc-editor { background: var(--l0); border: 1px solid var(--edge);
+.doc-editor { background: var(--l1); border: 1px solid var(--edge2);
   padding: 10px 14px; max-width: 640px; margin-top: 8px; }
 .doc-editor.floating { position: absolute; left: 24px; right: 24px;
-  z-index: 5; box-shadow: 0 10px 28px rgba(0, 0, 0, .45); }
+  z-index: 5; }
 .doc-editor textarea { width: 100%; min-height: 52px; resize: vertical;
-  padding: 8px 10px; font: 12.5px/1.5 var(--mono); }
+  padding: 8px 10px; font: 12px/1.6 var(--mono);
+  background: var(--l0); border: 1px solid var(--edge); }
 .doc-editor textarea:focus { outline: none;
   box-shadow: inset 0 -1px 0 var(--voice); }
 .reveal-flash { animation: revealflash 1.6s ease-out; }
@@ -586,6 +598,30 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 .file-head { display: flex; align-items: center; gap: 12px; margin: 0 0 10px; }
 .file-src { font: 12.5px/1.6 var(--mono); background: var(--l0);
   padding: 12px 14px; overflow-x: auto; margin: 0; }
+
+/* ---- M4: file tree + syntax highlighting ---------------------------------------- */
+.ftree-row { display: flex; align-items: center; gap: 7px;
+  font: 12px/1.7 var(--mono); color: var(--ink2); cursor: pointer;
+  white-space: nowrap; }
+.ftree-row:hover { background: var(--hov); color: var(--ink); }
+.ftree-dir span:last-child { color: var(--ink); }
+.ftree-file span:last-child { color: var(--ink2); }
+.ftree-file:hover span:last-child { color: var(--ink); }
+/* hljs — mk3 code colors (files source view + doc code fences) */
+.hljs { color: var(--ink); background: transparent; }
+.hljs-comment, .hljs-quote { color: var(--ink3); }
+.hljs-keyword, .hljs-built_in, .hljs-type, .hljs-selector-tag,
+.hljs-doctag { color: #c586b6; }
+.hljs-title, .hljs-title.function_, .hljs-title.class_ { color: var(--sel); }
+.hljs-string, .hljs-regexp, .hljs-addition { color: var(--ok); }
+.hljs-number, .hljs-symbol, .hljs-literal, .hljs-meta,
+.hljs-link { color: var(--voice); }
+.hljs-deletion { color: var(--bad); }
+.hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable,
+.hljs-params, .hljs-name { color: var(--ink); }
+.hljs-section, .hljs-bullet { color: var(--sel); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }
 
 /* ---- B1b: html artifacts --------------------------------------------------- */
 .artifact-bar { display: flex; align-items: center; gap: 12px;

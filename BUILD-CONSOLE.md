@@ -208,6 +208,34 @@ mid cols: 266px fleet tree / 1fr canvas / 220px channel rack
 
 ## Journal
 
+- **2026-07-09 · M4 SHIPPED — views + editor: the annotation fix, files
+  tree + syntax highlighting.** (1) THE FIX: `renderPage` now routes
+  `screen` pages through `renderDocView` exactly like `doc` pages —
+  agent-pushed markdown was rendering through plain `renderMarkdown`
+  with no annotation wiring, which is why block-click did nothing on
+  the captain's "strip status" page. Server needed no change
+  (finding.add is untyped; the annotatable param gate still applies).
+  Verified end-to-end on :7911: block-click opened the editor on a
+  SCREEN page and a committed finding round-tripped into the ledger.
+  (2) Files view: flat list replaced by a collapsible directory TREE
+  with single-child chains compressed ("src/voco/server/static/"),
+  lone-root auto-open, filter still giving B1c's flat hit list; source
+  view now syntax-highlights. (3) Vendored highlight.js 11.10.0
+  (BSD-3-Clause, cdn-assets common build) per the vendor pattern —
+  CodeMirror stays out (the reference loads it from a CDN; voco's
+  no-CDN/CSP posture forbids that, and hljs is the reference's own
+  degrade path). Gotcha recorded in MANIFEST: the build is a classic
+  script, so `;globalThis.hljs = hljs;` must be appended post-download
+  or the module import silently yields undefined (caught live —
+  "highlighted:false" — not by gates). mk3 hljs palette mapped to
+  tokens; doc code fences highlight through the same seam
+  (markdown.mjs `highlightCode`). (4) Annotation editors (doc + diff
+  inline) reskinned to the mk3 flat form via CSS only — structure and
+  anchor mechanics untouched. (5) HTML artifacts survive-checked:
+  sandboxed iframe (allow-scripts) + annotate toggle render under the
+  new canvas. Gates: 371 pytest · mypy · ruff+format · tsc. NEXT: M5 —
+  channel rack.
+
 - **2026-07-08 · M3 SHIPPED — canvas tabs + page bar.** The crumb head
   is gone; the canvas now opens with the mk3 duo: a tab strip (the
   selected work's open pages as tabs — no new state, the tree's page

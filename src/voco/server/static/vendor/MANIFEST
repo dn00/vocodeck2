@@ -6,8 +6,16 @@ marked            14.1.3   MIT                       marked.min.js
 dompurify         3.1.7    Apache-2.0 OR MPL-2.0     purify.min.js
 @xterm/xterm      5.5.0    MIT                       xterm.min.js + xterm.css
 @xterm/addon-fit  0.10.0   MIT                       xterm-addon-fit.min.js
+highlight.js      11.10.0  BSD-3-Clause              highlight.min.js
+#   (cdn-assets common-languages build; syntax highlighting for the
+#    files source view + doc code fences — CONSOLE M4)
 
-# CodeMirror 6 joins here when the file-viewer page ships (later).
+# CodeMirror 6 stays out: the reference file-viewer loads it from a CDN,
+# which voco's no-CDN/CSP posture forbids; hljs is the reference's own
+# documented degrade path and covers read-only viewing.
 
 # Post-download step: prepend `// @ts-nocheck` to each *.min.js so the
 # buildless tsc --checkJs pass does not type-check vendored bundles.
+# highlight.min.js additionally needs `;globalThis.hljs = hljs;` APPENDED:
+# the cdn-assets build is a classic script (top-level `var hljs`), not UMD,
+# so imported as a module its var never reaches globalThis.

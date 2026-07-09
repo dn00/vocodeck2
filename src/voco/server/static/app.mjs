@@ -15,7 +15,7 @@
 
 import { Store } from "./store.mjs";
 import { connectBus } from "./bus.mjs";
-import { renderMarkdown } from "./markdown.mjs";
+import { renderMarkdown, highlightCode } from "./markdown.mjs";
 import { renderDiff, diffStats, seedFolds } from "./diff.mjs";
 import { renderFindings } from "./findings.mjs";
 import { renderTranscript, flashEntry } from "./transcript.mjs";
@@ -596,16 +596,47 @@ function renderWork(force = false) {
   view.append(h("div", { class: "empty-note" }, "no pages here yet"));
 }
 
-// ---- files (B1c): tracked-file browser + confined source view -----------------
-const filesState = new Map(); // wsKey -> {path, filter, list, truncated}
+// ---- files (M4): tracked-file TREE + highlighted confined source ---------------
+// Tree semantics ported from the reference explorer: directories are
+// collapsible, single-child directory chains render compressed
+// ("src/voco/server/"), files open the read-only source view. The
+// filter keeps B1c's flat-match behavior (typing = flat hit list).
+const filesState = new Map(); // wsKey -> {path, filter, list, truncated, open}
 function fstate(wsKey) {
   if (!filesState.has(wsKey)) {
     if (filesState.size > 20) // bounded: drop the oldest browsed workspace
       filesState.delete(filesState.keys().next().value);
-    filesState.set(wsKey, { path: null, filter: "", list: null, truncated: 0 });
+    filesState.set(wsKey,
+      { path: null, filter: "", list: null, truncated: 0, open: new Set() });
   }
   return filesState.get(wsKey);
 }
+
+/** @typedef {{dirs: Map<string, FileNode>, files: {name:string, path:string}[]}} FileNode */
+/** @param {string[]} paths @returns {FileNode} */
+function buildFileTree(paths) {
+  /** @type {FileNode} */
+  const root = { dirs: new Map(), files: [] };
+  for (const p of paths) {
+    const parts = p.split("/");
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const d = parts[i];
+      if (!node.dirs.has(d)) node.dirs.set(d, { dirs: new Map(), files: [] });
+      node = /** @type {FileNode} */ (node.dirs.get(d));
+    }
+    node.files.push({ name: parts[parts.length - 1], path: p });
+  }
+  return root;
+}
+
+const LANG_BY_EXT = { js: "javascript", mjs: "javascript", cjs: "javascript",
+  jsx: "javascript", ts: "typescript", tsx: "typescript", py: "python",
+  rb: "ruby", rs: "rust", go: "go", sh: "bash", bash: "bash", zsh: "bash",
+  yml: "yaml", yaml: "yaml", md: "markdown", html: "xml", htm: "xml",
+  xml: "xml", css: "css", scss: "scss", json: "json", toml: "ini",
+  ini: "ini", sql: "sql", c: "c", h: "c", cpp: "cpp", java: "java",
+  kt: "kotlin", swift: "swift", diff: "diff", patch: "diff" };
 
 async function renderFilesView(view, ws) {
   const st = fstate(ws.key);
@@ -627,18 +658,73 @@ async function renderFilesView(view, ws) {
     placeholder: `filter ${st.list.length} tracked files…` }));
   filter.value = st.filter;
   const listBox = h("div", { class: "file-list" });
-  const renderList = () => {
-    listBox.replaceChildren();
-    const q = st.filter.toLowerCase();
+  const openFile = (p) => { st.path = p; renderWork(true); };
+
+  const renderFlat = (q) => {
     const hits = st.list.filter((f) => f.toLowerCase().includes(q));
     for (const f of hits.slice(0, 500))
       listBox.append(h("div", { class: "file-row",
-        onclick: () => { st.path = f; renderWork(true); } }, f));
+        onclick: () => openFile(f) }, f));
     if (hits.length > 500)
       listBox.append(h("div", { class: "empty-note" },
         `+${hits.length - 500} more — narrow the filter`));
     if (!hits.length)
       listBox.append(h("div", { class: "empty-note" }, "no matches"));
+  };
+
+  const renderDir = (node, prefix, depth) => {
+    const pad = (d) => "padding-left:" + (8 + d * 16) + "px";
+    const dirs = [...node.dirs.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]));
+    for (let [name, child] of dirs) {
+      // compress single-child chains: src/voco/server as one row
+      let label = name;
+      let path = prefix + name;
+      while (child.files.length === 0 && child.dirs.size === 1) {
+        const next = child.dirs.entries().next().value;
+        if (!next) break;
+        label += "/" + next[0];
+        path += "/" + next[0];
+        child = next[1];
+      }
+      const open = st.open.has(path);
+      const kid = child;
+      listBox.append(h("div", { class: "ftree-row ftree-dir",
+        style: pad(depth),
+        onclick: () => {
+          if (open) st.open.delete(path); else st.open.add(path);
+          renderList();
+        } },
+        h("span", { class: "tw" }, open ? "▾" : "▸"),
+        h("span", {}, label + "/")));
+      if (open) renderDir(kid, path + "/", depth + 1);
+    }
+    for (const f of node.files.sort((a, b) => a.name.localeCompare(b.name)))
+      listBox.append(h("div", { class: "ftree-row ftree-file",
+        style: pad(depth), onclick: () => openFile(f.path) },
+        h("span", { class: "tw" }, ""),
+        h("span", {}, f.name)));
+  };
+
+  const renderList = () => {
+    listBox.replaceChildren();
+    const q = st.filter.trim().toLowerCase();
+    if (q) { renderFlat(q); return; }
+    const tree = buildFileTree(st.list);
+    // first visit: auto-open a lone root chain so the tree isn't a
+    // single collapsed row
+    const first = tree.dirs.entries().next().value;
+    if (!st.open.size && tree.dirs.size === 1 && !tree.files.length && first) {
+      let [path, child] = first;
+      while (child.files.length === 0 && child.dirs.size === 1) {
+        const next = child.dirs.entries().next().value;
+        if (!next) break;
+        path += "/" + next[0];
+        child = next[1];
+      }
+      st.open.add(path);
+    }
+    renderDir(tree, "", 0);
   };
   filter.addEventListener("input", () => { st.filter = filter.value; renderList(); });
   renderList();
@@ -658,11 +744,16 @@ async function renderFileSource(view, ws, st) {
       { headers: { "x-voco-wb": (window.__VOCO__ || {}).wb || "" } });
     if (!resp.ok) throw new Error(`${resp.status}: ${await resp.text()}`);
     const body = await resp.json();
+    const ext = (st.path.match(/\.([a-z0-9]+)$/i) || [""])[1] || "";
+    const code = h("code", { class: ext ? "language-" + ext : "" },
+      body.content);
     view.replaceChildren(
       h("div", { class: "file-head" },
         h("button", { class: "whbtn", onclick: back }, "← files"),
         h("span", { class: "mono" }, st.path)),
-      h("pre", { class: "file-src" }, body.content));
+      h("pre", { class: "file-src" }, code));
+    highlightCode(/** @type {HTMLElement} */ (code),
+      LANG_BY_EXT[ext.toLowerCase()] || "");
   } catch (e) {
     view.replaceChildren(
       h("div", { class: "file-head" },
@@ -797,28 +888,26 @@ async function renderPage(view, page, srnote, actions) {
     try {
       const c = await fetchContent(page.page_id, page.rev);
       if (stale()) return;
-      if (page.type === "doc") {
-        // B1a: docs are an annotation surface — select a passage or
-        // click a block; text-range anchors re-anchor after edits.
-        let reveal = null;
-        if (pendingReveal && pendingReveal.pageId === page.page_id
-            && pendingReveal.text) {
-          reveal = pendingReveal.text;
-          pendingReveal = null;
-        }
-        await renderDocView(view, c.markdown || "", {
-          title: page.title,
-          readOnly: !!(c.params && c.params.annotatable === false),
-          reveal,
-          onAnnotate: (anchor, text, kind, blocking) =>
-            addFinding(page, anchor, text, kind, blocking),
-        });
-        if (!stale() && !reveal) restoreScroll(view);
-        return;
+      // M4 FIX: every markdown-rendered page is an annotation surface —
+      // agent-pushed SCREENS included. Screens used to render through
+      // plain renderMarkdown with no annotation wiring, which is why
+      // "click a block" did nothing on them. Select a passage or click
+      // a block; text-range anchors re-anchor after edits; the server
+      // accepts findings on any page type (finding.add is untyped).
+      let reveal = null;
+      if (pendingReveal && pendingReveal.pageId === page.page_id
+          && pendingReveal.text) {
+        reveal = pendingReveal.text;
+        pendingReveal = null;
       }
-      view.replaceChildren();
-      await renderMarkdown(view, c.markdown || "");
-      if (!stale()) restoreScroll(view);
+      await renderDocView(view, c.markdown || "", {
+        title: page.title,
+        readOnly: !!(c.params && c.params.annotatable === false),
+        reveal,
+        onAnnotate: (anchor, text, kind, blocking) =>
+          addFinding(page, anchor, text, kind, blocking),
+      });
+      if (!stale() && !reveal) restoreScroll(view);
     } catch (e) { if (!stale()) view.textContent = "could not load: " + errMsg(e); }
     return;
   }
