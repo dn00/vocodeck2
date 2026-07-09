@@ -34,8 +34,6 @@ const el = (tag, attrs = {}, ...kids) => {
 // ptt_only daemon after one click.
 const ATTENTION_CYCLE = ["muted", "wake", "ptt_only", "always"];
 const HEARING = new Set(["capturing", "holding", "routing"]);
-const STATE_ORDER = { blocked: 0, working: 1, listening: 2, idle: 3,
-  stale: 4, gone: 5 };
 const stateWord = (st) => (st === "listening" ? "ready" : st);
 
 // Hold-PTT state is MODULE-level: the deck re-renders on voice events
@@ -105,11 +103,10 @@ export function renderRack(deck, store, ctx) {
   lastArgs = [deck, store, ctx];
   deck.replaceChildren();
   deck.classList.toggle("min", deckMin);
-  const sessions = [...store.sessions.values()].sort((a, b) =>
-    (a.session_id === store.activeSession ? -1 : 0)
-    - (b.session_id === store.activeSession ? -1 : 0)
-    || (STATE_ORDER[ctx.stateOf(a)] ?? 9) - (STATE_ORDER[ctx.stateOf(b)] ?? 9)
-    || a.name.localeCompare(b.name));
+  // STABLE order (captain): a console's channels never move — spatial
+  // memory beats attention-sorting here. Mic/blocked speak via color.
+  const sessions = [...store.sessions.values()]
+    .sort((a, b) => a.name.localeCompare(b.name));
   const hearing = HEARING.has(store.turnState);
   const mic = store.mic || {};
 
