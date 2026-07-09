@@ -143,6 +143,36 @@ mid cols: 266px fleet tree / 1fr canvas / 220px channel rack
 4. Instrument floor: custom scrollbars, focus rings, reduced-motion —
    built in from M0, invisible until needed.
 
+## Code-reading facts (recorded before M0; keep current)
+
+- Client seam is clean: `store.mjs` (typed slices + subscribe-by-kind),
+  `bus.mjs` (WS), per-zone render fns in `app.mjs`. The rebuild keeps
+  the store/bus seam and the render-discipline patterns (fingerprint
+  gate, scroll memo, async tokens, editor-owns-the-center).
+- **Screen-annotation bug root cause (M4)**: `app.mjs` `renderPage`
+  routes `type === "doc"` through `renderDocView` (annotation wiring)
+  but `type === "screen"` through plain `renderMarkdown` — agent-pushed
+  markdown was never annotatable. Fix: screens render through
+  `renderDocView` too (annotatable unless params say otherwise).
+- Asks plumbing already exists client-side (`store.asks`, `ask.created`
+  / `ask.answered` events, `asksFor`, `loadAsks`) — M6 is UI + the
+  answer command wiring; confirm ask direction/reply verb in
+  PROTOCOL.md before building.
+- Canvas tabs need NO new state: tabs = the selected work's open pages
+  (what the old rail page-rows showed), `✕` = `page.close`, pinned
+  pages get no ✕, overview renders when no page is selected.
+- Function homes for old presence-strip controls (inventory addition):
+  `■ interrupt` (barge-in) → command-bar keys cell; speaking stop →
+  the speaking agent's channel; `attention`/`duplex` (mic.set) → rack
+  master block (M5; interim: small selects stay in the keys cell so
+  function never disappears); patience presets → settings modal.
+- Panel-resize grips persist (localStorage): keep for tree/rack widths,
+  add one for console height.
+- Light-theme media block in styles.css is removed with the token swap
+  (light theme is parked; re-derive from tokens when it returns).
+- Old `ui.html` debug client at `/` is untouched — the deck shell is
+  `workbench.py:SHELL` loading `static/app.mjs`.
+
 ## Milestones (each ends browser-verified vs design/index5 side-by-side)
 
 - **M0 — tokens + shell**: new styles.css token block, the 4-row grid,
@@ -178,4 +208,16 @@ mid cols: 266px fleet tree / 1fr canvas / 220px channel rack
 
 ## Journal
 
-- (empty — M0 next)
+- **2026-07-08 · M0 SHIPPED — tokens + instrument floor.** styles.css
+  token block swapped to mk3: gunmetal b0–b3 (+ --hov, --edge2), steel
+  #6ea3d8, amber #d9a334 (--warn folded into amber per mk3's one-amber
+  rule), green/red signals, system-font stacks. Light-theme media block
+  removed (parked; re-derive from tokens when it returns). Instrument
+  floor from addendum 4: thin dark scrollbars global, .caps micro-label
+  utility; focus-visible + reduced-motion already existed. Zero
+  structural change by design — every component inherits the palette
+  and the deck stays fully functional; zones land M1–M7. Gates: 371
+  pytest · mypy (47 files) · ruff check+format · tsc. Browser-verified:
+  hermetic daemon :7911 (scratch state/data dirs, --no-audio) +
+  seed_demo; all five zones render in the new tokens, diff/annotation/
+  transcript surfaces intact. NEXT: M1 — command bar + status line.

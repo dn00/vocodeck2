@@ -1,55 +1,56 @@
-/* voco deck — the design system (DESIGN-DECK rev 4.1, U1).
+/* voco deck — CONSOLE mk3 design system (BUILD-CONSOLE.md; pinned
+   mockup: design/index5.html).
 
-   THE RULES (codified — change them in DESIGN-DECK.md first):
-   - LAYERS, NOT LINES: layout/lists separate by background tier
-     (l0 work, l1 chrome, l2 hover/inputs, l3 active), never by
-     hairline. Borders belong to STRUCTURE (strip bottom, rail right,
-     dock left, status top; modals/toasts) and to CONTROLS (buttons,
-     inputs get a 1px edge — affordance is not noise).
-   - THREE TYPE SLOTS: 13px sans chrome · 12.5px mono content · 11px
-     sans micro. Lowercase chrome; no letterspaced uppercase.
-   - COLOR BUDGET: chrome is monochrome at rest; MEANING always keeps
-     its color — diff +/− green/red, state words tint like their dots,
-     amber = voice-live/needs-you, blue = selection, red = blocked/
-     destructive. Decoration gets no color.
+   THE RULES (change them in BUILD-CONSOLE.md first):
+   - SURFACES, NOT LINES: separation by background tier (l0 work, l1
+     chrome, l2 raised/inputs, l3 active, hov hover). Hairlines only at
+     zone seams, command-bar cells, canvas bars, table heads, editor
+     outlines, and control edges.
+   - COLOR IS SIGNAL: steel = selection + PR/issue chips; amber = mic ·
+     blocking · queue · dirty · needs-you; green/red = live signal and
+     diff/ahead-behind. Chrome rests in gray.
+   - TYPE: 12px mono data/labels · 13.5px sans prose · 10px caps
+     micro-labels (letterspaced) · 10.5px mono meta.
+   - Square LEDs. No border-radius. No shadows. No animation except
+     meters (reduced-motion stills them).
    - MONO = CONTENT: if it's mono you could read it aloud to the agent.
-   - THE ONLY CURVE IS THE ORB.
-   - CONTRAST: micro text uses --ink2 (≥4.5:1); --ink3 never sets words.
-   - MOTION: orb pulse, listening bars, speaking eq — nothing else. */
+   - CONTRAST: meta text uses --ink2 (≥4.5:1); --ink3 sets marks and
+     resting labels, never body words. */
 
 :root {
-  --l0: #0c0e12;
-  --l1: #10131a;
-  --l2: #161b23;
-  --l3: #1d232e;
-  --edge: #252c37;
-  --ink: #c9d3e0;
-  --ink2: #8b96a6;
-  --ink3: #566070;
-  --voice: #e0a458;
-  --sel: #63a8f2;
-  --ok: #4cba63;
-  --warn: #d0a42e;
-  --bad: #e5645e;
-  --sans: system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --l0: #131417;
+  --l1: #17181c;
+  --l2: #1c1e23;
+  --l3: #24262c;
+  --hov: #20232a;
+  --edge: #26282e;
+  --edge2: #33363e;
+  --ink: #d6d9de;
+  --ink2: #9aa0a9;
+  --ink3: #5f646d;
+  --voice: #d9a334;
+  --sel: #6ea3d8;
+  --ok: #43b581;
+  --warn: #d9a334;
+  --bad: #d95c4f;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo,
     Consolas, monospace;
-  --railw: 248px;
+  --railw: 266px;
   --dockw: 340px;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --l0: #f6f7f9; --l1: #eef0f4; --l2: #e4e8ee; --l3: #d8dde5;
-    --edge: #c9cfd8;
-    --ink: #1e2732; --ink2: #5a6574; --ink3: #97a1ad;
-    --voice: #af6e1c; --sel: #0d6cd1; --ok: #187f36; --warn: #9c7a12;
-    --bad: #c93c37;
-  }
 }
 
 * { box-sizing: border-box; min-width: 0; }
 html, body { height: 100%; margin: 0; }
+/* instrument floor: thin dark scrollbars everywhere (stock chrome bars
+   break the gunmetal surfaces) */
+* { scrollbar-width: thin; scrollbar-color: var(--l3) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--l3);
+  border: 2px solid var(--l0); }
+::-webkit-scrollbar-thumb:hover { background: var(--edge2); }
 body {
   font: 13px/1.5 var(--sans);
   background: var(--l0); color: var(--ink);
@@ -58,6 +59,8 @@ body {
 #app { height: 100vh; display: flex; flex-direction: column; }
 .mono { font-family: var(--mono); font-size: 12.5px; }
 .micro { font-size: 11px; color: var(--ink2); }
+/* caps micro-label (mk3): zone headers and table heads only */
+.caps { font: 10px var(--mono); color: var(--ink3); letter-spacing: .12em; }
 button { font: 12px var(--sans); color: var(--ink2); background: var(--l2);
   border: 1px solid var(--edge); padding: 3px 10px; cursor: pointer; }
 button:hover { color: var(--ink); background: var(--l3); }
