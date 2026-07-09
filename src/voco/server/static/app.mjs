@@ -147,8 +147,6 @@ function selectedAgent() {
   return store.selectedAgent ? store.sessions.get(store.selectedAgent) : null;
 }
 
-// herdr borrow: blocked is loud — attention-first ordering.
-const STATE_ORDER = { blocked: 0, working: 1, listening: 2, idle: 3, stale: 4, gone: 5 };
 const stateOf = (s) => s.display_state || s.state || "idle";
 // "listening" renders as "ready" (audit): the state means the agent is
 // parked at its listen call — the word listening belongs to the mic.
@@ -159,12 +157,12 @@ function dot(s) {
   return h("span", { class: "dot " + state, title: state });
 }
 
+// STABLE order (decision sweep): rows never jump on state changes —
+// spatial memory wins; urgency speaks through the LEDs and words.
 function agentsIn(ws) {
   return [...store.sessions.values()]
     .filter((s) => sessionInWs(s, ws))
-    .sort((a, b) =>
-      (STATE_ORDER[stateOf(a)] ?? 9) - (STATE_ORDER[stateOf(b)] ?? 9)
-      || a.name.localeCompare(b.name));
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 const workLabel = (ws) => String(ws.branch || ws.name);
@@ -229,14 +227,15 @@ function focusAgent(s) {
  * locked, unforced clicks degrade to view-only; force = the explicit
  * movers (MIC patch, ⌘K mic→). */
 async function selectAgent(s, { force = false } = {}) {
-  const ws = focusAgent(s);
+  focusAgent(s);
   if (micLock && !force) return; // locked: look, don't re-route
   try { await bus.command("switch_session", { name: s.name }); }
   catch (e) { toast("activate failed: " + errMsg(e), true); }
-  if (ws && (!Array.isArray(s.capabilities) || s.capabilities.includes("review"))) {
-    try { await bus.command("review.primary", { workspace: ws.key, agent: s.name }); }
-    catch (e) { /* agent may lack review capability; the dock says so */ }
-  }
+  // Review routing is NOT set here (decision sweep after ADR-0003):
+  // the daemon ELECTS the primary and its election already prefers the
+  // active (mic-holding) session when reachable — the old per-click
+  // review.primary override pinned what should stay fluid and fought
+  // that election. Explicit pinning returns as UI if real use asks.
 }
 
 // Voice/daemon-initiated mic moves (spoken switch, another client):
@@ -310,9 +309,9 @@ function renderRail() {
             openSpawn({ ...mctx(), rootHint: groupWs().root }); } },
           "+agt"))));
     if (folded) continue;
+    // stable label order — rows never jump when agent states change
     const rows = g.works.map((ws) => ({ ws, agents: agentsIn(ws) }))
-      .sort((a, b) => rowOrder(a) - rowOrder(b)
-        || workLabel(a.ws).localeCompare(workLabel(b.ws)));
+      .sort((a, b) => workLabel(a.ws).localeCompare(workLabel(b.ws)));
     for (const r of rows) rail.append(workRow(r.ws, r.agents));
   }
   // Agents outside any checkout (sessionspaces, pre-identity strays) —
@@ -333,9 +332,6 @@ function renderRail() {
   rail.scrollTop = keep;
 }
 
-// Blocked work first; parked (agentless) work below live work, above gone.
-const rowOrder = (r) =>
-  r.agents.length ? (STATE_ORDER[stateOf(r.agents[0])] ?? 9) : 4.5;
 
 function workRow(ws, agents) {
   const sel = store.selectedWorkspace === ws.key;
@@ -1389,6 +1385,14 @@ function renderDock() {
 
   if (dockTab === "transcript") {
     if (agent) {
+      // split state (mic locked elsewhere): say whose ears your voice
+      // actually reaches while this transcript is showing
+      const holder = store.activeSession
+        && store.sessions.get(store.activeSession);
+      if (holder && holder.session_id !== agent.session_id)
+        body.append(h("div", { class: "t-micnote" },
+          "viewing " + agent.name + " · ",
+          h("span", { class: "amber" }, "mic → " + holder.name)));
       renderTranscript(body, store.transcriptFor(agent.session_id),
         { agentName: agent.name, speaking: store.speaking });
       loadTranscript(agent); // refetch if stale

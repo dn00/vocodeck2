@@ -329,6 +329,8 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 /* ---- transcript: a radio log — mk4 ledger (narrow panel): meta line
    above the text, stacked entries ------------------------------------------------ */
 .t-scroll { flex: 1; overflow-y: auto; min-height: 0; padding: 4px 0; }
+.t-micnote { padding: 6px 14px; font: 10.5px var(--mono);
+  color: var(--ink3); border-bottom: 1px solid var(--edge); }
 .tline { padding: 6px 14px; }
 .tline .thead { display: flex; gap: 9px; align-items: baseline;
   font-size: 11px; color: var(--ink3); }
