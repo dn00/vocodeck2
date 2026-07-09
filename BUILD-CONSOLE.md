@@ -208,6 +208,25 @@ mid cols: 266px fleet tree / 1fr canvas / 220px channel rack
 
 ## Journal
 
+- **2026-07-09 · M8 (builder half) — final sweep; captain click-through
+  pending.** Side-by-side vs design/index5 on seeded state: layout,
+  tokens, tree, tabs+page bar, doc/diff/files views, editor, rack, and
+  console all match the pinned mockup; every milestone was
+  browser-verified on its own hermetic daemon as it landed. Deliberate,
+  journaled deviations (all honest-signal): no ⌘K hint until the
+  palette exists; no PTT key hint until ptt.press/release; no page push
+  timestamps or fabricated channel ages (protocol carries neither —
+  ages appear once a transition is observed live); one amber
+  (mk3 folded --warn into --voice). REMAINING for the captain's
+  click-through + M9: live-verify an agent ANSWERING an ask (needs a
+  real bridge agent); PR/issue attach end-to-end UI (workspace.link
+  exists; the connect/link surface is M9's first item); ⌘K palette;
+  file-line annotation from the files view; server-side `updated_ts`
+  on pages so provenance can carry push time. Captain's daemon on
+  :7777 restarted onto the finished build (one hard refresh needed for
+  the OLD tab; every restart after that self-heals via the M7
+  stale-token reload).
+
 - **2026-07-09 · M7 SHIPPED — states + modals + the restart self-heal.**
   Disconnected is now fully designed: command-bar LED goes red and the
   host cell counts down honestly from the bus's real retryAt ("daemon
