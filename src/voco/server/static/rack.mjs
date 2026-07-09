@@ -30,7 +30,9 @@ const el = (tag, attrs = {}, ...kids) => {
   return n;
 };
 
-const ATTENTION_CYCLE = ["muted", "wake", "always"];
+// All four modes (audit #2): the old orb's cycle skipped ptt_only,
+// which stranded a ptt_only daemon after one click.
+const ATTENTION_CYCLE = ["muted", "wake", "ptt_only", "always"];
 const HEARING = new Set(["capturing", "holding", "routing"]);
 
 // Hold-PTT state is MODULE-level: the rack re-renders on voice events
@@ -162,7 +164,8 @@ export function renderRack(rack, store, ctx) {
     text: mic.attention || "headless" });
   if (mic.attention) {
     attn.classList.add("cyc");
-    attn.title = `attention: ${mic.attention} — click cycles muted → wake → always`;
+    attn.title = `attention: ${mic.attention} — click cycles `
+      + ATTENTION_CYCLE.join(" → ");
     attn.addEventListener("click", async () => {
       const next = ATTENTION_CYCLE[
         (ATTENTION_CYCLE.indexOf(mic.attention) + 1) % ATTENTION_CYCLE.length];

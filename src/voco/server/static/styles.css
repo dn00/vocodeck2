@@ -246,6 +246,7 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
   max-height: 340px; overflow-y: auto; }
 .st-item { display: flex; align-items: center; gap: 5px; }
 .st-item .k { color: var(--ink3); }
+.card-actions { display: flex; gap: 8px; }
 
 /* ---- markdown ------------------------------------------------------------- */
 .md { max-width: 900px; }
@@ -312,17 +313,19 @@ td.x span:hover { color: var(--bad); }
 .ask-input { flex: 1; background: transparent; border: none;
   color: var(--ink); font: 12px var(--mono); outline: none; }
 .ask-input::placeholder { color: var(--ink3); }
-.ask { padding: 8px 14px; }
+.ask { display: grid; grid-template-columns: 160px minmax(0, 1fr);
+  gap: 0 16px; padding: 6px 14px; }
 .ask + .ask { border-top: 1px solid var(--edge); }
 .ask-head { display: flex; gap: 9px; align-items: baseline;
+  justify-content: flex-end; text-align: right; margin-top: 2px;
   font: 10.5px var(--mono); color: var(--ink3); }
 .ask-head b { color: var(--voice); font-weight: 700; }
 .ask-head .hot { color: var(--voice); }
-.ask-text { margin-top: 3px; font: 12.5px/1.55 var(--sans);
-  color: var(--ink); }
-.ask-answer { margin-top: 6px; padding-left: 10px;
+.ask-text { margin-top: 0; font: 12.5px/1.55 var(--sans);
+  color: var(--ink); max-width: 110ch; }
+.ask-answer { grid-column: 2; margin-top: 6px; padding-left: 10px;
   box-shadow: inset 2px 0 0 var(--edge2); font-size: 12px;
-  color: var(--ink2); }
+  color: var(--ink2); max-width: 110ch; }
 .ask-answer p { margin: 4px 0; }
 /* log: the daemon event tail */
 .logln { display: flex; gap: 10px; padding: 1.5px 14px;
@@ -331,17 +334,23 @@ td.x span:hover { color: var(--bad); }
 .lg-ty { color: var(--ink2); flex: none; min-width: 150px; }
 .lg-pl { color: var(--ink3); overflow: hidden; text-overflow: ellipsis; }
 
-/* ---- transcript: a radio log, not a messenger ---------------------------------- */
-.t-scroll { flex: 1; overflow-y: auto; min-height: 0; }
-.tline { padding: 8px 14px; }
+/* ---- transcript: a radio log — full-width console layout: the meta
+   (speaker · time) lives in a right-aligned LEFT GUTTER so every line
+   of text starts at one x and the wide panel reads like a real log --- */
+.t-scroll { flex: 1; overflow-y: auto; min-height: 0; padding: 4px 0; }
+.tline { display: grid; grid-template-columns: 160px minmax(0, 1fr);
+  gap: 0 16px; padding: 3px 14px; }
 .tline .thead { display: flex; gap: 9px; align-items: baseline;
+  justify-content: flex-end; text-align: right;
   font-size: 11px; color: var(--ink3); }
 .tline .thead b { font-weight: 600; font-size: 11px; }
 .tline.you .thead b { color: var(--voice); }
 .tline.agent .thead b { color: var(--sel); }
-.tline .ttext { margin-top: 3px; font: 12.5px/1.65 var(--mono);
-  color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
-.tline.meta { font-size: 11px; color: var(--ink3); padding: 2px 14px 6px; }
+.tline .ttext { margin-top: 0; font: 12.5px/1.6 var(--mono);
+  color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere;
+  max-width: 110ch; }
+.tline.meta { grid-column: 2; font-size: 11px; color: var(--ink3);
+  padding: 0 14px 3px 0; }
 .tline .said { color: var(--ink2); }
 .tline .saying { background: color-mix(in srgb, var(--sel) 18%, transparent);
   padding: 0 2px; }

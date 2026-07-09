@@ -113,8 +113,12 @@ export function renderPresence(bar, store, ctx) {
     host.textContent = location.host;
   }
 
-  // the ONE input: placeholder/disabled only — value and focus SURVIVE
-  dom.input.placeholder = "say “deck …” or type";
+  // the ONE input: placeholder/disabled only — value and focus SURVIVE.
+  // No voice loop = no "say" (audit #7: the placeholder must not offer
+  // a voice path a headless daemon cannot hear).
+  dom.input.placeholder = (store.mic && store.mic.attention)
+    ? "say “deck …” or type"
+    : "type — routes like speech";
   dom.input.disabled = offline;
   dom.route.textContent = activeName ? "route → " + activeName : "route → —";
   dom.route.classList.toggle("none", !activeName);

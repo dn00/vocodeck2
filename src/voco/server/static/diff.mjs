@@ -68,7 +68,8 @@ export function seedFolds(content, findings) {
  *   findings:any[], rev?:number, fold:Set<string>, reveal?:?string,
  *   scrollTo?:(el:HTMLElement)=>void, onFoldChange?:()=>void,
  *   highlight?:(codeEl:HTMLElement, path:string)=>any,
- *   reviewed?:Set<string>, onReviewToggle?:(path:string, on:boolean)=>void}} ctx
+ *   reviewed?:Set<string>, onReviewToggle?:(path:string, on:boolean)=>void,
+ *   onAsk?:(a:Anchor, text:string)=>void}} ctx
  * @returns {{expandAll:(open:boolean)=>void, allOpen:boolean,
  *   nextChange:()=>void, prevChange:()=>void}}
  */
@@ -276,6 +277,14 @@ export function renderDiff(view, content, ctx) {
       pills,
       el("div", { class: "editor-actions" },
         el("button", { class: "tbtn primary", text: "add annotation", onclick: add }),
+        ctx.onAsk ? el("button", { class: "tbtn", text: "ask",
+          title: "ask the work's agents about these lines",
+          onclick: () => {
+            const text = ta.value.trim();
+            if (!text) { ta.focus(); return; }
+            /** @type {NonNullable<typeof ctx.onAsk>} */ (ctx.onAsk)(anchor, text);
+            close();
+          } }) : null,
         el("button", { class: "tbtn", text: "cancel", onclick: close })),
       el("div", { class: "flow-note",
         text: "tip: shift-click another line first to annotate a range. ctrl/cmd+enter to add." }));

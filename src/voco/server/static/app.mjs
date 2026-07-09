@@ -622,12 +622,13 @@ function renderWork(force = false) {
     : page && page.type === "diff" ? "annotate: click a line"
       : page && page.type === "html" ? "annotate: toggle, then click an element"
         : "";
+  // export lives on the overview card + palette now (audit #1): it
+  // writes interop FILES for external tools — agents already receive
+  // annotations live, so it is not a step in the loop.
   work.append(tabbar,
     h("div", { class: "pgbar" }, prov, srnote,
       hint ? h("span", { class: "pg-hint" }, hint) : "",
-      actions,
-      ws ? h("button", { class: "whbtn", title: "export this work's review",
-        onclick: () => exportReview() }, "export") : ""));
+      actions));
   const view = h("div", { class: "view" });
   // Capture the key this view was RENDERED for: saving under a live
   // pageKey() re-keyed page A's offset onto page B when the selection
@@ -871,6 +872,14 @@ function openFileEditor(view, afterEl, anchor) {
     ta, pills,
     h("div", { class: "editor-actions" },
       h("button", { class: "tbtn primary", onclick: commit }, "add annotation"),
+      h("button", { class: "tbtn",
+        title: "ask the work's agents about this selection (audit #3)",
+        onclick: () => {
+          const text = ta.value.trim();
+          if (!text) { ta.focus(); return; }
+          askWithContext(text, anchor);
+          box.remove();
+        } }, "ask"),
       h("button", { class: "tbtn", onclick: () => box.remove() }, "cancel")));
   async function commit() {
     const text = ta.value.trim();
@@ -941,6 +950,11 @@ function renderWorkCard(view, ws) {
     kv("agents", agents.length ? agents.map((a) => a.name).join(" ") : "none"),
     kv("open", String(open))));
   card.append(linkEditor(ws));
+  card.append(h("div", { class: "card-actions" },
+    h("button", { class: "whbtn",
+      title: "write diff-annotate-compatible review files for external"
+        + " tools — agents already receive annotations live",
+      onclick: () => exportReview() }, "export review file")));
   card.append(h("div", { class: "empty-note" }, agents.length
     ? "select a page in the rail — or click an agent to talk to it"
     : "review-only: no agent attached — diffs and annotations still work"));
@@ -1132,6 +1146,8 @@ async function renderPage(view, page, srnote, actions) {
         scrollTo: (el) => scrollViewTo(el),
         onAnnotate: (anchor, text, kind, blocking) =>
           addFinding(page, anchor, text, kind, blocking),
+        onAsk: (anchor, text) =>
+          askWithContext(text, { kind: "diff", ...anchor }),
         onFoldChange: () => syncExpand(),
         highlight: (codeEl, path) => {
           const ext = (path.match(/\.([a-z0-9]+)$/i) || [""])[1] || "";
@@ -1256,6 +1272,16 @@ function anchorLabel(f) {
   return p ? `${icon} ${p.title}` : "";
 }
 
+/** #3: an ask that carries WHAT you're pointing at. The context rides
+ * ask.create verbatim and reaches the agent with the question. */
+async function askWithContext(text, context) {
+  try {
+    await bus.command("ask.create",
+      { workspace: store.selectedWorkspace, text, context });
+    setDockTab("asks");
+  } catch (e) { toast("ask failed: " + errMsg(e), true); }
+}
+
 async function withdrawFinding(wsKey, f) {
   try {
     await bus.command("finding.withdraw",
@@ -1315,10 +1341,11 @@ function renderDock() {
     tab("asks", openAsks, true), // amber when a question is outstanding
     tab("log", null, false),
     h("div", { class: "cfoot" },
-      h("span", {}, h("b", {}, openF.length + " open"),
+      h("span", { title:
+        "open annotations and asks reach this work's agents automatically"
+        + " — no send step" },
+        h("b", {}, openF.length + " open"),
         blockingN ? ` · ${blockingN} blocking` : ""),
-      h("span", { class: "cfoot-btn", onclick: () => exportReview() },
-        "export ↓"),
       h("span", {}, "scope: " + scopeTxt))));
   const body = h("div", { class: "cbody" });
   body.addEventListener("scroll",
@@ -1388,6 +1415,9 @@ function renderDock() {
         h("b", {}, "agent"), " — " + f.answer));
     if (f.note)
       textCell.append(h("div", { class: "freply" }, f.note));
+    if (f.commit) // audit #4: the fixing commit, when an agent stamped it
+      textCell.append(h("div", { class: "freply" },
+        "✓ fixed in " + String(f.commit).slice(0, 10)));
     table.append(h("tr", { class: done ? "done" : "",
       onclick: (e) => {
         // an in-place edit owns the row — clicks in it never reveal

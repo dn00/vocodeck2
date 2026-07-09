@@ -208,6 +208,32 @@ mid cols: 266px fleet tree / 1fr canvas / 220px channel rack
 
 ## Journal
 
+- **2026-07-09 · FIT-AUDIT BATCH — export demoted, honest affordances,
+  console width.** Captain challenged the export button ("why not send
+  to the agent?") — the audit answer: SENDING ALREADY HAPPENS (open
+  findings/asks reach the work's agents automatically via the bridge's
+  pending-review path), and export is an interop artifact (diff-
+  annotate-compatible files for external tools like onebrain3). The
+  button was teaching the wrong mental model from the deck's two most
+  prominent spots. (1) Export demoted: gone from the page bar and
+  console footer; lives on the work overview card ("export review
+  file", tooltip says agents already receive annotations live) + the
+  palette; the footer's open-count tooltip states the no-send-step
+  truth. (2) Attention cycle now includes ptt_only — the old
+  muted→wake→always cycle STRANDED a ptt_only daemon after one click.
+  (3) Asks carry context: "ask" buttons in the file-selection editor
+  and the diff inline editor send ask.create with the selection
+  ({kind:file|diff, file, lines, exact…}) and open the asks tab.
+  (4) finding.commit renders ("✓ fixed in <sha>" under the text) when
+  an agent stamps it. (7) Headless daemons get an honest prompt
+  placeholder ("type — routes like speech"). Debug client: already at
+  /debug (+ legacy /ui) — kept, no change needed. Console width:
+  transcript and asks now use a 160px right-aligned meta GUTTER +
+  text column (max 110ch) so the full-width panel reads like a real
+  log instead of a skinny column. Gates: 374 pytest · ruff · tsc;
+  verified on :7911 (tab identity double-checked first this time).
+  STILL OWED: #17 scripted smoke test.
+
 - **2026-07-09 · mk3.1 BATCH SHIPPED — all of A, plus 7/9/10/11-as-
   decided/12/13/14/15.** Bulk pass by file, browser-verified end-to-end
   on :7911. (A1) PR/issue attach: link editor on the work overview card
