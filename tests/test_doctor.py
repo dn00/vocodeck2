@@ -335,3 +335,42 @@ def test_input_monitoring_row_tristate():
     denied = doctor.input_monitoring_row(lambda: False)
     assert denied.status == "warn" and "Input Monitoring" in denied.detail
     assert doctor.input_monitoring_row(lambda: None).status == "--"
+
+
+def test_mic_row_stalled_backend_times_out_not_hangs():
+    import time as _time
+
+    class StuckSd(FakeSd):
+        def wait(self):
+            _time.sleep(60)  # wedged PortAudio
+
+    row = doctor.mic_row(sd_module=lambda: StuckSd(np.zeros(1)), timeout_s=0.2)
+    assert row.status == "warn" and "stalled" in row.detail
+
+
+def test_mic_row_stall_abandons_stream_and_attempts_stop():
+    import time as _time
+
+    released = threading.Event()
+
+    class StuckSd(FakeSd):
+        def __init__(self, samples):
+            super().__init__(samples)
+            self.stop_called = False
+
+        def wait(self):
+            released.wait(5)  # wedged until stop() releases the stream
+
+        def stop(self):
+            self.stop_called = True
+            released.set()
+
+    stuck = StuckSd(np.zeros(1))
+    row = doctor.mic_row(sd_module=lambda: stuck, timeout_s=0.2)
+    assert row.status == "warn" and "stalled" in row.detail
+    # the abort runs on a SIDE thread so a hung stop() can't re-wedge
+    # doctor — poll for it to actually reach stop()
+    deadline = _time.monotonic() + 1.0
+    while not stuck.stop_called and _time.monotonic() < deadline:
+        _time.sleep(0.01)
+    assert stuck.stop_called

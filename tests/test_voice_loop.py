@@ -512,3 +512,153 @@ async def test_ptt_unknown_permission_is_not_denied(tmp_path):
         ]
     finally:
         voice.stop()
+
+
+# ---- wake word (P12: wiring + honesty) ----------------------------------------
+
+
+def test_wake_loader_default_is_the_real_detector():
+    """THE P12 regression pin: wake_loader defaulted to None and nothing
+    ever wired it — the adapter was dead code and wake mode a silent
+    lie. The real loader is now the default (lazy import inside)."""
+    from voco.adapters.wake import load_openwakeword
+
+    assert VoiceLoopDeps().wake_loader is load_openwakeword
+
+
+@pytest.mark.asyncio
+async def test_wake_mode_without_model_falls_back_honestly(tmp_path):
+    from voco.core.attention import AttentionMode
+
+    voice, _host, events = make_loop(tmp_path, attention="wake", wake_loader=None)
+    await voice.start(asyncio.get_running_loop())
+    try:
+        assert voice.attention.mode is AttentionMode.PTT_ONLY  # not deaf-wake
+        errs = [
+            p["error"]
+            for t, p in events
+            if t == "daemon.error" and "wake attention unavailable" in p["error"]
+        ]
+        assert errs and "wake_model" in errs[0]  # names the fix
+    finally:
+        voice.stop()
+
+
+@pytest.mark.asyncio
+async def test_wake_model_load_failure_names_the_missing_extra(tmp_path):
+    from voco.core.attention import AttentionMode
+
+    def loader_raises(path):
+        raise ImportError("No module named 'openwakeword'")
+
+    bus = EventBus()
+    events: list = []
+    bus.subscribe(lambda env: events.append((env.type, env.payload)))
+    cfg = {
+        **CFG,
+        "audio": {
+            **CFG["audio"],
+            "phrase_bank_dir": str(tmp_path / "bank"),
+            "attention": "wake",
+            "wake_model": "models/voco.onnx",
+        },
+    }
+    deps = VoiceLoopDeps(
+        load_vad_model=lambda path: ScriptedVad(),
+        stt_builder=lambda provider, **kw: FakeStt("x"),
+        tts_factory=FakeTts,
+        mic_factory=FakeMic,
+        player_factory=FakePlayer,
+        hotkey_factory=None,
+        wake_loader=loader_raises,
+    )
+    voice = VoiceLoop(cfg, bus, host=Host(), deps=deps)
+    await voice.start(asyncio.get_running_loop())
+    try:
+        assert voice.attention.mode is AttentionMode.PTT_ONLY
+        errs = [p["error"] for t, p in events if t == "daemon.error"]
+        assert any("--extra wake" in e for e in errs)  # actionable reason
+    finally:
+        voice.stop()
+
+
+@pytest.mark.asyncio
+async def test_runtime_switch_to_wake_without_detector_is_refused(tmp_path):
+    from voco.core.attention import AttentionMode
+
+    voice, _host, events = make_loop(tmp_path, wake_loader=None)  # always mode
+    await voice.start(asyncio.get_running_loop())
+    try:
+        assert voice.set_attention(AttentionMode.WAKE) is False  # refused
+        assert voice.attention.mode is AttentionMode.ALWAYS  # unchanged
+        assert any(
+            t == "daemon.error" and "wake attention unavailable" in p["error"]
+            for t, p in events
+        )
+        # a mode with a WORKING path still switches (the refusal is
+        # wake-specific, not a frozen control)
+        assert voice.set_attention(AttentionMode.MUTED) is True
+        assert voice.attention.mode is AttentionMode.MUTED
+    finally:
+        voice.stop()
+
+
+@pytest.mark.asyncio
+async def test_muted_stays_muted_when_wake_is_refused(tmp_path):
+    # Review pin: only always->wake was covered. A MUTED deck whose wake
+    # detector can't arm must NOT slide into wake on a refused switch —
+    # it stays muted, and a mode with a working path still applies.
+    from voco.core.attention import AttentionMode
+
+    voice, _host, _events = make_loop(tmp_path, attention="muted", wake_loader=None)
+    await voice.start(asyncio.get_running_loop())
+    try:
+        assert voice.set_attention(AttentionMode.WAKE) is False
+        assert voice.attention.mode is AttentionMode.MUTED  # not deaf-wake
+        assert voice.set_attention(AttentionMode.PTT_ONLY) is True
+        assert voice.attention.mode is AttentionMode.PTT_ONLY
+    finally:
+        voice.stop()
+
+
+@pytest.mark.asyncio
+async def test_wake_model_set_but_loader_absent_names_the_build(tmp_path):
+    # wake_model IS configured but no loader is wired: the reason must not
+    # tell the user to set a key they already set — it names the build.
+    from voco.core.attention import AttentionMode
+
+    bus = EventBus()
+    events: list = []
+    bus.subscribe(lambda env: events.append((env.type, env.payload)))
+    cfg = {
+        **CFG,
+        "audio": {
+            **CFG["audio"],
+            "phrase_bank_dir": str(tmp_path / "bank"),
+            "attention": "wake",
+            "wake_model": "models/voco.onnx",
+        },
+    }
+    deps = VoiceLoopDeps(
+        load_vad_model=lambda path: ScriptedVad(),
+        stt_builder=lambda provider, **kw: FakeStt("x"),
+        tts_factory=FakeTts,
+        mic_factory=FakeMic,
+        player_factory=FakePlayer,
+        hotkey_factory=None,
+        wake_loader=None,
+    )
+    voice = VoiceLoop(cfg, bus, host=Host(), deps=deps)
+    await voice.start(asyncio.get_running_loop())
+    try:
+        assert voice.attention.mode is AttentionMode.PTT_ONLY  # honest degrade
+        errs = [
+            p["error"]
+            for t, p in events
+            if t == "daemon.error" and "wake attention unavailable" in p["error"]
+        ]
+        assert errs
+        assert "set [audio].wake_model" not in errs[0]  # the config IS set
+        assert "disabled in this build" in errs[0]  # names the real miss
+    finally:
+        voice.stop()

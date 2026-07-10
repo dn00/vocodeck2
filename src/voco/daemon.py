@@ -490,6 +490,10 @@ class Daemon:
         return {
             "duplex": v.duplex.value if v else None,
             "attention": v.attention.mode.value if v else None,
+            # the deck filters "wake" out of its cycle when the detector
+            # can't arm — an older server without this field keeps the
+            # full cycle (strict === false check client-side)
+            "wake_available": v.wake_available if v else False,
         }
 
     def _emit_mic_state(self) -> None:
@@ -536,12 +540,20 @@ class Daemon:
                 # There is no runtime to change; pretending otherwise is the
                 # exact lie the live test caught on config.set.
                 raise ValueError("no voice loop running")
+            refused: str | None = None
             if duplex is not None:
                 self._set_duplex(str(duplex))
             if attention is not None:
-                self.voice.set_attention(AttentionMode(str(attention)))
+                if not self.voice.set_attention(AttentionMode(str(attention))):
+                    refused = (
+                        f"attention {attention!r} unavailable — "
+                        f"{self.voice.wake_unavailable_reason}"
+                    )
                 self._emit_mic_state()
-            return {"duplex": duplex, "attention": attention}
+            result = self._mic_payload()  # actual state, never the echo
+            if refused:
+                result["refused"] = refused
+            return result
         if cmd == "say_as_user":
             text = str(payload.get("text", "")).strip()
             if not text:
@@ -963,6 +975,7 @@ class Daemon:
         value = payload["value"]
         self.cfg = config_mod.set_value(self._config_path, self.cfg, key, value)
         applied = False
+        reason: str | None = None
         if key in self._HOT_APPLY:
             try:
                 if key == "audio.duplex":
@@ -972,7 +985,10 @@ class Daemon:
                 elif key == "audio.attention":
                     if self.voice is None:
                         raise ValueError("no voice loop running")
-                    self.voice.set_attention(AttentionMode(str(value)))
+                    if not self.voice.set_attention(AttentionMode(str(value))):
+                        raise ValueError(
+                            f"refused: {self.voice.wake_unavailable_reason}"
+                        )
                     self._emit_mic_state()
                 elif key == "audio.dispatch_hold_ms":
                     if self.voice is None:
@@ -985,15 +1001,19 @@ class Daemon:
                 elif key == "first_mate.timeout_ms":
                     self.router.set_timeout(float(value) / 1000.0)
                 applied = True
-            except Exception:
-                applied = False  # persisted; takes effect on restart
-        return {
+            except Exception as e:
+                applied = False  # persisted; a restart re-attempts it
+                reason = str(e)
+        resp = {
             "key": key,
             "value": value,
             "applied": applied,
             "restart_required": not applied,
             "written": str(config_mod.overrides_path(self._config_path)),
         }
+        if reason:
+            resp["reason"] = reason
+        return resp
 
     def _peek_target(self, payload: dict) -> tuple[str, str | None]:
         """Terminal mirror target: a registered session's pane (by call

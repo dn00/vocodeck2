@@ -186,12 +186,18 @@ export function renderRack(deck, store, ctx) {
     text: mic.attention || "headless" });
   if (mic.attention) {
     attn.classList.add("cyc");
+    // A refused mode must never be the computed next mode, or the cycle
+    // deadlocks (server refuses wake → mode stays → next recomputes wake).
+    // Strict === false: an older server without the field keeps the full
+    // cycle.
+    const cycle = mic.wake_available === false
+      ? ATTENTION_CYCLE.filter((m) => m !== "wake")
+      : ATTENTION_CYCLE;
     attn.title = `attention: ${mic.attention} — click cycles `
-      + ATTENTION_CYCLE.join(" → ");
+      + cycle.join(" → ");
     attn.addEventListener("click", async (e) => {
       e.stopPropagation();
-      const next = ATTENTION_CYCLE[
-        (ATTENTION_CYCLE.indexOf(mic.attention) + 1) % ATTENTION_CYCLE.length];
+      const next = cycle[(cycle.indexOf(mic.attention) + 1) % cycle.length];
       try { await ctx.command("mic.set", { attention: next }); }
       catch (err) { ctx.toast("attention: " + msg(err), true); }
     });

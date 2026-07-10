@@ -29,6 +29,7 @@ from voco.adapters.silero import load_silero
 from voco.adapters.speaker import SpeakerPlayer
 from voco.adapters.stt import build_stt
 from voco.adapters.tts import OpenAICompatibleTts, PhraseBank
+from voco.adapters.wake import load_openwakeword
 from voco.core.arbitration import DuplexMode, PlaybackItem, PlaybackQueue, Source
 from voco.core.attention import AttentionGate, AttentionMode
 from voco.core.capture import CaptureBuffer, pre_roll_frames_for
@@ -71,7 +72,13 @@ class VoiceLoopDeps:
     # P4: OS permission probe for the PTT listener (macOS Input
     # Monitoring). Injectable so tests exercise the denied path.
     ptt_preflight: Callable[[], bool | None] = input_monitoring_granted
-    wake_loader: Callable[[str], Callable[[np.ndarray], float]] | None = None
+    # P12: the REAL detector is the default (the wiring bug was a None
+    # default nobody ever overrode — wake was dead code); the heavy
+    # openwakeword import stays lazy inside the loader call, and the
+    # loader only runs when [audio].wake_model is configured.
+    wake_loader: Callable[[str], Callable[[np.ndarray], float]] | None = (
+        load_openwakeword
+    )
 
 
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
@@ -263,11 +270,45 @@ class VoiceLoop:
         self.mic = deps.mic_factory(
             self._on_frame, device=audio_cfg.get("input_device")
         )
+        # P12 wake honesty: a detector either LOADS or the failure is a
+        # named reason — "wake" mode with no working detector is a deaf
+        # deck wearing a lying label, never a permitted state.
         self._wake_scorer: Callable[[np.ndarray], float] | None = None
+        self._wake_unavailable = (
+            "no wake-word model configured — set [audio].wake_model"
+        )
         wake_model = audio_cfg.get("wake_model")
         if wake_model and deps.wake_loader is not None:
-            self._wake_scorer = deps.wake_loader(str(wake_model))
+            try:
+                self._wake_scorer = deps.wake_loader(str(wake_model))
+                self._wake_unavailable = ""
+            except ImportError:
+                self._wake_unavailable = (
+                    "openwakeword is not installed — uv sync --extra wake,"
+                    " then restart voco-d"
+                )
+            except Exception as e:
+                self._wake_unavailable = (
+                    f"wake model failed to load ({wake_model}): {e}"
+                )
+        elif wake_model:
+            # a model IS configured, so the "set [audio].wake_model" reason
+            # would lie — the miss is the loader, not the config
+            self._wake_unavailable = (
+                "wake detector disabled in this build (no wake loader wired)"
+            )
         self._wake_threshold = float(audio_cfg.get("wake_threshold", 0.5))
+        self._wake_boot_fallback: str | None = None
+        if self.attention.mode is AttentionMode.WAKE and self._wake_scorer is None:
+            # honest boot degrade: ptt_only keeps the same "deaf until an
+            # explicit act" posture, and the reason reaches the deck/log
+            # once start() runs (the bus funnel is wired by then)
+            self.attention.set_mode(AttentionMode.PTT_ONLY)
+            self._premute = AttentionMode.PTT_ONLY
+            self._wake_boot_fallback = (
+                f"wake attention unavailable ({self._wake_unavailable})"
+                " — falling back to ptt_only"
+            )
 
         self._loop: asyncio.AbstractEventLoop | None = None
         self._ptt: PttHotkey | None = None
@@ -281,6 +322,10 @@ class VoiceLoop:
     async def start(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
         self.player.bind_loop(loop)
+        if self._wake_boot_fallback:
+            # emitted here, not in __init__, so the P4 log funnel and any
+            # early deck subscriber actually see it
+            self._bus.emit("daemon.error", {"error": self._wake_boot_fallback})
         failed = await self.bank.ensure()
         if failed:
             self._bus.emit(
@@ -345,10 +390,29 @@ class VoiceLoop:
     ) -> None:
         self.machine.set_patience(hold_ms=hold_ms, incomplete_ms=incomplete_ms)
 
-    def set_attention(self, mode: AttentionMode) -> None:
+    def set_attention(self, mode: AttentionMode) -> bool:
+        if mode is AttentionMode.WAKE and self._wake_scorer is None:
+            # P12: refuse, loudly, and stay in the current WORKING mode —
+            # the deck toasts this error, so the click is never silently
+            # dead and the mic never silently deaf. The False reaches the
+            # caller, which reports the actual state instead of the echo.
+            self._bus.emit(
+                "daemon.error",
+                {"error": f"wake attention unavailable — {self._wake_unavailable}"},
+            )
+            return False
         if mode is not AttentionMode.MUTED:
             self._premute = mode
         self.attention.set_mode(mode)
+        return True
+
+    @property
+    def wake_available(self) -> bool:
+        return self._wake_scorer is not None
+
+    @property
+    def wake_unavailable_reason(self) -> str:
+        return self._wake_unavailable  # "" when a detector is loaded
 
     def set_muted(self, muted: bool) -> None:
         """Phrase-table mute/unmute: MUTED <-> the last non-muted mode."""

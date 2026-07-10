@@ -62,7 +62,7 @@ Ground rules (best practice, non-negotiable):
       by policy; state-dir size in `voco status`.
 - [ ] **P11 — the stream-stall ghost**: soak test (long synthetic
       session) to reproduce or retire the old handoff bug.
-- [ ] **P12 — wake-word honesty**: "wake" attention mode gated on the
+- [x] **P12 — wake-word honesty**: "wake" attention mode gated on the
       detector actually being installed/loaded.
 - [ ] **P13 — multi-writer races**: two decks + MCP + CLI on
       mic.set/ptt.* concurrently; verify or serialize.
@@ -87,6 +87,69 @@ post-review-to-PR · settings polish · light theme · full palette.
 Order: P1 → P2+P3 → P4+P5 → B by risk → C → D. UI work is paused.
 
 ## Journal
+
+- **2026-07-09 · P12 SHIPPED (+ ssh-host dash-reject + doctor mic
+  watchdog) — honest wake attention (xai round included).** The P12
+  wiring bug: `VoiceLoopDeps.wake_loader` defaulted to None and nothing
+  ever wired it — the openwakeword adapter was dead code and "wake" a
+  silent lie. The real loader is now the default (lazy import inside the
+  call; regression-pinned). Detector failures become named reasons (not
+  installed → "uv sync --extra wake"; load error names the model;
+  configured-model-but-no-loader names the build). Booting in wake with
+  no detector degrades to ptt_only with a daemon.error emitted in
+  start() (after the P4 funnel is wired); runtime set_attention(WAKE)
+  with no detector refuses loudly and stays in the current working mode.
+  Rode along: tmux ssh hosts from agent-supplied identity are
+  dash-rejected and passed after `--` (option-injection gate; local
+  OpenSSH verified to accept the form), and doctor's mic probe runs
+  under a 5s watchdog so a wedged PortAudio backend hangs a row, not the
+  whole diagnostic.
+
+  **The /xai round (5 findings) — both blockers + all warnings fixed
+  in-slice:** (1) BLOCKER: the refusal was invisible to callers —
+  mic.set echoed the REQUEST back and config.set said applied:true while
+  the loop never moved. set_attention now returns success; mic.set
+  answers with the ACTUAL resulting state plus a `refused` reason;
+  config.set hot-apply reports applied:false with the refusal reason.
+  (2) BLOCKER: the deck's attention click-cycle (muted→wake→ptt_only→
+  always) could strand a muted user forever — refused wake left
+  mode=muted and the next click recomputed wake. mic.state now carries
+  `wake_available` and the deck builds the cycle without unavailable
+  modes (strict `=== false`, so an older server keeps the full cycle).
+  (3) the loader-absent reason above. (4) the watchdog now attempts
+  sd.stop() from a side thread on stall (a truly wedged backend could
+  hang stop() too) and the row says the stream was abandoned. (5)
+  coverage: 6 new tests — muted-stays-muted, build-named reason,
+  daemon-level mic.set/config.set honesty against a real refusing
+  VoiceLoop, watchdog stop-attempt poll. Journaled deferral: no JS test
+  infra exists (no package.json/vitest/jest), so the cycle fix is
+  covered by tsc plus the server-side wake_available tests, not a JS
+  unit test.
+
+  Gates: 469 pytest (463→469) · mypy · ruff+format (slice files clean;
+  scripts/seed_demo.py carries 2 pre-existing violations outside this
+  slice) · tsc clean · protocol drift clean (wake_available is a payload
+  field; PROTOCOL.md regenerated unchanged — globals.d.ts is
+  hand-authored and store.mic is untyped). LIVE (hermetic :7917, scratch
+  `[state].dir` + VOCO_STATE_DIR + VOCO_DATA_DIR): booted with
+  `[audio].attention=wake` and no model → came up ptt_only with the
+  named daemon.error ("falling back to ptt_only" logged once); mic.set
+  wake → `{"attention":"ptt_only","wake_available":false,"refused":"…set
+  [audio].wake_model"}`; mic.set always applied clean; config.set
+  audio.attention=wake → applied:false with reason "refused: …", the
+  write isolated to the scratch overrides file; clean SIGTERM shutdown,
+  port freed. Live-drill side-lesson queued under P16: a PARTIAL [tts]
+  table (manage_floor only) headlesses the loop with a bare KeyError
+  reason ('base_url', then 'model') — validate-on-write should name the
+  missing key and the honest-headless reason should be a sentence.
+
+  Slice hygiene note: an adjacent session's command-bar/deck-header UI
+  rewrite clobbered the rack.mjs cycle fix once mid-implementation;
+  rack.mjs was restored to HEAD + the cycle fix alone for this commit,
+  and that session's uncommitted presence/app/styles churn stays OUT of
+  this slice pending the deliberate index7 UI port. NEXT: the index7
+  deck port (captain-ordered), then B-phase continues (P6 device churn /
+  P8 auth posture / P9 state integrity).
 
 - **2026-07-09 · P5 SHIPPED — `voco doctor` rebuilt as a real
   diagnostic (xai round included).** The inline cmd_doctor moved to a

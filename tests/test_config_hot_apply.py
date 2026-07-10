@@ -58,7 +58,11 @@ async def test_config_set_duplex_hot_applies(tmp_path):
     assert result["restart_required"] is False
     assert d.voice is not None and d.voice.duplex is DuplexMode.HALF
     mic = [p for t, p in events if t == "mic.state"]
-    assert mic and mic[-1] == {"duplex": "half_duplex", "attention": "always"}
+    assert mic and mic[-1] == {
+        "duplex": "half_duplex",
+        "attention": "always",
+        "wake_available": False,  # no wake_model configured in this fixture
+    }
 
 
 async def test_config_set_attention_hot_applies(tmp_path):

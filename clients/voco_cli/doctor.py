@@ -26,6 +26,7 @@ import json
 import os
 import shlex
 import shutil
+import threading
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -315,29 +316,67 @@ def device_rows(sd_module: Callable[[], object] = _sd) -> list[Row]:
     return rows
 
 
-def mic_row(sd_module: Callable[[], object] = _sd) -> Row:
+def mic_row(sd_module: Callable[[], object] = _sd, timeout_s: float = 5.0) -> Row:
     """Capture a beat of real audio. macOS denies the microphone with
     SILENCE (all zeros), not an error — so pure silence is the signal.
     Running this may trigger the OS permission prompt; doctor is the
-    right place for that to happen (the user is watching)."""
+    right place for that to happen (the user is watching). The capture
+    runs under a watchdog: a stalled PortAudio backend must hang a row,
+    not the whole diagnostic (doctor also runs headless/over ssh)."""
+    # Acquire the backend in THIS thread: a failed import/init is a clean
+    # row, and the stall path below needs the sd handle to try releasing a
+    # wedged stream — a value the capture thread cannot hand back once it
+    # is stuck inside sd.wait().
     try:
         sd = sd_module()
-        frames = int(16000 * MIC_PROBE_MS / 1000)
-        buf = sd.rec(  # type: ignore[attr-defined]
-            frames, samplerate=16000, channels=1, dtype="int16"
-        )
-        sd.wait()  # type: ignore[attr-defined]
-        if bool((buf == 0).all()):
-            return Row(
-                "warn",
-                "microphone",
-                f"{MIC_PROBE_MS}ms of PURE silence — mic permission denied"
-                " (System Settings → Privacy & Security → Microphone) or a"
-                " dead input device",
-            )
-        return Row("ok", "microphone", f"captured {MIC_PROBE_MS}ms of live audio")
-    except Exception as e:
+    except Exception as e:  # reported as the row, never raised
         return Row("warn", "microphone", f"cannot capture ({e})")
+
+    result: dict = {}
+
+    def capture() -> None:
+        try:
+            frames = int(16000 * MIC_PROBE_MS / 1000)
+            buf = sd.rec(  # type: ignore[attr-defined]
+                frames, samplerate=16000, channels=1, dtype="int16"
+            )
+            sd.wait()  # type: ignore[attr-defined]
+            result["silent"] = bool((buf == 0).all())
+        except Exception as e:  # reported as the row, never raised
+            result["error"] = e
+
+    t = threading.Thread(target=capture, daemon=True)  # abandonable on stall
+    t.start()
+    t.join(timeout_s)
+    if t.is_alive():
+        # The thread still owns an input stream. A truly wedged backend can
+        # hang stop() too, so the release runs on a SIDE thread — doctor
+        # reports and moves on rather than re-hanging on the cleanup.
+        def _abort() -> None:
+            try:
+                sd.stop()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+
+        threading.Thread(target=_abort, daemon=True).start()
+        return Row(
+            "warn",
+            "microphone",
+            f"capture stalled (> {timeout_s:.0f}s) — audio backend wedged?"
+            " The input stream was abandoned (stop attempted); later audio"
+            " rows may be unreliable. Try again, or check the input device",
+        )
+    if "error" in result:
+        return Row("warn", "microphone", f"cannot capture ({result['error']})")
+    if result.get("silent"):
+        return Row(
+            "warn",
+            "microphone",
+            f"{MIC_PROBE_MS}ms of PURE silence — mic permission denied"
+            " (System Settings → Privacy & Security → Microphone) or a"
+            " dead input device",
+        )
+    return Row("ok", "microphone", f"captured {MIC_PROBE_MS}ms of live audio")
 
 
 def input_monitoring_row(
