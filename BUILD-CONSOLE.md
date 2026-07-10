@@ -8,6 +8,14 @@ Design lineage for archaeology: index.html (round 1: bridge/paper/signal)
 → index2 (D·CONSOLE) → index3 (rejected restyle) → index4 (mk2 quiet)
 → **index5 (mk3 final)**.
 
+**Design anchor (captain, 2026-07-09): "reminds me of FruityLoops — I
+like that."** The DAW/instrument reading is the intended one and future
+UI work should lean INTO it, not sand it off: THE DECK as a channel
+rack of agent cards, fixed MIC patch points like a patch bay, the
+presence strip as a transport bar, dark hardware-panel surfaces with
+per-channel state lights. When a UI decision has a "software dashboard"
+option and a "music-production hardware" option, pick the hardware one.
+
 ## Tokens (the contract — from index5)
 
 - Surfaces: b0 `#131417` (work) · b1 `#17181c` (chrome) · b2 `#1c1e23`
