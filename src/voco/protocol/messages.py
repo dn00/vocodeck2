@@ -43,6 +43,7 @@ EVENT_TYPES = {
     "digest.updated",
     "pane.hint",
     "mic.state",
+    "mic.level",
     "daemon.error",
     # Workbench (SPEC-WORKBENCH §9). screen.updated stays alongside
     # page.updated for screen pages — exact legacy payload, kept.

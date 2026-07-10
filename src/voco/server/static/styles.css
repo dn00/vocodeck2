@@ -33,12 +33,14 @@
   --ok: #43b581;
   --warn: #d9a334;
   --bad: #d95c4f;
+  --lcd: #0b0c0e;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
     Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo,
     Consolas, monospace;
   --railw: 266px;
   --dockw: 340px;
+  --deckh: 148px;
 }
 
 * { box-sizing: border-box; min-width: 0; }
@@ -89,16 +91,7 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 .cmd-host.down { color: var(--bad); }
 .cap-more { flex: none; font-size: 10px; padding: 1px 7px; }
 @keyframes bar { 0%, 100% { height: 4px; } 50% { height: 13px; } }
-.cmd-prompt { flex: 1 1 auto; display: flex; align-items: center; gap: 9px;
-  padding: 0 12px; min-width: 0; }
-.cmd-gt { color: var(--sel); flex: none; font-weight: 700; }
-.cmd-input { flex: 1; min-width: 0; background: transparent; border: none;
-  color: var(--ink); font: 12px var(--mono); padding: 6px 0; }
-.cmd-input:focus { outline: none; }
-.cmd-input::placeholder { color: var(--ink3); }
-.cmd-input:disabled { opacity: .4; }
-.cmd-route { flex: none; color: var(--voice); }
-.cmd-route.none { color: var(--ink3); }
+.cmd-spacer { flex: 1 1 auto; }
 .eq { display: flex; align-items: flex-end; gap: 2px; height: 12px; flex: none; }
 .eq i { width: 2.5px; background: var(--sel); animation: bar 1s ease-in-out infinite; }
 .eq i:nth-child(2) { animation-delay: .2s; }
@@ -117,6 +110,8 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 .grip { cursor: col-resize; background: transparent; position: relative; }
 .grip:hover::after, .grip.dragging::after { content: ""; position: absolute;
   inset: 0 1.5px; background: var(--sel); opacity: .5; }
+.grip.h { cursor: row-resize; height: 5px; flex: none; }
+.grip.h:hover::after, .grip.h.dragging::after { inset: 1.5px 0; }
 .deck-body.offline { opacity: .55; pointer-events: none; }
 
 /* ---- fleet tree (mk3 M2): groups → work rows → agents + pages ------------------- */
@@ -185,6 +180,24 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 .picon { width: 13px; flex: none; text-align: center; font-size: 11px;
   color: var(--ink3); }
 .page-row.sel .picon { color: var(--sel); }
+
+/* ---- icons (index7 lever 1): one 14px currentColor SVG sheet ------------------- */
+svg.ic { width: 14px; height: 14px; flex: none; display: block; }
+.ic.s10 { width: 10px; height: 10px; }
+.ic.s9 { width: 9px; height: 9px; }
+/* the module icon IS the agent's state LED: mk3 semantics (green =
+   live signal, amber = stale/needs-you, red = blocked), word adjacent */
+.ic.mstate { color: var(--ink3); }
+.ic.mstate.working, .ic.mstate.listening { color: var(--ok); }
+.ic.mstate.blocked { color: var(--bad); }
+.ic.mstate.stale { color: var(--voice); }
+.ic.mstate.gone, .ic.mstate.none { opacity: .45; }
+.picon .ic { margin: 0 auto; }
+.agent-row > .ic { color: var(--ink3); }
+.agent-row.sel > .ic { color: var(--sel); }
+.glyph .ic { margin: 0 auto; }
+.work-row.sel .glyph { color: var(--sel); }
+.tab.on .g { color: var(--sel); }
 
 /* ---- state LEDs (square; word always adjacent; mk3 semantics: green =
    live signal, amber = stale/needs-you, red = blocked) --------------------------- */
@@ -265,14 +278,17 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
   display: flex; flex-direction: column; min-width: 0; min-height: 0;
   overflow: hidden; }
 .dock.offline { opacity: .55; pointer-events: none; }
+/* ledger tabs (index7 form): counts as step lights, not digits; the
+   active tab underlines at the BOTTOM (it points into the body below) */
 .ctabs { display: flex; align-items: center; flex: none;
-  font: 11px var(--mono); }
-.ctab { padding: 6px 11px; color: var(--ink2); cursor: pointer; }
+  font: 12px var(--mono); border-bottom: 1px solid var(--edge); }
+.ctab { display: flex; align-items: center; gap: 7px;
+  padding: 8px 14px; color: var(--ink2); cursor: pointer; }
 .ctab:hover { color: var(--ink); }
-.ctab.on { background: var(--l0); color: var(--ink);
-  box-shadow: inset 0 2px 0 var(--sel); }
-.ctab .n { color: var(--ink3); }
-.ctab .n.hot { color: var(--voice); }
+.ctab.on { color: var(--ink); box-shadow: inset 0 -2px 0 var(--sel); }
+.lights { display: flex; gap: 2px; }
+.lights i { width: 5px; height: 5px; background: var(--l3); }
+.lights i.on { background: var(--voice); }
 .cfoot { flex: none; border-top: 1px solid var(--edge);
   padding: 6px 14px; font: 10.5px var(--mono); color: var(--ink3);
   display: flex; gap: 14px; align-items: baseline; }
@@ -355,18 +371,84 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 .deckrow { border-top: 1px solid var(--edge2); background: var(--l1);
   display: flex; flex-direction: column; min-height: 0; flex: none; }
 .deckrow.offline { opacity: .55; pointer-events: none; }
-.dhead { display: flex; align-items: center; gap: 14px;
-  padding: 5px 12px 0; flex: none; }
-.dhead .tgl { margin-left: auto; letter-spacing: 0; cursor: pointer;
+/* the deck header IS the master strip (index7): input + transport +
+   lock/duplex/counts. The input flexes; everything else holds width. */
+.dhead { display: flex; align-items: center; gap: 10px;
+  padding: 0 12px; height: 38px; flex: none; }
+.dhead .tgl { letter-spacing: 0; cursor: pointer;
   color: var(--ink3); border: 1px solid var(--edge2); padding: 0 7px;
   background: var(--l2); font: 11px var(--mono); }
 .dhead .tgl:hover { color: var(--ink); }
+/* LCD wells (index7 lever 4): inset recess, lit mono digits, flat */
+.lcd { background: var(--lcd); border: 1px solid var(--edge);
+  padding: 1px 8px; font: 11px var(--mono); letter-spacing: .1em;
+  color: var(--voice); white-space: nowrap; flex: none; }
+.lcd.grn { color: var(--ok); }
+.lcd.dim { color: var(--ink3); }
+.dinput { flex: 1 1 auto; min-width: 110px; display: flex;
+  align-items: center; gap: 9px; background: var(--lcd);
+  border: 1px solid var(--edge); padding: 0 10px; height: 26px; }
+.dinput .gt { color: var(--sel); flex: none; font-weight: 700;
+  font: 12px var(--mono); }
+.dinput input { flex: 1; min-width: 0; background: transparent;
+  border: none; color: var(--ink); font: 12px var(--mono); }
+.dinput input:focus { outline: none; }
+.dinput input::placeholder { color: var(--ink3); }
+.dinput input:disabled { opacity: .4; }
+.droute { margin-left: auto; flex: none; font: 10px var(--mono);
+  color: var(--voice); letter-spacing: .08em; white-space: nowrap; }
+.droute.none { color: var(--ink3); }
+.dtransport { display: flex; align-items: center; gap: 6px; flex: none; }
+.tbtn { display: flex; align-items: center; gap: 6px;
+  font: 11px var(--mono); color: var(--ink2); background: var(--l2);
+  border: 1px solid var(--edge2); padding: 3px 10px; cursor: pointer;
+  user-select: none; flex: none; }
+.tbtn:hover { color: var(--ink); background: var(--l3); }
+.tbtn.rec .ic { color: var(--voice); }
+.tbtn.rec.held { background: var(--voice); color: var(--l0);
+  border-color: var(--voice); font-weight: 700; }
+.tbtn.rec.held .ic { color: var(--l0); }
+.tbtn.stop .ic { color: var(--bad); }
+.tbtn.none { color: var(--ink3); cursor: default; }
+.tbtn.none:hover { color: var(--ink3); background: var(--l2); }
+.tbtn.none .ic { color: var(--ink3); }
+/* the 4-position attention switch (direct-select, no cycle) */
+.sw { display: flex; border: 1px solid var(--edge2); background: var(--l2);
+  flex: none; }
+.sw i { font: 9px var(--mono); font-style: normal; letter-spacing: .08em;
+  color: var(--ink3); padding: 4px 7px; cursor: pointer;
+  border-right: 1px solid var(--edge); }
+.sw i:last-child { border-right: none; }
+.sw i:hover { color: var(--ink); }
+.sw i.on { background: var(--voice); color: var(--l0); font-weight: 700; }
+/* disabled segment: dim but LEGIBLE — the label must stay readable so
+   the title can explain why it is unavailable */
+.sw i.off { color: var(--ink3); opacity: .35; cursor: default; }
+.sw i.off:hover { color: var(--ink3); }
+.sw.none { opacity: .45; }
+.sw.none i { cursor: default; }
+.sw.none i:hover { color: var(--ink3); }
+/* fixed width: the label alternates between "locked" and "follows
+   selection" — the row must not reflow on toggle */
+.dhead .lockbtn { display: flex; align-items: center; gap: 5px;
+  flex: none; min-width: 132px; justify-content: center; }
+.dvx { font: 10px var(--mono); border: 1px solid var(--edge2);
+  background: var(--l2); color: var(--ink2); padding: 2px 8px;
+  cursor: pointer; user-select: none; flex: none; }
+.dvx:hover { color: var(--ink); }
+/* keyboard operability: the master strip is reachable without a mouse */
+.sw i:focus-visible, .tbtn:focus-visible, .lockbtn:focus-visible,
+.dvx:focus-visible, .dhead .tgl:focus-visible {
+  outline: 1px solid var(--sel); outline-offset: -1px; }
 .cards { display: flex; gap: 8px; padding: 6px 12px 10px;
   overflow-x: auto; align-items: stretch; }
+/* resizable deck (grip above the header): fixed cards height, cards
+   stretch to fill; minimized chips keep their natural height */
+.deckrow:not(.min) .cards { height: var(--deckh); }
 .deckrow.min .cards { padding: 5px 12px 7px; align-items: center; }
-.card { width: 232px; flex: none; background: var(--l2);
-  border: 1px solid var(--edge); padding: 8px 10px; cursor: pointer;
-  display: flex; flex-direction: column; gap: 6px; min-height: 96px; }
+.card { width: 236px; flex: none; background: var(--l2);
+  border: 1px solid var(--edge); cursor: pointer;
+  display: flex; flex-direction: column; min-height: 128px; }
 .card:hover { border-color: var(--edge2); }
 /* sel = viewed (steel, matches the tree); live = mic holder (amber
    declares later and wins the border when both apply) */
@@ -374,60 +456,74 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
   background: color-mix(in srgb, var(--sel) 10%, var(--l2)); }
 .card.live { border-color: var(--voice);
   box-shadow: inset 0 2px 0 var(--voice); }
-.c-top { display: flex; align-items: center; gap: 7px;
-  font: 12px var(--mono); }
-.c-top .nm { color: var(--ink); font-weight: 700; }
-.c-top .st { margin-left: auto; font-size: 10px; color: var(--ink3);
+/* the channel-button plate: raised header strip, like an FL channel */
+.plate { display: flex; align-items: center; gap: 8px;
+  background: var(--l3); border-bottom: 1px solid var(--edge);
+  padding: 6px 10px; font: 12px var(--mono); }
+.plate .nm { color: var(--ink); font-weight: 700; }
+.plate .st { margin-left: auto; font-size: 10px; color: var(--ink3);
   flex: none; }
-.c-top .st.w { color: var(--ok); }
+.plate .st.w { color: var(--ok); }
+/* jump to the agent's overview (card body click stays = view/route) */
+.pbtn { background: none; border: none; padding: 0; margin: 0;
+  cursor: pointer; color: var(--ink3); display: flex; flex: none; }
+.pbtn:hover { color: var(--sel); }
+.pbtn .ic { width: 12px; height: 12px; }
+.cardbody { display: flex; flex-direction: column; gap: 6px;
+  padding: 7px 10px 9px; flex: 1; }
 .c-mid { display: flex; align-items: center; gap: 8px; }
 .patch { font: 10px var(--mono); border: 1px solid var(--edge2);
   padding: 2px 8px; cursor: pointer; color: var(--ink3); flex: none; }
 .patch:hover { color: var(--ink); }
 .patch.on { background: var(--voice); color: var(--l0);
   border-color: var(--voice); font-weight: 700; }
-.meter { flex: 1; height: 7px; background: var(--l0); display: flex;
-  gap: 1px; padding: 1px; }
-.meter i { width: 4px; background: var(--l3); }
+/* segment meter in an LCD recess (index7 lever 2). Lit ONLY under
+   .live — a real hearing/speaking state; never a faked level. */
+.meter { flex: 1; height: 9px; background: var(--lcd);
+  border: 1px solid var(--edge); display: flex; gap: 1px; padding: 1px; }
+.meter i { flex: 1; background: var(--l3); }
 .meter.live i { background: var(--ok);
   animation: meterpulse 1s ease-in-out infinite; }
 .meter.live i.a { background: var(--voice); }
-.meter.live i:nth-child(2) { animation-delay: .12s; }
-.meter.live i:nth-child(3) { animation-delay: .24s; }
-.meter.live i:nth-child(4) { animation-delay: .36s; }
-.meter.live i:nth-child(5) { animation-delay: .48s; }
-.meter.live i:nth-child(6) { animation-delay: .6s; }
+.meter.live i:nth-child(3n+2) { animation-delay: .12s; }
+.meter.live i:nth-child(3n) { animation-delay: .24s; }
 @keyframes meterpulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+/* driven mode: real mic.level data — pulse off, segments show SIGNAL */
+.meter.driven i { animation: none; background: var(--l3); }
+.meter i.lit { background: var(--ok); }
+.meter i.lit.hi { background: var(--voice); }
+.meter i.peak { background: var(--ink2); }
+/* the say-tail is the most informative element on a card — it gets the
+   room (3 lines), chrome does not */
 .c-cap { font: 10.5px/1.4 var(--mono); color: var(--ink2);
   border-left: 2px solid var(--edge2); padding-left: 6px;
-  display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+  display: flex; gap: 6px; align-items: baseline; min-width: 0; flex: 1; }
 .c-cap.live { border-left-color: var(--voice); }
-.c-cap span:first-child { overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; }
+.c-cap.none { color: var(--ink3); border-left-color: var(--edge); }
+.c-cap span:first-child { overflow: hidden; display: -webkit-box;
+  -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  white-space: normal; }
+/* the workspace path outranks the queue: the path never clips — the
+   queue cluster is the one that gives way when space runs out */
 .c-meta { font: 10px var(--mono); color: var(--ink3); display: flex;
-  gap: 10px; margin-top: auto; }
+  align-items: center; gap: 8px; margin-top: auto; white-space: nowrap; }
 .c-meta .q { color: var(--voice); }
-/* the master card */
-.card.master { width: 196px; background: var(--l1); border-style: dashed; }
-.m-row { display: flex; justify-content: space-between;
-  font: 10.5px var(--mono); color: var(--ink3); }
-.m-row .v { color: var(--ink2); }
-.m-row .v.hot { color: var(--voice); }
-.m-row .v.cyc { cursor: pointer; }
-.m-row .v.cyc:hover { color: var(--ink); }
+.c-meta .path { margin-left: auto; flex: none; }
+.qgrp { display: flex; gap: 5px; align-items: center; overflow: hidden;
+  min-width: 0; }
+/* the queue as step cells (index7 lever 5) — 4 cells max; the amber
+   count carries the overflow truth */
+.steps { display: flex; gap: 2px; align-items: center; flex: none; }
+.steps i { width: 7px; height: 7px; background: var(--lcd);
+  border: 1px solid var(--edge); }
+.steps i.on { background: var(--voice); border-color: var(--voice); }
 .lockbtn { font: 10px var(--mono); border: 1px solid var(--edge2);
   background: var(--l2); color: var(--ink2); padding: 2px 8px;
   cursor: pointer; user-select: none; }
 .lockbtn:hover { color: var(--ink); }
 .lockbtn.on { background: var(--voice); color: var(--l0);
   border-color: var(--voice); font-weight: 700; }
-.hold { font: 10px var(--mono); border: 1px solid var(--edge2);
-  background: var(--l2); color: var(--ink2); text-align: center;
-  padding: 4px 0; cursor: pointer; user-select: none; }
-.hold:hover { color: var(--ink); }
-.hold.held { background: var(--voice); color: var(--l0);
-  border-color: var(--voice); font-weight: 700; }
-.hold.none { color: var(--ink3); cursor: default; }
+.lockbtn.on .ic { color: var(--l0); }
 /* minimized: chip strip */
 .chipcard { display: flex; align-items: center; gap: 7px;
   background: var(--l2); border: 1px solid var(--edge);
@@ -450,10 +546,15 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
   overflow: hidden; white-space: nowrap; }
 .statusline .spacer { flex: 1; }
 .statusline b { color: var(--ink2); font-weight: 400; }
-.status-mic { color: var(--voice); }
-.status-mic.none { color: var(--ink3); }
-.conn-cell.on { color: var(--ok); }
-.conn-cell.off { color: var(--bad); }
+.status-mic { cursor: pointer; }
+/* the master VU: an LCD recess fed by real mic.level events only */
+.vu { width: 120px; height: 10px; background: var(--lcd);
+  border: 1px solid var(--edge); display: flex; gap: 1px; padding: 1px;
+  flex: none; }
+.vu i { flex: 1; background: var(--l3); }
+.vu i.lit { background: var(--ok); }
+.vu i.lit.hi { background: var(--voice); }
+.vu i.peak { background: var(--ink2); }
 
 /* ---- toasts: errors persist, successes fade ------------------------------------ */
 .toast-msg { position: fixed; bottom: 34px; right: 14px;

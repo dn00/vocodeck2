@@ -662,3 +662,28 @@ async def test_wake_model_set_but_loader_absent_names_the_build(tmp_path):
         assert "disabled in this build" in errs[0]  # names the real miss
     finally:
         voice.stop()
+
+
+# ---- mic.level (index7 honest meters) ------------------------------------------
+
+
+def test_mic_level_is_throttled_and_settles_to_one_zero(tmp_path):
+    """The deck meter reads SIGNAL: ~10Hz while the level moves, one
+    trailing zero at silence, then nothing — never an idle event storm."""
+    voice, _host, events = make_loop(tmp_path)
+    loud = np.full(512, 6000, dtype=np.int16)
+    voice._level_ts = 0.0
+    voice._emit_mic_level(loud)
+    levels = [p["level"] for t, p in events if t == "mic.level"]
+    assert levels and 0.2 < levels[-1] <= 1.0
+    n_before = len(levels)
+    voice._emit_mic_level(loud)  # within the 100ms window: throttled
+    assert len([1 for t, _p in events if t == "mic.level"]) == n_before
+    quiet = np.zeros(512, dtype=np.int16)
+    voice._level_ts = 0.0
+    voice._emit_mic_level(quiet)
+    voice._level_ts = 0.0
+    voice._emit_mic_level(quiet)  # silence repeats are suppressed
+    levels = [p["level"] for t, p in events if t == "mic.level"]
+    assert levels[-1] == 0.0
+    assert levels.count(0.0) == 1

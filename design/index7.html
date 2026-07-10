@@ -1,0 +1,416 @@
+<!doctype html>
+<!-- index7 — THE FL PUSH (proposal mockup, 2026-07-09).
+     Lineage: index5 (mk3 final) → index6 (mk4 THE DECK) → THIS.
+     Same tokens, same layout, same data as the live deck. What changed,
+     per the FL-audit's five levers:
+       1. ICONS — one inline-SVG set (14px, currentColor) replaces the
+          unicode glyph grab-bag; per-channel module icons on cards.
+       2. HONEST METERS — segmented level meters with peak-hold that
+          read signal-driven (mock walk here; real bus events in prod).
+       3. TRANSPORT CLUSTER — ● talk / ■ stop / attention as a 4-pos
+          switch / route as a pattern display, one cell in the bar.
+       4. LCD WELLS — inset display recesses for clock, counts, route.
+       5. STEP-GRID QUEUES — queue N as FL step cells on each card.
+     Plus: master card = solid raised MASTER plate (dashed read as
+     "empty slot"); channel name rows on raised channel-button plates.
+     Token contract intact: no radius, no shadows, hairline budget,
+     amber=mic/needs-you, green/red=signal, steel=selection.
+
+     === DESIGN DIRECTION (for the next agent bringing this to production) ===
+
+     KEY LAYOUT DECISIONS BAKED INTO THIS MOCKUP:
+       - The top bar is the ADE (agent dev environment) chrome. It holds
+         only the app identity cell (voco + connection LED + address) and
+         the settings gear. Everything else was stripped out.
+       - The DECK HEADER ROW ("DECK · 2") now holds ALL voice/input UI:
+         the text input bar (LCD-recessed), the transport cluster
+         (talk/stop/attention switch/route LCD), and the collapse toggle.
+         Rationale: audio belongs on the instrument (the deck), not the
+         IDE shell. The deck header survives minimize, so transport is
+         always reachable even when cards are collapsed.
+       - Settings (gear ⚙) stays in the top ADE bar — it's app-level,
+         not deck-level.
+       - Queue indicator is compacted (4 cells max + amber count) and
+         flex-shrinks BEFORE the workspace path. The path (cwd/branch)
+         must always be fully visible — it's more important than queue.
+       - Every agent card (active mic holder AND inactive) has the ⊞
+         overview button in its plate, right of the state text.
+       - CONSOLE not MASTER. No clock in the card. Single clock stays
+         bottom-right in the status line.
+       - Say-tail gets 3 lines (the most informative element on a card).
+
+     WHAT THIS MOCKUP DOES NOT COVER (production TODO):
+       - Real event-driven meters (the mock uses Math.random walks).
+       - Deck minimize/expand animation.
+       - Overview button click → route to that agent's overview page.
+       - Responsive breakpoints for the deck header when very narrow.
+       - Keyboard shortcut overlays (PTT hold, mute toggle).
+       - The collapse toggle (—) should fold cards but keep the header
+         row (with input + transport) visible.
+  -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>voco · deck — index7 (FL push)</title>
+<style>
+:root {
+  --l0:#131417; --l1:#17181c; --l2:#1c1e23; --l3:#24262c; --hov:#20232a;
+  --edge:#26282e; --edge2:#33363e;
+  --ink:#d6d9de; --ink2:#9aa0a9; --ink3:#5f646d;
+  --voice:#d9a334; --sel:#6ea3d8; --ok:#43b581; --bad:#d95c4f;
+  --lcd:#0b0c0e;
+  --mono:ui-monospace,"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box;min-width:0}
+html,body{height:100%;margin:0}
+body{font:13px/1.5 var(--sans);background:var(--l0);color:var(--ink);overflow:hidden}
+#app{height:100vh;display:flex;flex-direction:column}
+.caps{font:10px var(--mono);color:var(--ink3);letter-spacing:.12em}
+.mono{font-family:var(--mono);font-size:12px}
+svg.ic{width:14px;height:14px;flex:none;display:block}
+.led{width:6px;height:6px;flex:none;background:var(--l3)}
+.led.ok{background:var(--ok)} .led.warm{background:var(--voice)} .led.bad{background:var(--bad)}
+
+/* LCD wells — lever 4: inset recess, lit mono digits, flat (no glow) */
+.lcd{background:var(--lcd);border:1px solid var(--edge);padding:1px 8px;
+  font:11px var(--mono);letter-spacing:.1em;color:var(--voice);white-space:nowrap}
+.lcd.grn{color:var(--ok)} .lcd.dim{color:var(--ink3)}
+
+/* ---- command bar + transport (lever 3) ---- */
+.cmd{height:36px;flex:none;display:flex;align-items:stretch;background:var(--l1);
+  border-bottom:1px solid var(--edge);font:11px var(--mono)}
+.cell{display:flex;align-items:center;gap:8px;padding:0 12px;border-right:1px solid var(--edge);color:var(--ink2)}
+.cmd-app{color:var(--ink);font-weight:700}
+/* .prompt and .transport removed — input + controls now live in .dhead (the deck header) */
+.tbtn{display:flex;align-items:center;gap:6px;font:11px var(--mono);color:var(--ink2);
+  background:var(--l2);border:1px solid var(--edge2);padding:3px 10px;cursor:pointer;user-select:none}
+.tbtn:hover{color:var(--ink);background:var(--l3)}
+.tbtn .ic{width:10px;height:10px}
+.tbtn.rec .ic{color:var(--voice)}
+.tbtn.rec.held{background:var(--voice);color:var(--l0);border-color:var(--voice);font-weight:700}
+.tbtn.rec.held .ic{color:var(--l0)}
+.tbtn.stop .ic{color:var(--bad)}
+/* the 4-position attention switch */
+.sw{display:flex;border:1px solid var(--edge2);background:var(--l2)}
+.sw i{font:9px var(--mono);font-style:normal;letter-spacing:.08em;color:var(--ink3);
+  padding:4px 7px;cursor:pointer;border-right:1px solid var(--edge)}
+.sw i:last-child{border-right:none}
+.sw i:hover{color:var(--ink)}
+.sw i.on{background:var(--voice);color:var(--l0);font-weight:700}
+.gear{background:none;border:1px solid var(--edge2);color:var(--ink2);padding:2px 8px;cursor:pointer;font:12px var(--mono)}
+
+/* ---- body grid (mk4: tree | canvas | ledger) ---- */
+.body{flex:1;display:grid;min-height:0;grid-template-columns:266px 1fr 340px}
+.tree{background:var(--l1);border-right:1px solid var(--edge);padding:10px 0;overflow-y:auto}
+.zone-h{display:flex;align-items:center;gap:7px;padding:2px 12px 6px}
+.trow{display:flex;align-items:center;gap:7px;padding:2px 12px;font:12px var(--mono);
+  color:var(--ink2);cursor:pointer;white-space:nowrap}
+.trow:hover{background:var(--hov)}
+.trow .ic{color:var(--ink3)}
+.trow.sel{background:#3d63804d;color:var(--ink)}
+.trow.sel .ic{color:var(--sel)}
+.trow .meta{margin-left:auto;font-size:10.5px;color:var(--ink3);display:flex;gap:8px}
+.meta .pr{color:var(--sel)} .meta .flag{color:var(--voice)} .meta .up{color:var(--ok)}
+.grp{color:var(--ink);font-weight:700}
+.ind1{padding-left:26px}.ind2{padding-left:40px}
+.canvas{background:var(--l0);display:flex;flex-direction:column;min-width:0}
+.tabs{display:flex;background:var(--l1);border-bottom:1px solid var(--edge);flex:none}
+.tab{display:flex;align-items:center;gap:7px;font:11px var(--mono);color:var(--ink2);
+  padding:7px 13px;border-right:1px solid var(--edge);cursor:pointer}
+.tab .ic{color:var(--ink3)}
+.tab.on{background:var(--l0);color:var(--ink);box-shadow:inset 0 2px 0 var(--sel)}
+.tab.on .ic{color:var(--sel)}
+.pgbar{display:flex;align-items:center;gap:14px;padding:6px 14px;font:11px var(--mono);
+  color:var(--ink3);border-bottom:1px solid var(--edge);flex:none}
+.pgbar b{color:var(--ink2);font-weight:400}
+.page{padding:26px 34px;overflow:auto;font:13.5px/1.65 var(--sans)}
+.ovh{display:flex;align-items:center;gap:10px;font:17px var(--sans);font-weight:700}
+.ovh .holds{font:11px var(--mono);color:var(--voice);font-weight:400}
+.ovmeta{display:flex;gap:26px;font:12px var(--mono);color:var(--ink3);margin:10px 0 18px}
+.ovmeta b{color:var(--ink2);font-weight:400}
+.doc{background:var(--l1);border:1px solid var(--edge);padding:18px 22px;max-width:640px}
+.doc h3{margin:0 0 10px;font-size:14px}
+.doc li{margin:3px 0;color:var(--ink2)}
+.doc code{font:12px var(--mono);background:var(--l2);padding:1px 6px}
+.ledger{background:var(--l1);border-left:1px solid var(--edge);display:flex;flex-direction:column}
+.ltabs{display:flex;border-bottom:1px solid var(--edge);flex:none}
+.ltab{display:flex;align-items:center;gap:7px;font:12px var(--mono);color:var(--ink2);
+  padding:8px 14px;cursor:pointer}
+.ltab.on{color:var(--ink);box-shadow:inset 0 -2px 0 var(--sel)}
+/* lever 5 (ledger form): counts as step lights, not digits */
+.lights{display:flex;gap:2px}
+.lights i{width:5px;height:5px;background:var(--l3)}
+.lights i.on{background:var(--voice)}
+.lbody{flex:1;display:flex;align-items:center;justify-content:center;
+  color:var(--ink3);font:12px var(--sans);padding:20px;text-align:center}
+.lfoot{border-top:1px solid var(--edge);padding:6px 12px;display:flex;
+  justify-content:space-between;font:11px var(--mono);color:var(--ink3)}
+
+/* ---- THE DECK (levers 1/2/5/6) ---- */
+.deckrow{border-top:1px solid var(--edge2);background:var(--l1);flex:none}
+.dhead{display:flex;align-items:center;gap:10px;padding:0 12px;height:38px}
+.dhead .tgl{color:var(--ink3);border:1px solid var(--edge2);
+  padding:0 7px;background:var(--l2);font:11px var(--mono);cursor:pointer}
+.dhead .dinput{flex:1;display:flex;align-items:center;gap:9px;
+  background:var(--lcd);border:1px solid var(--edge);padding:0 10px;height:26px}
+.dhead .dinput .gt{color:var(--sel);font-weight:700;font:12px var(--mono)}
+.dhead .dinput input{flex:1;background:transparent;border:none;color:var(--ink);font:12px var(--mono)}
+.dhead .dinput input::placeholder{color:var(--ink3)}
+.dhead .dinput input:focus{outline:none}
+.dhead .dtransport{display:flex;align-items:center;gap:6px}
+.cards{display:flex;gap:8px;padding:6px 12px 10px;overflow-x:auto;align-items:stretch}
+.card{width:236px;flex:none;background:var(--l2);border:1px solid var(--edge);
+  cursor:pointer;display:flex;flex-direction:column;min-height:128px}
+.card:hover{border-color:var(--edge2)}
+.card.sel{border-color:var(--sel);background:color-mix(in srgb,var(--sel) 10%,var(--l2))}
+.card.live{border-color:var(--voice);box-shadow:inset 0 2px 0 var(--voice)}
+/* the channel-button plate: raised header strip, like an FL channel */
+.plate{display:flex;align-items:center;gap:8px;background:var(--l3);
+  border-bottom:1px solid var(--edge);padding:6px 10px;font:12px var(--mono)}
+.plate .ic{color:var(--ink2)}
+.card.live .plate .ic{color:var(--voice)}
+.plate .nm{color:var(--ink);font-weight:700}
+.plate .st{margin-left:auto;font-size:10px;color:var(--ink3)}
+.plate .st.w{color:var(--ok)}
+/* jump to the agent's overview page (card body click stays = view/route) */
+.pbtn{background:none;border:none;padding:0;margin:0;cursor:pointer;
+  color:var(--ink3);display:flex;flex:none}
+.pbtn:hover{color:var(--sel)}
+.cbody{display:flex;flex-direction:column;gap:6px;padding:7px 10px 9px;flex:1}
+.crow{display:flex;align-items:center;gap:8px}
+.patch{font:10px var(--mono);border:1px solid var(--edge2);padding:2px 8px;
+  color:var(--ink3);cursor:pointer;flex:none}
+.patch.on{background:var(--voice);color:var(--l0);border-color:var(--voice);font-weight:700}
+/* lever 2: a segment meter that reads signal-driven (+ peak hold) */
+.meter{flex:1;height:9px;background:var(--lcd);border:1px solid var(--edge);
+  display:flex;gap:1px;padding:1px}
+.meter i{flex:1;background:var(--l3)}
+.meter i.lit{background:var(--ok)}
+.meter i.lit.hi{background:var(--voice)}
+.meter i.peak{background:var(--ink2)}
+/* the say-tail is the most informative element on a card — it gets the
+   room (3 lines, like the shipped deck), chrome does not */
+.cap{font:10.5px/1.4 var(--mono);color:var(--ink2);border-left:2px solid var(--edge2);
+  padding-left:6px;display:-webkit-box;-webkit-line-clamp:3;
+  -webkit-box-orient:vertical;overflow:hidden;flex:1}
+.card.live .cap{border-left-color:var(--voice)}
+.cmeta{display:flex;align-items:center;gap:8px;font:10px var(--mono);color:var(--ink3);margin-top:auto;white-space:nowrap}
+/* the workspace path outranks the queue: the path never clips — the
+   queue cluster is the one that gives way when space runs out */
+.cmeta .path{margin-left:auto;flex:none}
+.cmeta .qgrp{display:flex;gap:5px;align-items:center;overflow:hidden;min-width:0}
+/* lever 5: the queue as step cells — compact, 4 cells max */
+.steps{display:flex;gap:2px;align-items:center;flex:none}
+.steps i{width:7px;height:7px;background:var(--lcd);border:1px solid var(--edge)}
+.steps i.on{background:var(--voice);border-color:var(--voice)}
+/* master: solid raised plate, not a dashed "empty slot" */
+.card.master{width:200px;background:var(--l1)}
+.card.master .plate{background:var(--l2)}
+.card.master .plate .nm{font-weight:400;letter-spacing:.12em;font-size:10px;color:var(--ink2)}
+.mrow{display:flex;justify-content:space-between;align-items:center;
+  font:10.5px var(--mono);color:var(--ink3)}
+.mrow .v{color:var(--ink2)} .mrow .v.hot{color:var(--voice)}
+.lockbtn{font:10px var(--mono);border:1px solid var(--edge2);background:var(--l2);
+  color:var(--ink2);padding:2px 8px;cursor:pointer;user-select:none}
+.lockbtn.on{background:var(--voice);color:var(--l0);border-color:var(--voice);font-weight:700}
+
+/* ---- status line: LCDs + master VU ---- */
+.status{height:26px;flex:none;display:flex;align-items:center;gap:14px;
+  padding:0 12px;background:var(--l1);border-top:1px solid var(--edge);
+  font:11px var(--mono);color:var(--ink2)}
+.status .right{margin-left:auto;display:flex;gap:10px;align-items:center}
+.vu{width:120px;height:10px;background:var(--lcd);border:1px solid var(--edge);
+  display:flex;gap:1px;padding:1px}
+.vu i{flex:1;background:var(--l3)}
+.vu i.lit{background:var(--ok)} .vu i.lit.hi{background:var(--voice)}
+@media (prefers-reduced-motion: reduce){ .anim{animation:none} }
+</style>
+</head>
+<body>
+<!-- the icon set — lever 1: one 14px currentColor sheet -->
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-module" viewBox="0 0 14 14"><rect x="2.5" y="1.5" width="9" height="11" fill="none" stroke="currentColor"/><rect x="5" y="4" width="4" height="3" fill="currentColor"/><path d="M5 9.5h4M5 11h2.5" stroke="currentColor"/><path d="M0.5 4h2M0.5 7h2M0.5 10h2M11.5 4h2M11.5 7h2M11.5 10h2" stroke="currentColor"/></symbol>
+  <symbol id="i-overview" viewBox="0 0 14 14"><rect x="1.5" y="1.5" width="4.5" height="4.5" fill="currentColor"/><rect x="8" y="1.5" width="4.5" height="4.5" fill="none" stroke="currentColor"/><rect x="1.5" y="8" width="4.5" height="4.5" fill="none" stroke="currentColor"/><rect x="8" y="8" width="4.5" height="4.5" fill="none" stroke="currentColor"/></symbol>
+  <symbol id="i-screen" viewBox="0 0 14 14"><rect x="1.5" y="2.5" width="11" height="8" fill="none" stroke="currentColor"/><path d="M4 12.5h6" stroke="currentColor"/><path d="M3.5 5h7M3.5 7h4" stroke="currentColor"/></symbol>
+  <symbol id="i-diff" viewBox="0 0 14 14"><path d="M4 3.5h6M7 1v5" stroke="currentColor"/><path d="M4 10.5h6" stroke="currentColor"/></symbol>
+  <symbol id="i-files" viewBox="0 0 14 14"><path d="M2 2.5h4l1.5 2H12v7H2z" fill="none" stroke="currentColor"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 14 14"><path d="M3 2.5h8M3 5h8M3 7.5h8M3 10h5" stroke="currentColor"/></symbol>
+  <symbol id="i-term" viewBox="0 0 14 14"><path d="M2.5 3l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 11h4" stroke="currentColor" stroke-width="1.5"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 14 14"><circle cx="3.5" cy="3" r="1.6" fill="none" stroke="currentColor"/><circle cx="3.5" cy="11" r="1.6" fill="none" stroke="currentColor"/><circle cx="10.5" cy="5" r="1.6" fill="none" stroke="currentColor"/><path d="M3.5 4.6v4.8M10.5 6.6c0 2.5-4 2-5.5 3" fill="none" stroke="currentColor"/></symbol>
+  <symbol id="i-rec" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.6" fill="currentColor"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7" fill="currentColor"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 14 14"><rect x="3" y="6" width="8" height="6" fill="none" stroke="currentColor"/><path d="M4.7 6V4.3a2.3 2.3 0 014.6 0V6" fill="none" stroke="currentColor"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 14 14"><rect x="5.2" y="1.5" width="3.6" height="7" fill="none" stroke="currentColor"/><path d="M3 7.5a4 4 0 008 0M7 11.5v1.5" fill="none" stroke="currentColor"/></symbol>
+</svg>
+
+<div id="app">
+  <!-- command bar: ADE chrome only — voice/input live on the deck now -->
+  <div class="cmd">
+    <div class="cell"><span class="cmd-app">voco</span><span class="led ok"></span><span class="lcd grn">127.0.0.1:7913</span></div>
+    <div class="cell" style="flex:1;border-right:none"></div>
+    <div class="cell" style="border-right:none"><button class="gear">⚙</button></div>
+  </div>
+
+  <div class="body">
+    <!-- fleet tree with the icon set -->
+    <div class="tree">
+      <div class="zone-h"><span class="caps">FLEET</span></div>
+      <div class="trow grp">▾ voco-demo-fix-pty<span class="meta">+rev +agt</span></div>
+      <div class="trow ind1"><svg class="ic"><use href="#i-branch"/></svg>fix-pty<span class="meta">no agent</span></div>
+      <div class="trow ind1"><svg class="ic"><use href="#i-branch"/></svg>workbench…<span class="meta"><span>#3</span><span class="pr">pr#7</span><span class="flag">1⚑</span><span class="flag">?1</span></span></div>
+      <div class="trow ind2"><svg class="ic"><use href="#i-overview"/></svg>overview</div>
+      <div class="trow ind2"><svg class="ic"><use href="#i-files"/></svg>files</div>
+      <div class="trow ind2 sel"><svg class="ic"><use href="#i-diff"/></svg>branch:main<span class="meta">r2</span></div>
+      <div class="trow ind2"><svg class="ic"><use href="#i-screen"/></svg>strip status</div>
+      <div class="trow ind2"><svg class="ic"><use href="#i-doc"/></svg>notes</div>
+      <div class="trow ind2"><svg class="ic"><use href="#i-term"/></svg>run tests</div>
+      <div class="zone-h" style="margin-top:12px"><span class="caps">SESSIONS</span></div>
+      <div class="trow"><span class="led warm"></span><svg class="ic"><use href="#i-module"/></svg>Freya<span class="meta"><span class="flag">MIC · q2</span><span>working</span></span></div>
+      <div class="trow"><span class="led"></span><svg class="ic"><use href="#i-module"/></svg>Iris<span class="meta">idle</span></div>
+      <div class="trow" style="margin-top:12px;color:var(--ink3)">connect →</div>
+    </div>
+
+    <!-- canvas: icon tabs + a familiar overview -->
+    <div class="canvas">
+      <div class="tabs">
+        <div class="tab on"><svg class="ic"><use href="#i-diff"/></svg>branch:main@r2 ✕</div>
+        <div class="tab"><svg class="ic"><use href="#i-screen"/></svg>strip status</div>
+        <div class="tab"><svg class="ic"><use href="#i-files"/></svg>files</div>
+        <div class="tab">+</div>
+      </div>
+      <div class="pgbar"><b>voco-demo/workbench…</b> · 1 file changed since r1 · <b>3 files · <span style="color:var(--ok)">+18</span> <span style="color:var(--bad)">−4</span></b></div>
+      <div class="page">
+        <div class="ovh"><span class="led warm"></span>Freya (MacBook-Pro:voco-demo) <span class="holds">⚡ holds the mic</span></div>
+        <div class="ovmeta"><span>state <b>working</b></span><span>queued <b>2</b></span><span>capabilities <b>say listen review</b></span></div>
+        <div class="doc">
+          <h3>strip status</h3>
+          <ul>
+            <li>orb states: <b style="color:var(--ink)">done</b></li>
+            <li>captions: done</li>
+            <li>tests: 3 green</li>
+          </ul>
+          next: wire <code>speech.sentence</code> karaoke
+        </div>
+      </div>
+    </div>
+
+    <!-- ledger: tab counts as step lights -->
+    <div class="ledger">
+      <div class="ltabs">
+        <div class="ltab on">annotations<span class="lights"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span></div>
+        <div class="ltab">transcript</div>
+        <div class="ltab">asks<span class="lights"><i class="on"></i><i class="on"></i><i></i><i></i></span></div>
+        <div class="ltab">log</div>
+      </div>
+      <div class="lbody">no annotations — open a diff or a doc,<br>then flag what you see</div>
+      <div class="lfoot"><span>3 open · 1 blocking</span><span>scope: Freya</span></div>
+    </div>
+  </div>
+
+  <!-- THE DECK: channel plates, honest meters, step queues, MASTER -->
+  <div class="deckrow">
+    <div class="dhead">
+      <span class="caps">DECK · 2</span>
+      <div class="dinput"><span class="gt">&gt;</span><input placeholder='say "deck …" or type'><span style="margin-left:auto;font:10px var(--mono);color:var(--voice);letter-spacing:.08em;white-space:nowrap">ROUTE → FREYA</span></div>
+      <div class="dtransport">
+        <button class="tbtn rec" id="talk"><svg class="ic"><use href="#i-rec"/></svg>talk</button>
+        <button class="tbtn stop"><svg class="ic"><use href="#i-stop"/></svg></button>
+        <span class="sw" id="attn"><i>MUTED</i><i class="on">PTT</i><i>WAKE</i><i>ALWAYS</i></span>
+      </div>
+      <button class="tgl">—</button>
+    </div>
+    <div class="cards">
+      <div class="card master">
+        <div class="plate"><span class="nm">CONSOLE</span></div>
+        <div class="cbody">
+          <div class="mrow"><span>mic</span><button class="lockbtn"><svg class="ic" style="width:9px;height:9px;display:inline-block;vertical-align:-1px"><use href="#i-lock"/></svg> follows selection</button></div>
+          <div class="mrow"><span>duplex</span><span class="v">half</span></div>
+          <div class="mrow" style="margin-top:auto"><span>working / ready</span><span class="lcd grn">1 / 1</span></div>
+        </div>
+      </div>
+      <div class="card live sel">
+        <div class="plate"><span class="led warm"></span><svg class="ic"><use href="#i-module"/></svg><span class="nm">Freya</span><span class="st w">working 4s</span><button class="pbtn" title="open overview"><svg class="ic"><use href="#i-overview"/></svg></button></div>
+        <div class="cbody">
+          <div class="crow"><span class="patch on">MIC</span><span class="meter" data-live="1"></span></div>
+          <div class="cap">“Gates are green — 3 tests, tsc clean. Re-pushed the branch diff as r2.”</div>
+          <div class="cmeta"><span class="qgrp"><span>queue</span><span class="steps" data-q="2"></span><span style="color:var(--voice)">2</span></span><span class="path">tmp/voco-demo</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="plate"><span class="led"></span><svg class="ic"><use href="#i-module"/></svg><span class="nm">Iris</span><span class="st">idle · 19h</span><button class="pbtn" title="open overview"><svg class="ic"><use href="#i-overview"/></svg></button></div>
+        <div class="cbody">
+          <div class="crow"><span class="patch">mic</span><span class="meter" data-live="0"></span></div>
+          <div class="cap" style="color:var(--ink3)">“Repro captured — the pty dies on resize; bisecting now.”</div>
+          <div class="cmeta"><span class="path">tmp/voco-demo-fix-pty</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- status line: LCD cells + master VU -->
+  <div class="status">
+    <span class="led ok"></span><span class="lcd grn">127.0.0.1:7913</span>
+    <span class="lcd">MIC → FREYA</span><span class="vu" id="vu" title="mic level"></span>
+    <span>ptt_only · half_duplex</span>
+    <div class="right">
+      <span>1 working · 1 ready · <span style="color:var(--voice)">3 ann</span></span>
+      <span class="lcd dim" id="clock2">22:02:22</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// mock signal walks — in prod these are bus speech/turn events (lever 2:
+// meters must be signal-driven, never a looping keyframe)
+const SEGS = 14, still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+function buildMeter(el, n) {
+  for (let i = 0; i < n; i++) el.appendChild(document.createElement("i"));
+}
+document.querySelectorAll(".meter").forEach(m => buildMeter(m, SEGS));
+buildMeter(document.getElementById("vu"), 22);
+function drive(el, liveP) {
+  let level = 0, peak = 0;
+  setInterval(() => {
+    const segs = el.children, n = segs.length;
+    const target = Math.random() < liveP ? .3 + Math.random() * .65 : 0;
+    level += (target - level) * .5;
+    const lit = Math.round(level * n);
+    peak = Math.max(peak - .4, lit);
+    for (let i = 0; i < n; i++) {
+      segs[i].className = i < lit ? ("lit" + (i > n * .75 ? " hi" : "")) :
+        (i === Math.round(peak) && peak > 0 ? "peak" : "");
+    }
+  }, 120);
+}
+if (!still) {
+  document.querySelectorAll('.meter[data-live="1"]').forEach(m => drive(m, .8));
+  document.querySelectorAll('.meter[data-live="0"]').forEach(m => drive(m, .02));
+  drive(document.getElementById("vu"), .6);
+}
+// step queues: compact 4-cell strip, count carries the overflow truth
+document.querySelectorAll(".steps").forEach(s => {
+  const q = +s.dataset.q;
+  for (let i = 0; i < 4; i++) {
+    const c = document.createElement("i");
+    if (i < q) c.className = "on";
+    s.appendChild(c);
+  }
+});
+// transport interactions (mock): hold-to-talk + attention switch
+const talk = document.getElementById("talk");
+talk.addEventListener("pointerdown", () => talk.classList.add("held"));
+document.addEventListener("pointerup", () => talk.classList.remove("held"));
+document.getElementById("attn").addEventListener("click", e => {
+  if (e.target.tagName !== "I") return;
+  document.querySelectorAll("#attn i").forEach(i => i.classList.remove("on"));
+  e.target.classList.add("on");
+});
+// clocks
+setInterval(() => {
+  const t = new Date().toTimeString().slice(0, 8);
+  document.getElementById("clock2").textContent = t;
+}, 1000);
+</script>
+</body>
+</html>

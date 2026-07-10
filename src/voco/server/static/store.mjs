@@ -28,7 +28,7 @@
  *   state_ts?:number}} Session
  */
 
-/** @typedef {"workspaces"|"sessions"|"selection"|"mic"|"conn"|"ticker"|"findings"|"asks"|"voice"|"speaking"|"transcript"} Kind */
+/** @typedef {"workspaces"|"sessions"|"selection"|"mic"|"miclevel"|"conn"|"ticker"|"findings"|"asks"|"voice"|"speaking"|"transcript"} Kind */
 
 export class Store {
   constructor() {
@@ -43,6 +43,9 @@ export class Store {
     this.selectedWorkspace = /** @type {?string} */ (null);
     this.selectedPage = /** @type {?string} */ (null);
     this.mic = /** @type {any} */ ({});
+    // Live input level 0..1 (mic.level events, ~10Hz). Its "miclevel"
+    // notify drives meter/VU slots directly — never a panel re-render.
+    this.micLevel = 0;
     this.connected = false;
     // When disconnected: epoch-ms of the next reconnect attempt (the
     // command bar renders the honest countdown from it).
@@ -108,9 +111,13 @@ export class Store {
     this.asks.clear();
     for (const t of this.transcripts.values()) t.stale = true;
     this.mic = snap.mic || {};
+    // level is transient signal: a (re)connected daemon may never emit
+    // mic.level (older build, headless) — stale bars must not survive
+    this.micLevel = 0;
     if (!this.selectedWorkspace && this.workspaces.size)
       this.selectWorkspace([...this.workspaces.keys()][0]);
-    this._notify("workspaces", "sessions", "mic", "selection", "transcript");
+    this._notify("workspaces", "sessions", "mic", "selection", "transcript",
+      "miclevel");
   }
 
   /** Route a bus event to the right slice. Unknown types are ignored. */
@@ -176,6 +183,11 @@ export class Store {
       case "mic.state":
         this.mic = { ...this.mic, ...p };
         this._notify("mic");
+        break;
+      case "mic.level":
+        // clamp: a malformed payload must not make the meters lie
+        this.micLevel = Math.min(1, Math.max(0, Number(p.level) || 0));
+        this._notify("miclevel");
         break;
       // ---- voice presence (U1) ---------------------------------------------
       case "turn.state":

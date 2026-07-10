@@ -21,7 +21,8 @@ import { renderTranscript, flashEntry } from "./transcript.mjs";
 import { renderDocView } from "./docview.mjs";
 import { renderHtmlView } from "./htmlview.mjs";
 import { renderPresence } from "./presence.mjs";
-import { renderRack } from "./rack.mjs";
+import { renderRack, setMicLevel } from "./rack.mjs";
+import { ic, installIcons } from "./icons.mjs";
 import { renderTerminal } from "./term.mjs";
 import { openPicker, openRepo, openSpawn, openConnect, openSettings,
   confirmDanger } from "./modals.mjs";
@@ -77,6 +78,8 @@ const h = (tag, attrs = {}, ...kids) => {
 
 // ---- shell ------------------------------------------------------------------
 const app = /** @type {HTMLElement} */ (document.getElementById("app"));
+installIcons(); // the SVG symbol sheet — before any ic() render
+
 const presence = h("div", { class: "cmd" });
 const rail = h("div", { class: "rail" });
 const gripRail = h("div", { class: "grip", role: "separator", tabindex: "0",
@@ -89,9 +92,11 @@ const gripDock = h("div", { class: "grip", role: "separator", tabindex: "0",
 // band — vocodeck, full circle.
 const dock = h("div", { class: "dock" });
 const deckEl = h("div", { class: "deckrow" });
+const gripDeck = h("div", { class: "grip h", role: "separator", tabindex: "0",
+  "aria-label": "resize deck" });
 const statusline = h("div", { class: "statusline" });
 const body = h("div", { class: "deck-body" }, rail, gripRail, work, gripDock, dock);
-app.append(presence, body, deckEl, statusline);
+app.append(presence, body, gripDeck, deckEl, statusline);
 
 // ---- toasts (policy: errors persist w/ dismiss; successes fade) ---------------
 /** @returns {HTMLElement} the toast node (P4: daemon alerts dedupe on it) */
@@ -275,6 +280,11 @@ async function detachAgent(s) {
 
 // ---- fleet tree (mk3 M2): groups → work rows → agents + pages -------------------
 const PAGE_ICON = { screen: "▦", diff: "±", doc: "¶", terminal: "❯", html: "▣" };
+// SVG twins of PAGE_ICON for DOM contexts (text contexts — the page
+// bar provenance string, anchor labels — keep the unicode glyphs).
+const PAGE_ICON_SVG = {
+  screen: "screen", diff: "diff", doc: "doc", terminal: "term", html: "screen",
+};
 
 function groupKey(ws) { return ws.common_dir || ws.key; }
 
@@ -390,7 +400,7 @@ function workRow(ws, agents) {
     class: "work-row" + (sel ? " sel" : "") + (agents.length ? "" : " parked"),
     onclick: () => selectWork(ws) },
     caret,
-    h("span", { class: "glyph" }, "⌥"),
+    h("span", { class: "glyph" }, ic("branch")),
     h("span", { class: "wr-label" }, workLabel(ws)),
     meta);
   if (!expanded) return row;
@@ -412,7 +422,9 @@ function agentRow(s, bare = false) {
     title: micLock ? `view ${s.name} (mic locked)`
       : `talk to ${s.name} — selection is routing`,
     onclick: () => selectAgent(s) },
-    dot(s),
+    // the module icon IS the state LED (one signal, not two glyphs);
+    // the state word stays adjacent in ar-state per the design system
+    ic("module", "ic mstate " + stateOf(s)),
     h("span", { class: "ar-name" }, s.name),
     store.speaking && store.speaking.who === s.name ? speakingEq() : "",
     h("span", { class: "ar-meta" },
@@ -477,13 +489,13 @@ function pagesTree(ws) {
   tree.append(h("div", {
     class: "page-row" + (store.selectedPage == null ? " sel" : ""),
     onclick: (e) => { e.stopPropagation(); store.selectPage(null); } },
-    h("span", { class: "picon" }, "◈"),
+    h("span", { class: "picon" }, ic("overview")),
     h("span", { class: "page-title" }, "overview")));
   if (ws && ws.kind === "workspace")
     tree.append(h("div", {
       class: "page-row" + (store.selectedPage === "__files__" ? " sel" : ""),
       onclick: (e) => { e.stopPropagation(); store.selectPage("__files__"); } },
-      h("span", { class: "picon" }, "▤"),
+      h("span", { class: "picon" }, ic("files")),
       h("span", { class: "page-title" }, "files")));
   const pages = ws
     ? ws.pages.filter((p) => !p.closed)
@@ -494,7 +506,7 @@ function pagesTree(ws) {
     const row = h("div", {
       class: "page-row" + (p.page_id === store.selectedPage ? " sel" : ""),
       onclick: (e) => { e.stopPropagation(); store.selectPage(p.page_id); } },
-      h("span", { class: "picon" }, PAGE_ICON[p.type] || "·"),
+      h("span", { class: "picon" }, ic(PAGE_ICON_SVG[p.type] || "doc")),
       h("span", { class: "page-title" }, p.title),
       p.rev > 1 ? h("span", { class: "rev",
         title: `revision ${p.rev} — republished ${p.rev - 1}×` },
@@ -626,7 +638,7 @@ function renderWork(force = false) {
     const on = p.page_id === store.selectedPage;
     const t = h("div", { class: "tab" + (on ? " on" : ""),
       onclick: () => store.selectPage(p.page_id) },
-      h("span", { class: "g" }, PAGE_ICON[p.type] || "·"),
+      h("span", { class: "g" }, ic(PAGE_ICON_SVG[p.type] || "doc")),
       h("span", { class: "tab-title" }, p.title),
       p.rev > 1 ? h("span", { class: "g" }, "@r" + p.rev) : "");
     if (!p.pinned)
@@ -637,7 +649,7 @@ function renderWork(force = false) {
   if (ws && ws.kind === "workspace")
     tabbar.append(h("div", { class: "tab" + (isFiles ? " on" : ""),
       onclick: () => store.selectPage("__files__") },
-      h("span", { class: "g" }, "▤"),
+      h("span", { class: "g" }, ic("files")),
       h("span", { class: "tab-title" }, "files")));
   if (ws)
     tabbar.append(h("div", { class: "tab plus", title: "open a review diff",
@@ -1367,16 +1379,28 @@ function renderDock() {
   const memoKey = dockTab + ":" + wsKey;
   const keep = dockScrollMemo.get(memoKey) ?? 0;
 
-  const tab = (name, count, hot) => h("div",
-    { class: "ctab" + (dockTab === name ? " on" : "")
-      + (name === "asks" && askPulse ? " pulse" : ""),
-      onclick: () => setDockTab(name) },
-    name, count != null && count > 0
-      ? h("span", { class: "n" + (hot ? " hot" : "") }, " " + count) : "");
+  // counts render as step lights (index7 ledger form) — 4 cells, lit up
+  // to the count; the exact number stays in the tooltip and the footer
+  const tab = (name, count, hot) => {
+    const t = h("div",
+      { class: "ctab" + (dockTab === name ? " on" : "")
+        + (name === "asks" && askPulse ? " pulse" : ""),
+        role: "tab", "aria-selected": String(dockTab === name),
+        title: count != null && count > 0 ? count + " open" : "",
+        onclick: () => setDockTab(name) },
+      name);
+    if (count != null && count > 0) {
+      const lights = h("span", { class: "lights" + (hot ? " hot" : "") });
+      for (let i = 0; i < 4; i++)
+        lights.append(h("i", { class: i < Math.min(count, 4) ? "on" : "" }));
+      t.append(lights);
+    }
+    return t;
+  };
   const scopeTxt = agent
     ? agent.name + (ws ? " · " + workLabel(ws) : "")
     : ws ? (ws.repo || ws.name) + "/" + workLabel(ws) : "nothing selected";
-  dock.append(h("div", { class: "ctabs" },
+  dock.append(h("div", { class: "ctabs", role: "tablist" },
     tab("annotations", openF.length, false),
     tab("transcript", null, false),
     tab("asks", openAsks, true), // amber when a question is outstanding
@@ -1640,10 +1664,6 @@ function jumpToTranscript(target) {
 // ---- command bar + channel rack ---------------------------------------------
 function renderStrip() {
   renderPresence(presence, store, {
-    command: (cmd, payload) => bus.command(cmd, payload),
-    micLocked: micLock,
-    onFull: jumpToTranscript,
-    toast,
     onSettings: () => openSettings(mctx()),
   });
 }
@@ -1664,7 +1684,24 @@ function renderRackPanel() {
 // ---- status line: ambient truth (mk3 M1) --------------------------------------
 // The clock is one persistent node ticked by an interval — never a
 // full status re-render per second.
-const statusClock = h("span", {}, new Date().toTimeString().slice(0, 8));
+const statusClock = h("span", { class: "lcd dim" },
+  new Date().toTimeString().slice(0, 8));
+// The VU is likewise one persistent node: mic.level events drive its
+// segments out-of-band ("miclevel" notify), never a status re-render.
+const statusVu = h("span", { class: "vu", title: "mic input level" });
+for (let i = 0; i < 22; i++) statusVu.append(h("i"));
+let vuPeak = 0;
+function setVuLevel(level) {
+  const segs = statusVu.children, n = segs.length;
+  const lit = Math.round(level * n);
+  // the trailing zero is the daemon's last word at silence — clear the
+  // peak with it, or it holds forever (no further events decay it)
+  vuPeak = level === 0 ? 0 : Math.max(vuPeak - 0.6, lit);
+  for (let i = 0; i < n; i++) {
+    segs[i].className = i < lit ? ("lit" + (i > n * 0.75 ? " hi" : ""))
+      : (i === Math.round(vuPeak) && vuPeak > 0 ? "peak" : "");
+  }
+}
 setInterval(() => {
   statusClock.textContent = new Date().toTimeString().slice(0, 8);
 }, 1000);
@@ -1681,13 +1718,16 @@ function renderStatus() {
     .filter((f) => f.status === "open").length;
   // segments double as shortcuts (mk3.1 batch #13): mic → view the
   // holder's work; ann count → open the console's annotations tab
+  // LCD language (index7): LED + host well, MIC routing well, live VU.
   statusline.replaceChildren(
-    h("span", { class: "conn-cell " + (store.connected ? "on" : "off") },
-      store.connected ? "● " + location.host : "○ reconnecting"),
-    h("span", { class: "status-mic sc" + (active ? "" : " none"),
+    h("span", { class: "cmd-led " + (store.connected ? "on" : "off") }),
+    h("span", { class: "lcd" + (store.connected ? " grn" : " dim") },
+      store.connected ? location.host : "reconnecting…"),
+    h("span", { class: "lcd status-mic sc" + (active ? "" : " dim"),
       title: active ? "view " + active.name + "'s work" : "",
       onclick: () => { if (active) focusAgent(active); } },
-      active ? "MIC → " + active.name : "mic → nobody"),
+      active ? "MIC → " + active.name.toUpperCase() : "MIC → —"),
+    statusVu,
     h("span", {}, [mic.attention, mic.duplex].filter(Boolean).join(" · ") || "headless"),
     h("span", { class: "spacer" }),
     h("span", {},
@@ -1704,6 +1744,12 @@ function renderConn() {
   body.classList.toggle("offline", !store.connected);
   dock.classList.toggle("offline", !store.connected);
   deckEl.classList.toggle("offline", !store.connected);
+  if (!store.connected) {
+    // no daemon = no signal: dark meters, never a frozen last level
+    store.micLevel = 0;
+    setMicLevel(0);
+    setVuLevel(0);
+  }
   renderStrip(); renderRackPanel(); renderStatus();
   if (store.connected) {
     loadFindings(store.selectedWorkspace || "");
@@ -1817,6 +1863,9 @@ function grip(el, cssVar, min, max, invert, storeKey, opts = {}) {
 }
 grip(gripRail, "--railw", 180, 400, false, "voco.railw");
 grip(gripDock, "--dockw", 260, 520, true, "voco.dockw");
+// deck height: the grip rides ABOVE the deck, so dragging up grows it
+grip(gripDeck, "--deckh", 144, 420, true, "voco.deckh",
+  { vertical: true, target: deckEl });
 
 // ---- wire subscriptions -----------------------------------------------------
 store.subscribe("workspaces", () => { renderRail(); renderWork(); renderDock(); });
@@ -1832,6 +1881,12 @@ store.subscribe("findings", () => { renderDock(); renderWork(); renderRail(); re
 store.subscribe("asks", () => { renderDock(); renderRail(); });
 // voice presence lives in the rack now (the live channel's meter + caption)
 store.subscribe("voice", renderRackPanel);
+// mic.level (~10Hz) drives ONLY the meter + VU slots in place — a full
+// panel re-render at that rate would trash the deck
+store.subscribe("miclevel", () => {
+  setMicLevel(store.micLevel);
+  setVuLevel(store.micLevel);
+});
 // speech.sentence fires per sentence — the rack updates every time,
 // but the rail only cares WHO is speaking (eq marker), and the dock
 // only when the transcript is showing (karaoke lives there).

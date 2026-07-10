@@ -316,6 +316,10 @@ class VoiceLoop:
         self._deadline_wakeup = asyncio.Event()
         self._speculation: dict[tuple[int, int], asyncio.Task[None]] = {}
         self._playing = False  # mirrored from the player (loop thread)
+        # mic.level throttle state (deck meters read real signal, never a
+        # synthetic pulse): last emit time + last emitted value.
+        self._level_ts = 0.0
+        self._level_sent = -1.0
 
     # ---- lifecycle ---------------------------------------------------------
 
@@ -516,9 +520,26 @@ class VoiceLoop:
             del self._aec_ref[:frame_bytes]
             self._aec.push_playback(np.frombuffer(chunk, dtype=np.int16))
 
+    def _emit_mic_level(self, frame: np.ndarray) -> None:
+        """Throttled honest input level (post-AEC — what voco actually
+        hears): ~10Hz while there is signal, one trailing zero when it
+        settles, then silence on the wire. -50..-10 dBFS maps to 0..1."""
+        now = time.monotonic()
+        if now - self._level_ts < 0.1:
+            return
+        rms = float(np.sqrt(np.mean(np.square(frame.astype(np.float64)))))
+        db = 20.0 * float(np.log10(max(rms, 1.0) / 32768.0))
+        level = round(min(1.0, max(0.0, (db + 50.0) / 40.0)), 3)
+        if level == 0.0 and self._level_sent == 0.0:
+            return  # silence already reported — no idle spam
+        self._level_ts = now
+        self._level_sent = level
+        self._bus.emit("mic.level", {"level": level})
+
     def _process_frame(self, frame: np.ndarray) -> None:
         if self._aec is not None:
             frame = self._aec.process(frame)
+        self._emit_mic_level(frame)
         self.capture.feed(frame)
         if (
             self._wake_scorer is not None

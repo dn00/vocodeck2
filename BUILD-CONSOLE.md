@@ -1,12 +1,34 @@
 # BUILD-CONSOLE — the mk3 UI rebuild (plan + running journal)
 
-**Pinned design: `design/index5.html` (CONSOLE mk3, blessed 2026-07-08).**
-The deck client is rebuilt to look exactly like that mockup. Where the
-mockup is silent (modals, disconnected, empty states), the tokens and
-rules below govern. Style tokens are immutable without captain sign-off.
-Design lineage for archaeology: index.html (round 1: bridge/paper/signal)
+**Pinned design: `design/index7.html` (FL push, blessed + ported
+2026-07-10).** Supersedes index5 for everything it covers; index5 rules
+still govern where index7 is silent. Style tokens are immutable without
+captain sign-off. Design lineage for archaeology: index.html (round 1)
 → index2 (D·CONSOLE) → index3 (rejected restyle) → index4 (mk2 quiet)
-→ **index5 (mk3 final)**.
+→ index5 (mk3 final) → index6 (mk4 THE DECK) → **index7 (FL push)**.
+
+**index7 port (SHIPPED 2026-07-10), the deltas over mk4:** one SVG icon
+sheet (`icons.mjs`, `ic()` is the only SVG builder — createElement
+cannot make SVG); the command bar is ADE chrome only ([voco ● host] ·
+⚙); the DECK HEADER is the master strip — the one input (mount-once:
+value/focus survive re-renders), ROUTE display (status only, by design),
+● talk / ■ stop, the 4-pos attention switch (direct-select; WAKE
+disables itself on mic.state `wake_available:false` with an actionable
+toast), mic lock (fixed width — no reflow), duplex click-toggle,
+working/ready LCD, minimize toggle; there is NO master card — every
+card is an agent channel (plate = state-colored module icon [the icon
+IS the LED, word adjacent] + name + state·age + ⊞ overview→focusAgent);
+3-line say-tail (agent's voice ONLY — user text lives in the
+transcript); queue as 4 step cells + amber count with the path-never-
+clips flex contract; deck is height-resizable (grip above the header,
+`--deckh`, persisted); ledger tabs show counts as step lights; status
+line speaks LCD (LED+host well, MIC→NAME well, live VU). Meters/VU are
+SIGNAL-driven: the daemon now emits throttled `mic.level` (~10Hz,
+post-AEC, one trailing zero at silence) and the deck updates meter/VU
+slots out-of-band (a dedicated "miclevel" store notify — never a panel
+re-render at 10Hz); without level events (older daemon) meters fall
+back to the state pulse. A11y: aria-pressed on talk/lock, radiogroup
+switch, tablist ledger, focus-visible outlines.
 
 **Design anchor (captain, 2026-07-09): "reminds me of FruityLoops — I
 like that."** The DAW/instrument reading is the intended one and future

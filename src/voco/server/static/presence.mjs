@@ -1,19 +1,17 @@
 // @ts-check
 /**
- * The command bar (CONSOLE mk3, final form as of M5) — one 36px row of
- * cells: [voco ● host] [> the ONE input · route → holder] [keys: ■
- * interrupt · ⚙ settings].
+ * The command bar — ADE chrome only (index7 FL push): one 36px row of
+ * [voco ● host] · spacer · [⚙ settings].
+ *
+ * The one input, route display, and ■ interrupt moved to the deck
+ * header (rack.mjs): audio belongs on the instrument, not the IDE
+ * shell — and the deck header survives minimize, so they stay
+ * reachable. Settings stays here: it is app-level, not deck-level.
  *
  * MOUNT-ONCE (kept from U1): the bar's DOM is built exactly once; every
- * later render updates slots in place, so the input's value and focus
- * survive every voice event.
- *
- * Voice presence (live caption, speaking line, attention control)
- * lives in the channel rack (rack.mjs) since M5.
- *
- * Deliberately absent (honest-signal rule): no ⌘K hint until the
- * palette exists (M9); no PTT hold/key hint until the daemon grows
- * ptt.press/release (post-skin backlog).
+ * later render updates slots in place. The identity cell is the daemon
+ * truth: LED + host, with the honest reconnect countdown (bus retryAt)
+ * while offline.
  */
 
 const el = (tag, attrs = {}, ...kids) => {
@@ -28,8 +26,7 @@ const el = (tag, attrs = {}, ...kids) => {
   return n;
 };
 
-/** @type {?{led:HTMLElement, host:HTMLElement, input:HTMLInputElement,
- *   route:HTMLElement}} */
+/** @type {?{led:HTMLElement, host:HTMLElement}} */
 let dom = null;
 /** Latest render context — persistent handlers read through this. */
 let live = /** @type {any} */ (null);
@@ -41,58 +38,25 @@ function buildOnce(bar) {
   const host = el("span", { class: "cmd-host", text: location.host });
   const idcell = el("div", { class: "cmd-cell cmd-id" },
     el("span", { class: "cmd-app", text: "voco" }), led, host);
-
-  const input = /** @type {HTMLInputElement} */ (el("input", {
-    class: "cmd-input", type: "text", "aria-label": "type as speech" }));
-  input.addEventListener("keydown", async (e) => {
-    if (e.key !== "Enter") return;
-    const text = input.value.trim();
-    if (!text) return;
-    input.value = "";
-    const store = live.store;
-    try {
-      await live.ctx.command("say_as_user", { text });
-      store.lastRouted = { text, origin: "typed",
-        route: store._nameOf(store.activeSession), ts: Date.now() / 1000 };
-      store._staleTranscript(store.activeSession);
-      store._notify("voice", "transcript");
-    } catch (err) { live.ctx.toast("send failed: " + msg(err), true); }
-  });
-  const route = el("span", { class: "cmd-route",
-    title: "who hears you — click an agent or a channel's mic patch to move it" });
-  const prompt = el("div", { class: "cmd-prompt" },
-    el("span", { class: "cmd-gt", text: ">" }), input, route);
-
   const keys = el("div", { class: "cmd-cell cmd-keys" },
-    el("button", { class: "cmd-btn warm", text: "■",
-      title: "interrupt: barge-in + Escape to the active agent",
-      onclick: async () => {
-        try { await live.ctx.command("interrupt", {}); }
-        catch (e) { live.ctx.toast("interrupt: " + msg(e), true); }
-      } }),
     el("button", { class: "cmd-btn", text: "⚙", title: "settings",
       onclick: () => live.ctx.onSettings() }));
-
-  bar.append(idcell, prompt, keys);
-  return { led, host, input, route };
+  bar.append(idcell, el("div", { class: "cmd-spacer" }), keys);
+  return { led, host };
 }
 
 /**
  * @param {HTMLElement} bar
  * @param {import("./store.mjs").Store} store
- * @param {{command:(cmd:string, payload?:object)=>Promise<any>,
- *   micLocked?:boolean,
- *   onFull:(target:"you"|"agent")=>void, toast:(msg:string, sticky?:boolean)=>void,
- *   onSettings:()=>void}} ctx
+ * @param {{onSettings:()=>void}} ctx
  */
 export function renderPresence(bar, store, ctx) {
   live = { store, ctx };
-  if (!dom || !bar.contains(dom.input)) {
+  if (!dom || !bar.contains(dom.led)) {
     bar.replaceChildren();
     dom = buildOnce(bar);
   }
   const offline = !store.connected;
-  const activeName = store._nameOf(store.activeSession);
 
   // identity cell: the LED is the daemon truth; while offline the host
   // cell carries the honest reconnect countdown (bus retryAt)
@@ -113,17 +77,4 @@ export function renderPresence(bar, store, ctx) {
   } else {
     host.textContent = location.host;
   }
-
-  // the ONE input: placeholder/disabled only — value and focus SURVIVE.
-  // No voice loop = no "say" (audit #7: the placeholder must not offer
-  // a voice path a headless daemon cannot hear).
-  dom.input.placeholder = (store.mic && store.mic.attention)
-    ? "say “deck …” or type"
-    : "type — routes like speech";
-  dom.input.disabled = offline;
-  dom.route.textContent = (activeName ? "route → " + activeName : "route → —")
-    + (ctx.micLocked ? " 🔒" : "");
-  dom.route.classList.toggle("none", !activeName);
 }
-
-const msg = (e) => (e instanceof Error ? e.message : String(e));
