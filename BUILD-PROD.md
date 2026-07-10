@@ -44,7 +44,7 @@ Ground rules (best practice, non-negotiable):
       rotating file in the state dir, --verbose; daemon.error events
       consistently surfaced; the Input-Monitoring/PTT warning must
       reach the deck, not die in stderr.
-- [ ] **P5 — `voco doctor`**: mic permission, Input Monitoring grant,
+- [x] **P5 — `voco doctor`**: mic permission, Input Monitoring grant,
       models present, ports free, audio devices, state-dir health —
       actionable output.
 
@@ -87,6 +87,62 @@ post-review-to-PR · settings polish · light theme · full palette.
 Order: P1 → P2+P3 → P4+P5 → B by risk → C → D. UI work is paused.
 
 ## Journal
+
+- **2026-07-09 · P5 SHIPPED — `voco doctor` rebuilt as a real
+  diagnostic (xai round included).** The inline cmd_doctor moved to a
+  new `clients/voco_cli/doctor.py` (pure Row-returning check functions,
+  every impure edge injectable — the lifecycle.py testability pattern).
+  New checks on top of the P1-era probes (TTS synth, first-mate, tmux,
+  listen.sh, extras — moved over unchanged): **daemon** via the P4
+  /v1/health, discriminating healthy voco (live facts in the row) /
+  pre-P4 voco ("restart to finish the upgrade") / squatter (FAIL) /
+  nothing listening (FAIL), treating the unauthenticated payload as
+  untrusted input — wrong field types or `ok:false` are FAIL rows,
+  never a doctor traceback; **state-dir health** — writability via an
+  O_EXCL|O_NOFOLLOW create-then-delete probe (a planted symlink is
+  never written through), read-only identity-aware pidfile sanity (a
+  recycled pid must not read as a live daemon; doctor reports, `voco
+  up` heals), daemon.log size, and the **state-split** warning — the
+  P4 live-drill incident is now caught in BOTH shapes: `[state].dir`
+  set elsewhere, and $VOCO_STATE_DIR set while the registry sits at
+  the daemon default; compared literally, exactly as the daemon builds
+  its StateStore path; **pinned model cache** — presence always, sha256
+  against the P2 pins when `--deep` or the file is ≤10MB (the P2
+  deferred deep-verify), a directory/special file squatting an asset
+  name or an unreadable entry is a FAIL row not a crash, and the
+  remediation prints a shlex-quoted `rm`; **audio devices** (default
+  input/output by name); **microphone** — a real 150ms capture, because
+  macOS denies the mic with SILENCE not an error, so all-zero capture
+  is the honest permission signal (and doctor, user-invoked and
+  watched, is the right place for the OS prompt to fire); **Input
+  Monitoring** — the P4 tri-state probe as a row (None = "cannot
+  tell", never denied). Only FAIL rows drive a non-zero exit.
+
+  Journaled boundary decision: doctor imports PURE pieces of the
+  daemon package (asset pin constants, the ctypes permission probe) —
+  same wheel, and duplicating 64-char hashes would rot; daemon STATE
+  still flows over HTTP only, and lifecycle.py keeps the strict
+  no-import rule. The xai reviewer engaged the reasoning and did not
+  object. Its round (8 findings) fixed in-slice: the two blockers —
+  symlink-clobber in the write probe (write_text followed a planted
+  link; now O_EXCL on a per-pid name) and hostile health JSON crashing
+  the format call (`"uptime_s":"lol"` → ValueError; now shape-validated
+  to a FAIL row) — plus `ok:false` honored, the default-case state
+  split, literal (daemon-identical) path comparison, cache-entry
+  robustness, and rm quoting. Accepted with reasons: doctor's mkdir of
+  a missing state dir (exactly what voco up creates; docstring now says
+  so).
+
+  Gates: 457 pytest (25 doctor tests) · mypy · ruff+format · tsc ·
+  protocol drift clean. LIVE: against the captain's real :7777 daemon —
+  correctly warned it runs pre-/v1/health code, mic captured live
+  audio, Input Monitoring granted, TTS synthesized; against a hermetic
+  post-P4 daemon on :7913 — ok row with live facts, pidfile verified,
+  and the state-split warn fired on the scratch config's real split;
+  failure paths — daemon-down FAIL exits 1, a corrupt cached model
+  FAILs with the exact quoted rm command. NEXT: B-phase hardening by
+  risk (P6 audio device churn is first in the listed order; P8 auth
+  posture and P9 state integrity are the highest-risk candidates).
 
 - **2026-07-09 · P4 SHIPPED — real logging + /v1/health + honest PTT
   permission (xai round included).** New `voco.logsetup`: one setup for

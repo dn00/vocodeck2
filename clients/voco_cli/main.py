@@ -577,157 +577,6 @@ def cmd_watch(client: Client) -> int:
     return 0
 
 
-def cmd_doctor(client: Client) -> int:
-    """Environment diagnostic: what works, what's missing, how to fix it.
-    Warnings don't fail; only a dead required piece exits non-zero."""
-    import importlib.util
-    import shutil
-
-    failures = 0
-
-    def row(status: str, name: str, detail: str) -> None:
-        print(f"  {status:<4} {name:<14} {detail}")
-
-    def probe_tts(tts_cfg: dict) -> str | None:
-        """POST a real tiny synth and require audio bytes back — a random
-        HTTP listener squatting the port (OrbStack does) must not read ok."""
-        # Default mirrors the daemon's built-in (voice_loop): port 8880,
-        # the bundled floor's own default (P3 unification).
-        url = f"{tts_cfg.get('base_url', 'http://127.0.0.1:8880/v1').rstrip('/')}"
-        body = json.dumps(
-            {
-                "model": tts_cfg.get("model", "kokoro"),
-                "voice": tts_cfg.get("voice", "af_heart"),
-                "input": "hi",
-                "response_format": "pcm",
-            }
-        ).encode()
-        try:
-            req = urllib.request.Request(
-                f"{url}/audio/speech",
-                data=body,
-                method="POST",
-                headers={"Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                data = resp.read(4096)
-            return None if len(data) >= 1000 else "answers but returns no audio"
-        except Exception as e:
-            return str(getattr(e, "reason", e))
-
-    def probe_mate(base: str) -> str | None:
-        """GET /models and require OpenAI-shaped JSON back."""
-        try:
-            req = urllib.request.Request(f"{base.rstrip('/')}/models", method="GET")
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                obj = json.loads(resp.read(65536).decode())
-            if isinstance(obj, dict) and ("data" in obj or "object" in obj):
-                return None
-            return "answers but doesn't look OpenAI-compatible"
-        except Exception as e:
-            return str(getattr(e, "reason", e))
-
-    print(f"voco doctor — {client.base_url}")
-
-    # 1. daemon, then config separately — a config.get hiccup must not
-    # contradict an already-printed ok daemon row.
-    cfg: dict = {}
-    daemon_up = False
-    try:
-        state = client._request("POST", "/v1/control/state.get", {}, timeout=3)
-        n = len(state.get("sessions", []))
-        active = state.get("active_session")
-        row("ok", "daemon", f"up; {n} session(s), active={'yes' if active else 'no'}")
-        daemon_up = True
-    except Exception as e:
-        row("FAIL", "daemon", f"unreachable ({e}) — start with: voco-d")
-        failures += 1
-    if daemon_up:
-        try:
-            cfg = client._request("POST", "/v1/control/config.get", {}, timeout=3)
-        except Exception as e:
-            row("warn", "config", f"config.get failed ({e}); probing defaults")
-
-    # 2. TTS endpoint (from daemon config when available): must return audio
-    tts_cfg = cfg.get("tts", {})
-    tts_url = tts_cfg.get("base_url", "http://127.0.0.1:8000/v1")
-    err = probe_tts(tts_cfg)
-    if err is None:
-        row("ok", "tts", f"{tts_url} (synthesized a test phrase)")
-    else:
-        row(
-            "warn",
-            "tts",
-            f"{tts_url}: {err} — voice will be silent"
-            " (start voco-tts-floor or mlx-audio)",
-        )
-
-    # 3. first mate (llama-server or any OpenAI-compatible host)
-    mate_url = cfg.get("first_mate", {}).get("base_url")
-    if mate_url:
-        err = probe_mate(mate_url)
-        if err is None:
-            row("ok", "first_mate", mate_url)
-        else:
-            row(
-                "warn",
-                "first_mate",
-                f"{mate_url}: {err} — degraded mode (phrase table + forward-verbatim)",
-            )
-    else:
-        row("--", "first_mate", "not configured (degraded mode by design)")
-
-    # 4. tmux / inject
-    if shutil.which("tmux"):
-        inside = (
-            "this shell CAN inject"
-            if os.environ.get("TMUX_PANE")
-            else ("run agents inside tmux to enable inject")
-        )
-        row("ok", "tmux", inside)
-    else:
-        row("warn", "tmux", "not installed — no managed sessions, no inject")
-
-    # 5. listener script (voice_init output) — a stale MCP server keeps
-    # writing the pre-rework streaming variant, which never exits and so
-    # never wakes the agent (live-test find).
-    script = CACHE_DIR / "listen.sh"
-    if script.exists():
-        try:
-            stale = "--stream" in script.read_text()
-        except OSError:
-            stale = False
-        if stale:
-            row(
-                "warn",
-                "listen.sh",
-                "stale streaming script — restart the agent's MCP server"
-                " (old voice_init), then call voice_init again",
-            )
-        else:
-            row("ok", "listen.sh", "one-shot listener script")
-    else:
-        row("--", "listen.sh", "not written yet (voice_init creates it)")
-
-    # 6. optional python extras
-    for mod, extra, why in (
-        ("faster_whisper", "stt", "speech-to-text"),
-        ("sounddevice", "(core)", "mic/speaker"),
-        ("pynput", "ptt", "push-to-talk hotkey"),
-        ("openwakeword", "wake", "wake-word"),
-        ("kokoro_onnx", "floor", "bundled TTS floor"),
-    ):
-        found = importlib.util.find_spec(mod) is not None
-        row(
-            "ok" if found else "--",
-            mod,
-            why if found else f"{why} — uv sync --extra {extra}",
-        )
-
-    print(f"\n{'all required pieces up' if not failures else 'FAIL: daemon down'}")
-    return 1 if failures else 0
-
-
 def cmd_attach(args, client: Client) -> int:
     mcp = {
         "mcpServers": {
@@ -843,7 +692,10 @@ def main() -> None:
     p_input = sub.add_parser("input")  # typed input path (say_as_user)
     p_input.add_argument("text")
     sub.add_parser("attach-cmd")
-    sub.add_parser("doctor")
+    p_doctor = sub.add_parser("doctor")
+    p_doctor.add_argument(
+        "--deep", action="store_true", help="byte-verify large cached models"
+    )
     # lifecycle (BUILD-PROD P1): the daemon as a managed process
     p_up = sub.add_parser("up", help="start the daemon (managed, detached)")
     p_up.add_argument("--config", default=None)
@@ -975,7 +827,9 @@ def main() -> None:
     elif args.cmd == "attach-cmd":
         sys.exit(cmd_attach(args, client))
     elif args.cmd == "doctor":
-        sys.exit(cmd_doctor(client))
+        from voco_cli.doctor import cmd_doctor
+
+        sys.exit(cmd_doctor(client, deep=args.deep))
     elif args.cmd == "config":
         if args.action == "get":
             sys.exit(control(client, "config.get", {}, timeout=5))
