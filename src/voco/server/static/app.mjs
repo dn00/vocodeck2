@@ -40,10 +40,20 @@ const persistSet = (key, set) =>
 const store = new Store();
 // Console log tab (M6): a bounded ring of every bus event.
 const eventLog = [];
+// P4: daemon.error must be SEEN, not buried in the log tab — each
+// distinct message gets one sticky toast; a restart loop repeating the
+// same error re-toasts only after the first was dismissed.
+/** @type {Map<string, HTMLElement>} */
+const daemonAlerts = new Map();
 function logBusEvent(env) {
   eventLog.push({ ts: env.ts || Date.now() / 1000, seq: env.seq ?? "",
     type: env.type || "?", payload: env.payload });
   if (eventLog.length > 300) eventLog.shift();
+  if (env.type === "daemon.error") {
+    const msg = "daemon: " + String(env.payload?.error || "unknown error");
+    const live = daemonAlerts.get(msg);
+    if (!live || !live.isConnected) daemonAlerts.set(msg, toast(msg, true));
+  }
   if (env.type === "ask.answered" && dockTab !== "asks") {
     askPulse = true; // an answer landed unseen — pulse the asks tab (A5)
     renderDock();
@@ -84,6 +94,7 @@ const body = h("div", { class: "deck-body" }, rail, gripRail, work, gripDock, do
 app.append(presence, body, deckEl, statusline);
 
 // ---- toasts (policy: errors persist w/ dismiss; successes fade) ---------------
+/** @returns {HTMLElement} the toast node (P4: daemon alerts dedupe on it) */
 function toast(msg, sticky = false) {
   const t = h("div", { class: "toast-msg" + (sticky ? " sticky" : "") }, msg);
   if (sticky)
@@ -91,6 +102,7 @@ function toast(msg, sticky = false) {
       onclick: () => t.remove() }, "✕"));
   document.body.append(t);
   if (!sticky) setTimeout(() => t.remove(), 4000);
+  return t;
 }
 
 /** Undo-over-confirm (design policy): success-style toast carrying the

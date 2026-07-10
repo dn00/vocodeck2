@@ -468,3 +468,56 @@ def test_registry_refresh_identity_rekeys_and_emits_on_move():
     events.clear()
     reg.refresh_identity(s.session_id, {**base, "cwd": "/new", "worktree": "/new"})
     assert events == []
+
+
+# ---- /v1/health: the lifecycle probe (BUILD-PROD P4) -------------------------
+
+
+async def test_health_is_unauthenticated_and_signed(client):
+    # `voco up` polls with no token; the service field is the signature
+    # a random listener squatting the port can't accidentally fake
+    resp = await client.get("/v1/health")
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["service"] == "voco-d"
+    assert data["ok"] is True
+
+
+async def test_health_merges_live_daemon_facts():
+    bus = EventBus()
+    server = BridgeServer(
+        Registry(emit=bus.emit),
+        bus,
+        listen_slice_s=0.5,
+        health_info=lambda: {"version": "9.9.9", "uptime_s": 4.2, "voice": False},
+    )
+    c = TestClient(TestServer(server.build_app()))
+    await c.start_server()
+    try:
+        data = await (await c.get("/v1/health")).json()
+        assert data["service"] == "voco-d"  # merge never loses the signature
+        assert data["version"] == "9.9.9"
+        assert data["uptime_s"] == 4.2
+        assert data["voice"] is False
+    finally:
+        await c.close()
+
+
+async def test_health_info_cannot_shadow_the_signature():
+    # healthy() trusts service/ok — a colliding info payload must lose
+    bus = EventBus()
+    server = BridgeServer(
+        Registry(emit=bus.emit),
+        bus,
+        listen_slice_s=0.5,
+        health_info=lambda: {"service": "evil-d", "ok": False, "extra": 1},
+    )
+    c = TestClient(TestServer(server.build_app()))
+    await c.start_server()
+    try:
+        data = await (await c.get("/v1/health")).json()
+        assert data["service"] == "voco-d"
+        assert data["ok"] is True
+        assert data["extra"] == 1  # honest merge for non-signature keys
+    finally:
+        await c.close()

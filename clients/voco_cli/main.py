@@ -852,6 +852,9 @@ def main() -> None:
     p_up.add_argument(
         "--wait", type=float, default=20.0, help="seconds to wait for health"
     )
+    p_up.add_argument(
+        "--verbose", action="store_true", help="daemon DEBUG-level logging"
+    )
     p_down = sub.add_parser("down", help="stop the managed daemon")
     p_down.add_argument("--port", type=int, default=7777)
     p_logs = sub.add_parser("logs", help="show the managed daemon's log")

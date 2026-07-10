@@ -108,12 +108,16 @@ class BridgeServer:
         snapshot_extra: Callable[[], dict] | None = None,
         workspaces: WorkspaceStore | None = None,
         allowed_origins: list[str] | None = None,
+        health_info: Callable[[], dict] | None = None,
     ) -> None:
         self._registry = registry
         self._bus = bus
         self._token = token
         self._slice = listen_slice_s
         self.workspaces = workspaces
+        # P4: live daemon facts merged into /v1/health (version, uptime,
+        # voice/floor state). None = the bare service signature only.
+        self._health_info = health_info
         # §8.5: per-run workbench token — reaches browsers only inside the
         # pages this daemon serves; cross-origin pages cannot read it (no
         # CORS headers on any response), so holding it proves the page is
@@ -176,6 +180,7 @@ class BridgeServer:
         app.router.add_get("/v1/bridge/listen", self._listen)
         app.router.add_post("/v1/control/{cmd}", self._control)
         app.router.add_get("/v1/events", self._events_ws)
+        app.router.add_get("/v1/health", self._health)
         app.router.add_get("/debug", self._ui)
         app.router.add_get("/ui", self._ui)  # legacy alias for the debug UI
         add_workbench_routes(app, self)  # `/`, /static/*, page reads, page push
@@ -255,6 +260,18 @@ class BridgeServer:
             f'window.__VOCO_WB__="{self.wb_token}";</script>'
         )
         return self.html_response(body.replace("<body>", f"<body>{inject}", 1))
+
+    async def _health(self, request: web.Request) -> web.Response:
+        """P4: the lifecycle health probe. Unauthenticated GET, loopback
+        bind, no mutation — `voco up` polls it with no token, and the
+        `service` field is the signature that a random HTTP listener
+        squatting the port cannot accidentally fake."""
+        info: dict[str, Any] = dict(self._health_info()) if self._health_info else {}
+        # the signature outranks the callback: healthy() trusts these
+        # two keys, so no info payload may ever shadow them
+        info["service"] = "voco-d"
+        info["ok"] = True
+        return web.json_response(info)
 
     async def _register(self, request: web.Request) -> web.Response:
         self._check_browser_mutation(request)

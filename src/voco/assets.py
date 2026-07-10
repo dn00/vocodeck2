@@ -20,7 +20,9 @@ running since 2026-07-03):
 from __future__ import annotations
 
 import hashlib
+import http.client
 import os
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -90,19 +92,37 @@ def fetch(asset: Asset, dest_dir: Path | None = None, log=print) -> Path:
     peer could keep mutating after our rename), fsyncs it, verifies
     the BYTES ON DISK against the pin, and only then atomically
     replaces dest. Two racing daemons each publish a fully-verified
-    file; last write wins and both are identical."""
+    file; last write wins and both are identical. The temp is created
+    O_EXCL|O_NOFOLLOW after unlinking any leftover (xai P4 round): a
+    pre-existing .part — a crashed run's debris under a recycled pid,
+    or a planted symlink — must never become the inode we publish."""
     dest = (dest_dir or models_dir()) / asset.name
     if dest.exists():
         return dest
-    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise AssetError(
+            f"could not create the cache dir {dest.parent} ({e}) — a"
+            " permissions problem? Fix the directory, or point VOCO_CACHE"
+            " somewhere writable"
+        ) from e
     tmp = dest.with_suffix(dest.suffix + f".part.{os.getpid()}")
     log(f"voco: downloading {asset.name} ...")
     h = hashlib.sha256()
     try:
         try:
+            tmp.unlink(missing_ok=True)  # stale debris or a planted link
+            tmp_fd = os.open(
+                tmp,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                0o644,
+            )
             with (
+                # fdopen first: if urlopen raises, its __exit__ still
+                # closes the fd (no leak), and the outer cleanup unlinks
+                os.fdopen(tmp_fd, "wb") as out,
                 urllib.request.urlopen(asset.url, timeout=60) as resp,
-                open(tmp, "wb") as out,
             ):
                 total = int(resp.headers.get("Content-Length") or 0)
                 done = 0
@@ -119,10 +139,41 @@ def fetch(asset: Asset, dest_dir: Path | None = None, log=print) -> Path:
                         next_mark += 0.2
                 out.flush()
                 os.fsync(out.fileno())  # durable before we ever publish
+        # P4 taxonomy: name WHICH failure this is — server, network,
+        # mid-stream, or local disk — because they have different fixes.
+        except urllib.error.HTTPError as e:
+            raise AssetError(
+                f"could not download {asset.name}: the server said HTTP"
+                f" {e.code} {e.reason} for {asset.url} — the pinned URL may"
+                f" have moved; report this (or fetch the file yourself into"
+                f" {dest.parent})"
+            ) from e
+        except urllib.error.URLError as e:
+            if isinstance(e.reason, TimeoutError):  # urllib wraps connect
+                raise AssetError(  # timeouts — don't misname them "offline"
+                    f"download of {asset.name} timed out — slow network?"
+                    f" Retry, or fetch it yourself from {asset.url} into"
+                    f" {dest.parent}"
+                ) from e
+            raise AssetError(
+                f"could not download {asset.name} ({e.reason}) — offline?"
+                f" Fetch it yourself from {asset.url} into {dest.parent}"
+            ) from e
+        except TimeoutError as e:
+            raise AssetError(
+                f"download of {asset.name} timed out — slow network? Retry,"
+                f" or fetch it yourself from {asset.url} into {dest.parent}"
+            ) from e
+        except http.client.HTTPException as e:
+            raise AssetError(
+                f"download of {asset.name} broke mid-stream"
+                f" ({type(e).__name__}: {e}) — retry; if it persists, fetch"
+                f" it yourself from {asset.url} into {dest.parent}"
+            ) from e
         except OSError as e:
             raise AssetError(
-                f"could not download {asset.name} ({e}) — offline? Fetch it"
-                f" yourself from {asset.url} into {dest.parent}"
+                f"could not write {asset.name} under {dest.parent} ({e}) —"
+                " disk full, or a permissions problem in the cache dir?"
             ) from e
         if h.hexdigest() != asset.sha256:
             raise AssetError(

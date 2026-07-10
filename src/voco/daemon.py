@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.metadata
+import logging
 import os
 import signal
 import sys
@@ -45,6 +47,13 @@ from voco.server.workbench import handle_workbench_command
 
 DEFAULT_CONFIG = Path.home() / ".config" / "voco" / "config.toml"
 
+log = logging.getLogger("voco.daemon")
+
+try:
+    VERSION = importlib.metadata.version("voco")
+except importlib.metadata.PackageNotFoundError:  # not installed (source tree)
+    VERSION = "0+unknown"
+
 
 def load_config(path: Path | None) -> dict[str, Any]:
     """Read base + .local.toml overrides, validate, refuse boot on errors."""
@@ -67,7 +76,7 @@ def load_config(path: Path | None) -> dict[str, Any]:
     cfg = config_mod.merge(base, overrides)
     errors, warnings = config_mod.validate(cfg)
     for w in warnings:
-        print(f"voco-d: config warning: {w}", file=sys.stderr)
+        log.warning("config warning: %s", w)
     if errors:
         listing = "\n  ".join(errors)
         raise SystemExit(f"voco-d: invalid config {p}:\n  {listing}")
@@ -112,6 +121,7 @@ class Daemon:
         )
         # Latest routing awaiting its dispatch turn_id (late-mate stamping).
         self._pending_late: dict[str, Any] | None = None
+        self._started_mono = time.monotonic()
         self.bridge = BridgeServer(
             self.registry,
             self.bus,
@@ -120,6 +130,7 @@ class Daemon:
             snapshot_extra=lambda: {"mic": self._mic_payload()},
             workspaces=self.workspaces,
             allowed_origins=cfg.get("server", {}).get("allowed_origins"),
+            health_info=self._health_info,
         )
         self.bridge.pty_lookup = self._pty_lookup  # /v1/term (W4)
         # B1b: url-mode artifacts iframe arbitrary origins — off by default.
@@ -1052,7 +1063,7 @@ class Daemon:
         if data:
             n = self.registry.restore(data)
             if n:
-                print(f"voco-d: restored {n} session(s) from {self._state.path}")
+                log.info("restored %d session(s) from %s", n, self._state.path)
             for s in self.registry.all():
                 # Restored sessions get their workspaces back immediately,
                 # same as a fresh register — the rail must not be empty
@@ -1088,15 +1099,17 @@ class Daemon:
         except Exception as e:
             # A live sibling daemon owns the data dir: run without durable
             # workbench state rather than clobber it (fail-soft, named).
-            self.bus.emit("daemon.error", {"error": f"workspace lock: {e}"})
-            print(f"voco-d: workbench persistence off ({e})", file=sys.stderr)
+            self.bus.emit(
+                "daemon.error",
+                {"error": f"workspace lock: {e} — workbench persistence off"},
+            )
             return
         manifests, errors = self._manifest.load_all()
         for err in errors:
             self.bus.emit("daemon.error", {"error": f"manifest: {err}"})
         n = sum(1 for m in manifests if self.workspaces.restore_workspace(m))
         if n:
-            print(f"voco-d: restored {n} workspace(s)")
+            log.info("restored %d workspace(s)", n)
 
     def _wire_manifest_saver(self) -> None:
         def on_event(env) -> None:
@@ -1413,15 +1426,26 @@ class Daemon:
     # ---- operational errors reach the operator, not just the bus -----------------
 
     def _wire_error_log(self) -> None:
+        """Every daemon.error event lands in the structured log (P4):
+        one subscription is the single funnel, so emitters never also
+        print — the deck gets the event, the log gets the line."""
+
         def on_event(env) -> None:
             if env.type == "daemon.error":
-                stamp = time.strftime("%H:%M:%S", time.localtime(env.ts))
-                print(
-                    f"voco-d {stamp} ERROR {env.payload.get('error', '?')}",
-                    file=sys.stderr,
-                )
+                log.error("%s", env.payload.get("error", "?"))
 
         self.bus.subscribe(on_event)
+
+    def _health_info(self) -> dict[str, Any]:
+        """Live facts for /v1/health — cheap, no locks, no I/O."""
+        return {
+            "version": VERSION,
+            "uptime_s": round(time.monotonic() - self._started_mono, 1),
+            "port": self._port,
+            "voice": self.voice is not None,
+            "floor_managed": self._floor is not None,
+            "floor_restarts": self._floor.restarts if self._floor else 0,
+        }
 
     # ---- agent says become speech --------------------------------------------------
 
@@ -1454,7 +1478,7 @@ class Daemon:
             return
         self._floor = FloorSupervisor(floor_argv(port), emit=self.bus.emit)
         await self._floor.start()
-        print(f"voco-d: tts floor managed on 127.0.0.1:{port}")
+        log.info("tts floor managed on 127.0.0.1:%d", port)
 
     # ---- run ---------------------------------------------------------------
 
@@ -1497,18 +1521,26 @@ class Daemon:
                     assets.ensure_silero(
                         audio_cfg.get("silero_model"),
                         config_dir=self._config_path.parent,
+                        log=logging.getLogger("voco.assets").info,
                     )
                 )
                 self.voice = VoiceLoop(self.cfg, self.bus, host=self)
                 await self.voice.start(loop)
             except Exception as e:
                 self.voice = None
-                self.bus.emit("daemon.error", {"error": f"voice loop unavailable: {e}"})
-                print(f"voco-d: voice loop unavailable ({e}); running headless")
+                # one funnel: the wired error log turns this into the
+                # ERROR line; the deck gets the same event (P4)
+                self.bus.emit(
+                    "daemon.error",
+                    {"error": f"voice loop unavailable ({e}) — running headless"},
+                )
             await self._maybe_start_floor()
-        print(
-            f"voco-d listening on {host}:{port}"
-            + (" (no audio)" if self.voice is None else "")
+        log.info(
+            "voco-d %s listening on %s:%d%s",
+            VERSION,
+            host,
+            port,
+            " (no audio)" if self.voice is None else "",
         )
         try:
             await stop.wait()
@@ -1541,11 +1573,11 @@ class Daemon:
             try:
                 self._state.save(self.registry.dump())  # final synchronous save
             except Exception as e:
-                print(f"voco-d: state save failed: {e}", file=sys.stderr)
+                log.error("state save failed: %s", e)
             if self._pty is not None:
                 # v1: pty terminals die with the daemon (§5, honest).
                 self._pty.shutdown()
-            print("voco-d: shut down cleanly")
+            log.info("shut down cleanly")
 
 
 def main() -> None:
@@ -1553,7 +1585,17 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--port", type=int, default=7777)
     parser.add_argument("--no-audio", action="store_true")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="DEBUG-level logging"
+    )
     args = parser.parse_args()
+    # Logging first (P4): config warnings and every later line get
+    # levels, timestamps, and the rotating file in the state dir.
+    from voco import logsetup
+
+    log_file = logsetup.setup(verbose=args.verbose)
+    if log_file is not None:
+        log.debug("logging to %s", log_file)
     cfg = load_config(args.config)
     daemon = Daemon(cfg, no_audio=args.no_audio, config_path=args.config)
     try:

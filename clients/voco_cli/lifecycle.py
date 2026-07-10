@@ -19,11 +19,17 @@ forgotten terminal again. Hardened per the P1 adversarial review:
 
 Lifecycle files live in the DEFAULT state dir (~/.local/state/voco or
 $VOCO_STATE_DIR): pidfile/log are per-machine service facts, not
-per-config state. Log rotation + a real /v1/health endpoint are P4.
+per-config state. Two log files by design (P4): daemon.log is the
+daemon's OWN structured rotating log (voco.logsetup writes it; `voco
+logs` reads it, rotation-aware), while daemon.out is the spawn capture
+— the crash net for pre-logging tracebacks and anything that hits raw
+stdout/stderr. Managed spawns set VOCO_LOG_CONSOLE=0 so daemon.out
+doesn't duplicate every structured line.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import platform
 import plistlib
@@ -33,7 +39,9 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 LAUNCHD_LABEL = "io.voco.daemon"
@@ -50,7 +58,13 @@ def pidfile_path() -> Path:
 
 
 def log_path() -> Path:
+    """The daemon's structured rotating log (voco.logsetup owns it)."""
     return state_dir() / "daemon.log"
+
+
+def out_path() -> Path:
+    """The spawn's raw stdout/stderr capture — pre-logging crash net."""
+    return state_dir() / "daemon.out"
 
 
 def launchd_plist_path() -> Path:
@@ -76,7 +90,9 @@ def _posix_or_explain() -> bool:
 # ---- pure helpers (unit-tested) ------------------------------------------------
 
 
-def daemon_argv(*, config: str | None, port: int, no_audio: bool) -> list[str]:
+def daemon_argv(
+    *, config: str | None, port: int, no_audio: bool, verbose: bool = False
+) -> list[str]:
     """The exact argv `voco up` / launchd runs. Prefers the installed
     voco-d next to this interpreter (same venv), falls back to
     `python -m voco.daemon` so a source checkout works too."""
@@ -87,6 +103,8 @@ def daemon_argv(*, config: str | None, port: int, no_audio: bool) -> list[str]:
     argv += ["--port", str(port)]
     if no_audio:
         argv += ["--no-audio"]
+    if verbose:
+        argv += ["--verbose"]
     return argv
 
 
@@ -149,33 +167,52 @@ def managed_pid() -> int | None:
     return pid
 
 
-def build_launchd_plist(argv: list[str], log: Path) -> bytes:
+def _service_env() -> dict[str, str]:
+    """Env a managed daemon runs with: console mirror off (daemon.out
+    is the raw-output crash net, not a duplicate of daemon.log), and a
+    custom $VOCO_STATE_DIR carried through — the plist's paths were
+    computed from it, so the daemon must resolve the same state dir."""
+    env = {"VOCO_LOG_CONSOLE": "0"}
+    custom = os.environ.get("VOCO_STATE_DIR")
+    if custom:
+        env["VOCO_STATE_DIR"] = custom
+    return env
+
+
+def build_launchd_plist(argv: list[str], out: Path) -> bytes:
     """plistlib, not string XML: argv/paths are user-controlled and XML
     metacharacters in a config path were an injection. KeepAlive on
-    crash only (clean exits stick, so `voco down` sticks)."""
+    crash only (clean exits stick, so `voco down` sticks). launchd
+    captures raw stdout/stderr into daemon.out; the daemon writes its
+    own rotating daemon.log, so the console mirror is off (P4)."""
     return plistlib.dumps(
         {
             "Label": LAUNCHD_LABEL,
             "ProgramArguments": list(argv),
             "RunAtLoad": True,
             "KeepAlive": {"SuccessfulExit": False},
-            "StandardOutPath": str(log),
-            "StandardErrorPath": str(log),
+            "StandardOutPath": str(out),
+            "StandardErrorPath": str(out),
+            "EnvironmentVariables": _service_env(),
         }
     )
 
 
-def systemd_unit(argv: list[str], log: Path) -> str:
+def systemd_unit(argv: list[str], out: Path) -> str:
     """Printed as guidance on non-macOS; shlex-quoted so paths with
     spaces produce a valid ExecStart."""
+    env_lines = "\n".join(
+        f"Environment={shlex.quote(f'{k}={v}')}" for k, v in _service_env().items()
+    )
     return f"""[Unit]
 Description=voco daemon
 
 [Service]
 ExecStart={shlex.join(argv)}
 Restart=on-failure
-StandardOutput=append:{log}
-StandardError=append:{log}
+{env_lines}
+StandardOutput=append:{out}
+StandardError=append:{out}
 
 [Install]
 WantedBy=default.target
@@ -183,8 +220,8 @@ WantedBy=default.target
 
 
 def tail_text(path: Path, n: int) -> str:
-    """Last n lines without reading the whole file (the log can be
-    large until P4 brings rotation)."""
+    """Last n lines without reading the whole file (rotation caps
+    daemon.log, but daemon.out and foreign logs can still be large)."""
     try:
         with open(path, "rb") as f:
             f.seek(0, os.SEEK_END)
@@ -201,9 +238,26 @@ def tail_text(path: Path, n: int) -> str:
 
 
 def healthy(base_url: str, timeout: float = 2.0) -> bool:
-    """200 AND a voco signature in the body — a random HTTP listener
-    squatting the port must not read as a running daemon. (A dedicated
-    /v1/health endpoint is the P4 upgrade for this heuristic.)"""
+    """GET /v1/health: 200 + service=="voco-d" (P4). The endpoint
+    ANSWERING is authoritative: a different service name, garbage JSON,
+    or an error status is a hard no (a real voco-d never sends those).
+    Only endpoint-absent (404/405 from a pre-P4 daemon mid-upgrade) or
+    a connection-level failure falls through to the P1 body-signature
+    heuristic — and with nothing listening, that fails too."""
+    try:
+        with urllib.request.urlopen(base_url + "/v1/health", timeout=timeout) as r:
+            if r.status != 200:
+                return False
+            try:
+                data = json.loads(r.read(4096).decode(errors="replace"))
+            except ValueError:
+                return False  # a squatter's 200; voco-d sends real JSON
+            return data.get("service") == "voco-d"
+    except urllib.error.HTTPError as e:
+        if e.code not in (404, 405):
+            return False  # the endpoint exists and is not healthy voco
+    except Exception:
+        pass  # connection-level: let the legacy probe decide
     try:
         with urllib.request.urlopen(base_url + "/", timeout=timeout) as r:
             if r.status != 200:
@@ -249,17 +303,25 @@ def cmd_up(args) -> int:
         print(f"voco: cannot take the spawn lock: {e}")
         return 1
     try:
-        argv = daemon_argv(config=args.config, port=args.port, no_audio=args.no_audio)
-        log = log_path()
-        with open(log, "a", encoding="utf-8") as lf:
-            lf.write(f"\n--- voco up · {time.strftime('%F %T')} ---\n")
-            lf.flush()
+        argv = daemon_argv(
+            config=args.config,
+            port=args.port,
+            no_audio=args.no_audio,
+            verbose=getattr(args, "verbose", False),
+        )
+        log, out = log_path(), out_path()
+        with open(out, "a", encoding="utf-8") as of:
+            of.write(f"\n--- voco up · {time.strftime('%F %T')} ---\n")
+            of.flush()
             proc = subprocess.Popen(
                 argv,
-                stdout=lf,
-                stderr=lf,
+                stdout=of,
+                stderr=of,
                 stdin=subprocess.DEVNULL,
                 start_new_session=True,  # survives this CLI and its terminal
+                # the daemon writes its own rotating daemon.log; daemon.out
+                # captures only raw output (crashes before logging is up)
+                env={**os.environ, "VOCO_LOG_CONSOLE": "0"},
             )
         pidfile_path().write_text(str(proc.pid))
         deadline = time.time() + max(1.0, float(args.wait))
@@ -273,10 +335,9 @@ def cmd_up(args) -> int:
                 return 0
             time.sleep(0.3)
         pidfile_path().unlink(missing_ok=True)  # failed boot: never leave bait
-        print(
-            f"voco: daemon did not become healthy — last log lines:\n"
-            f"{tail_text(log, 15)}"
-        )
+        print("voco: daemon did not become healthy —")
+        print(f"--- process output ({out}) ---\n{tail_text(out, 10)}")
+        print(f"--- daemon log ({log}) ---\n{tail_text(log, 15)}")
         return 1
     finally:
         lock.unlink(missing_ok=True)
@@ -346,6 +407,47 @@ def cmd_down(args) -> int:
     return 1
 
 
+def follow_lines(
+    path: Path, *, poll_s: float = 0.5, sleep: Callable[[float], None] = time.sleep
+) -> Iterator[str]:
+    """Yield appended lines forever, surviving rotation (P4): when the
+    file at `path` is replaced (inode change) or truncated (size below
+    our position), reopen and read the NEW file from its start. A
+    missing file — before first boot or mid-rotation — is a normal
+    gap to wait through, not an error."""
+    waited = False
+    while True:
+        try:
+            # not a with-block: replaced on rotation (closed in finally)
+            f = open(path, encoding="utf-8", errors="replace")  # noqa: SIM115
+            break
+        except FileNotFoundError:
+            waited = True
+            sleep(poll_s)  # no log yet — wait for its birth
+    try:
+        if not waited:  # tail semantics for an existing file; a file we
+            f.seek(0, os.SEEK_END)  # waited for is read from its first line
+        ino = os.fstat(f.fileno()).st_ino
+        while True:
+            line = f.readline()
+            if line:
+                yield line
+                continue
+            try:
+                st = os.stat(path)
+            except OSError:
+                sleep(poll_s)  # rotation gap: old renamed, new not yet there
+                continue
+            if st.st_ino != ino or st.st_size < f.tell():
+                f.close()
+                f = open(path, encoding="utf-8", errors="replace")  # noqa: SIM115
+                ino = os.fstat(f.fileno()).st_ino
+                continue
+            sleep(poll_s)
+    finally:
+        f.close()
+
+
 def cmd_logs(args) -> int:
     if not _posix_or_explain():
         return 1
@@ -356,17 +458,12 @@ def cmd_logs(args) -> int:
     print(tail_text(log, args.lines))
     if not args.follow:
         return 0
-    with open(log, encoding="utf-8", errors="replace") as f:
-        f.seek(0, os.SEEK_END)
-        try:
-            while True:
-                line = f.readline()
-                if line:
-                    print(line, end="")
-                else:
-                    time.sleep(0.5)
-        except KeyboardInterrupt:
-            return 0
+    try:
+        for line in follow_lines(log):
+            print(line, end="")
+    except KeyboardInterrupt:
+        pass
+    return 0
 
 
 def cmd_autostart(args) -> int:
@@ -374,7 +471,7 @@ def cmd_autostart(args) -> int:
     if platform.system() != "Darwin":
         print("voco: managed autostart is macOS/launchd for now;")
         print("systemd --user unit to adapt:\n")
-        print(systemd_unit(argv, log_path()))
+        print(systemd_unit(argv, out_path()))
         return 1
     plist = launchd_plist_path()
     if args.action == "status":
@@ -387,7 +484,7 @@ def cmd_autostart(args) -> int:
         state_dir().mkdir(parents=True, exist_ok=True)
         plist.parent.mkdir(parents=True, exist_ok=True)
         tmp = plist.with_suffix(".plist.tmp")
-        tmp.write_bytes(build_launchd_plist(argv, log_path()))
+        tmp.write_bytes(build_launchd_plist(argv, out_path()))
         tmp.replace(plist)  # atomic — a half-written plist must not load
         # bootout first = idempotent reinstall picks up argv changes;
         # its failure is EXPECTED when nothing was loaded, so quiet.

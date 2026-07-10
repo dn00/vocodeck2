@@ -26,21 +26,21 @@ Ground rules (best practice, non-negotiable):
 ## The audit (2026-07-09) — what production-ready means here
 
 ### A · Ship-blockers
-- [ ] **P1 — lifecycle ownership**: `voco up` / `voco down` /
+- [x] **P1 — lifecycle ownership**: `voco up` / `voco down` /
       `voco status` / `voco logs`; pidfile + health check; idempotent
       up; launchd agent install/uninstall (macOS first, systemd unit
       documented later); XDG default config discovery
       (~/.config/voco/config.toml) so a service needs no flags.
-- [ ] **P2 — assets that survive leaving the repo**: absolute model
+- [x] **P2 — assets that survive leaving the repo**: absolute model
       defaults under the cache dir; first-run downloads (silero VAD,
       whisper via faster-whisper, kokoro voices) with progress +
       checksums into VOCO_CACHE; `models/silero_vad.onnx` relative
       default is a bug outside the repo.
-- [ ] **P3 — TTS floor lifecycle**: voco-d supervises voco-tts-floor
+- [x] **P3 — TTS floor lifecycle**: voco-d supervises voco-tts-floor
       (spawn, health, restart, shutdown) — no more hand-run stale
       floor processes; fix the port mismatch ([tts].base_url default
       :8880 vs the floor's :8000).
-- [ ] **P4 — real logging**: structured logs (levels, timestamps),
+- [x] **P4 — real logging**: structured logs (levels, timestamps),
       rotating file in the state dir, --verbose; daemon.error events
       consistently surfaced; the Input-Monitoring/PTT warning must
       reach the deck, not die in stderr.
@@ -87,6 +87,68 @@ post-review-to-PR · settings polish · light theme · full palette.
 Order: P1 → P2+P3 → P4+P5 → B by risk → C → D. UI work is paused.
 
 ## Journal
+
+- **2026-07-09 · P4 SHIPPED — real logging + /v1/health + honest PTT
+  permission (xai round included).** New `voco.logsetup`: one setup for
+  the `voco.*` tree — RotatingFileHandler on `<state-dir>/daemon.log`
+  (5MB × 3, $VOCO_STATE_DIR honored) + stderr mirror, `VOCO_LOG_CONSOLE=0`
+  for managed spawns, idempotent re-setup, uncreatable-dir degrade to
+  stderr-only; its `_SafeFormatter` pins one-record-one-line (newlines
+  escaped, C0/ESC stripped) because floor output and daemon.error
+  payloads are untrusted text in a log a terminal will print. Daemon:
+  every print() → logger, `--verbose`, logging wired before load_config,
+  `_wire_error_log` is the SINGLE daemon.error→ERROR funnel (emitters
+  never also print). NEW unauthenticated `GET /v1/health` (loopback bind,
+  no mutation) returns the voco-d signature merged with live facts
+  (version/uptime/port/voice/floor); the signature keys outrank the
+  callback. Two log files by design: `daemon.log` (the daemon's own,
+  rotating) vs `daemon.out` (spawn capture, pre-logging crash net —
+  launchd/`voco up`/systemd all point raw output there with the mirror
+  off). `voco logs -f` uses rotation-aware `follow_lines` (inode change /
+  truncation → reopen; missing file — first boot or mid-rotation — is a
+  wait, and a waited-for file is read from its first line). Floor
+  supervisor pumps merged stdout+stderr line-by-line through the
+  `voco.floor` logger (1MB line limit, truncated not fatal, pump reaped
+  on both stop paths). Assets error taxonomy names server/network/
+  timeout/mid-stream/disk failures distinctly. macOS Input Monitoring
+  preflight (`CGPreflightListenEventAccess`, tri-state — None is never
+  denied) makes the silent pynput PTT failure an actionable daemon.error;
+  the deck shows daemon.error as sticky toasts deduped per message.
+
+  **The /xai round (12 findings) — fixed in-slice:** asset temp files
+  now unlink-then-`O_EXCL|O_NOFOLLOW` so crash debris under a recycled
+  pid or a planted symlink can never become the published inode; cache-
+  dir mkdir joined the AssetError taxonomy; URLError-wrapped connect
+  timeouts say "timed out", not "offline"; `healthy()` hardened — the
+  endpoint answering is authoritative (garbage JSON, wrong service, or
+  error status = hard no; only 404/405 falls back to the P1 heuristic);
+  `logs -f` no longer crashes on a not-yet-born daemon.log; `/v1/health`
+  signature keys can't be shadowed by the info callback; the launchd
+  plist and systemd guidance propagate a custom $VOCO_STATE_DIR so the
+  daemon resolves the same state dir its lifecycle files live in.
+  **Contested/accepted with reasons:** the floor `stop()` cancel "race"
+  blocker — both stop paths already `_reap_pump`, race pinned by a
+  stop-immediately-after-start test; the residual cancel-mid-spawn
+  orphan window is microsecond-narrow pre-existing P3 shape, journaled
+  not fixed. Oversized-line recovery logging one truncated record per
+  64KB chunk is accepted: rotation bounds any child flood, and a
+  newline-spamming child floods identically. Mid-run file-handler emit
+  failures ride stdlib handleError to stderr (logging must never stop
+  the daemon); deep degrade is a P5/doctor candidate. /v1/health info
+  exposure accepted: loopback-only, and it reveals what the deck shows.
+
+  Gates: 432 pytest (36 new) · mypy · ruff+format · tsc · protocol
+  drift clean. LIVE (hermetic :7913, scratch VOCO_STATE_DIR/VOCO_CACHE
+  AND scratch `[state].dir`): structured boot/error/shutdown lines in
+  daemon.log, /v1/health JSON with merged facts, up idempotent → down
+  clean → port freed, `logs -f` followed across a forced rename+fresh
+  rotation live, daemon.out stayed banner-only. Live-drill lesson
+  re-learned the hard way: $VOCO_STATE_DIR does NOT scope the session
+  registry — that's config `[state].dir`, and a scratch config without
+  it restores the REAL registry (first attempt did; killed the daemon
+  pre-save, no pollution, config fixed). `voco doctor` (P5) should
+  probably warn when lifecycle state dir and `[state].dir` diverge.
+  NEXT: P5 (`voco doctor`).
 
 - **2026-07-09 · P2+P3 SHIPPED — assets + TTS floor supervision (xai
   round included).** P2: new voco.assets — pinned model downloads

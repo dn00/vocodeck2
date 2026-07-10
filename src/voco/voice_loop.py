@@ -23,7 +23,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from voco.adapters.hotkey import PttHotkey
+from voco.adapters.hotkey import PttHotkey, input_monitoring_granted
 from voco.adapters.microphone import MicStream
 from voco.adapters.silero import load_silero
 from voco.adapters.speaker import SpeakerPlayer
@@ -68,6 +68,9 @@ class VoiceLoopDeps:
     mic_factory: Callable[..., Any] = MicStream
     player_factory: Callable[..., Any] = SpeakerPlayer
     hotkey_factory: Callable[..., Any] | None = PttHotkey
+    # P4: OS permission probe for the PTT listener (macOS Input
+    # Monitoring). Injectable so tests exercise the denied path.
+    ptt_preflight: Callable[[], bool | None] = input_monitoring_granted
     wake_loader: Callable[[str], Callable[[np.ndarray], float]] | None = None
 
 
@@ -298,6 +301,23 @@ class VoiceLoop:
                 key=self._ptt_key,
             )
             self._ptt.start()
+            if self._deps.ptt_preflight() is False:
+                # P4: pynput does not raise on a missing macOS Input
+                # Monitoring grant — it warns to stderr and PTT silently
+                # never fires. Preflight makes the failure reach the
+                # deck instead of dying in a terminal nobody watches.
+                self._bus.emit(
+                    "daemon.error",
+                    {
+                        "error": (
+                            f"push-to-talk cannot see the"
+                            f" {self._ptt_key.upper()} key: grant Input"
+                            " Monitoring to the app that runs voco-d"
+                            " (System Settings → Privacy & Security →"
+                            " Input Monitoring), then restart voco-d"
+                        )
+                    },
+                )
         except Exception as e:
             # Capability degrades (Wayland / missing pynput); loop stays up.
             self._bus.emit("daemon.error", {"error": f"ptt unavailable: {e}"})

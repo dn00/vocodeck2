@@ -2,8 +2,9 @@
 process so nobody hand-runs a stale `voco-tts-floor` for a week again.
 
 The daemon spawns the floor (same-venv resolution, `python -m
-voco.tts_floor` fallback), pipes its output into the daemon's own
-stdout/stderr (one log stream, P4 formalizes it), restarts it on crash
+voco.tts_floor` fallback), pumps its stdout+stderr line-by-line through
+the `voco.floor` logger (P4: one structured, rotating log stream with
+timestamps — floor output never bypasses it), restarts it on crash
 with capped exponential backoff (reset after a healthy hour), and
 tears it down on shutdown. Every exit and restart is emitted as a
 daemon.error event — supervision is never silent.
@@ -12,6 +13,7 @@ daemon.error event — supervision is never silent.
 from __future__ import annotations
 
 import asyncio
+import logging
 import shutil
 import sys
 from collections.abc import Callable
@@ -64,14 +66,19 @@ class FloorSupervisor:
         backoff_start: float = BACKOFF_START_S,
         backoff_cap: float = BACKOFF_CAP_S,
         backoff_reset: float = BACKOFF_RESET_S,
+        line_log: Callable[[str], None] | None = None,
     ) -> None:
         self._argv = argv
         self._emit = emit
         self._backoff_start = backoff_start
         self._backoff_cap = backoff_cap
         self._backoff_reset = backoff_reset
+        # P4: every floor output line lands in the structured log with a
+        # timestamp (injectable so tests collect instead of logging)
+        self._line_log = line_log or logging.getLogger("voco.floor").info
         self._proc: asyncio.subprocess.Process | None = None
         self._task: asyncio.Task | None = None
+        self._pump_task: asyncio.Task | None = None
         self._stopping = False
         self.restarts = 0  # observability (voco status / tests)
 
@@ -83,10 +90,40 @@ class FloorSupervisor:
         return await asyncio.create_subprocess_exec(
             *self._argv,
             stdin=asyncio.subprocess.DEVNULL,
-            # the daemon's own stdout/stderr: one managed log stream
-            stdout=None,
-            stderr=None,
+            # one merged pipe, pumped through the voco.floor logger
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            limit=1 << 20,  # a huge line must not kill the pump
         )
+
+    async def _pump(self, stream: asyncio.StreamReader) -> None:
+        """Feed floor output into the log until EOF (child exit)."""
+        while True:
+            try:
+                line = await stream.readline()
+            except (asyncio.LimitOverrunError, ValueError):
+                # over-limit line: drain a chunk, mark the cut, move on
+                chunk = await stream.read(1 << 16)
+                if not chunk:
+                    return
+                text = chunk.decode(errors="replace").rstrip()
+                self._line_log(f"{text[:2000]} …[line truncated]")
+                continue
+            if not line:
+                return
+            self._line_log(line.decode(errors="replace").rstrip())
+
+    async def _reap_pump(self, timeout: float) -> None:
+        """The pump ends on pipe EOF right after child exit; a grandchild
+        holding the pipe open must not wedge shutdown — bounded wait,
+        then cancel."""
+        pump, self._pump_task = self._pump_task, None
+        if pump is None:
+            return
+        try:
+            await asyncio.wait_for(pump, timeout=timeout)
+        except (TimeoutError, asyncio.CancelledError):
+            pump.cancel()
 
     async def _run(self) -> None:
         backoff = self._backoff_start
@@ -122,7 +159,12 @@ class FloorSupervisor:
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, self._backoff_cap)
                 continue
+            if self._proc.stdout is not None:
+                self._pump_task = asyncio.create_task(
+                    self._pump(self._proc.stdout), name="tts-floor-pump"
+                )
             rc = await self._proc.wait()
+            await self._reap_pump(timeout=5)
             if self._stopping:
                 return
             ran_s = asyncio.get_running_loop().time() - started
@@ -152,6 +194,7 @@ class FloorSupervisor:
                 pass
         proc = self._proc
         if proc is None or proc.returncode is not None:
+            await self._reap_pump(timeout=1)
             return
         proc.terminate()
         try:
@@ -159,3 +202,5 @@ class FloorSupervisor:
         except TimeoutError:
             proc.kill()  # loud last resort
             await proc.wait()
+        # _run may have been cancelled mid-wait: reap its pump here too
+        await self._reap_pump(timeout=2)

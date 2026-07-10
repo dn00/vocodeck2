@@ -65,7 +65,7 @@ def silence_frame() -> np.ndarray:
 
 # Canned transcript is punctuated like real Whisper output for a finished
 # utterance — unpunctuated text now triggers incomplete_hold_ms patience.
-def make_loop(tmp_path, canned="run the tests.", attention="always"):
+def make_loop(tmp_path, canned="run the tests.", attention="always", **dep_overrides):
     bus = EventBus()
     events: list = []
     bus.subscribe(lambda env: events.append((env.type, env.payload)))
@@ -78,7 +78,7 @@ def make_loop(tmp_path, canned="run the tests.", attention="always"):
             "attention": attention,
         },
     }
-    deps = VoiceLoopDeps(
+    dep_args: dict = dict(
         load_vad_model=lambda path: ScriptedVad(),
         stt_builder=lambda provider, **kw: FakeStt(canned),
         tts_factory=FakeTts,
@@ -86,6 +86,8 @@ def make_loop(tmp_path, canned="run the tests.", attention="always"):
         player_factory=FakePlayer,
         hotkey_factory=None,  # no global hooks in tests
     )
+    dep_args.update(dep_overrides)
+    deps = VoiceLoopDeps(**dep_args)
     voice = VoiceLoop(cfg, bus, host=host, deps=deps)
     return voice, host, events
 
@@ -452,5 +454,61 @@ async def test_full_duplex_speech_barges_in_on_playback(tmp_path):
         await feed(voice, 4, speech_frame)  # user talks over it
         assert player.stops == 1  # rule 1: flushed
         assert any(t == "speech.interrupted" for t, _ in events)
+    finally:
+        voice.stop()
+
+
+# ---- PTT permission preflight (BUILD-PROD P4) --------------------------------
+
+
+class FakePtt:
+    """Constructs and starts cleanly — preflight only runs after a
+    successful start, so the disabled-factory default can't reach it."""
+
+    def __init__(self, loop, *, on_press, on_release, key):
+        self.key = key
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_ptt_denied_permission_reaches_the_deck(tmp_path):
+    """pynput never raises on a missing macOS Input Monitoring grant —
+    it warns to stderr and PTT silently does nothing. The preflight
+    turns that into an actionable daemon.error the deck can toast."""
+    voice, _host, events = make_loop(
+        tmp_path, hotkey_factory=FakePtt, ptt_preflight=lambda: False
+    )
+    await voice.start(asyncio.get_running_loop())
+    try:
+        denied = [
+            p
+            for t, p in events
+            if t == "daemon.error" and "Input Monitoring" in p.get("error", "")
+        ]
+        assert denied, "denied preflight never reached the bus"
+        assert "restart voco-d" in denied[0]["error"]  # actionable, not vague
+    finally:
+        voice.stop()
+
+
+@pytest.mark.asyncio
+async def test_ptt_unknown_permission_is_not_denied(tmp_path):
+    # None = "cannot tell" (non-mac, missing symbol) — the loop must
+    # NOT cry wolf about permissions it cannot actually check
+    voice, _host, events = make_loop(
+        tmp_path, hotkey_factory=FakePtt, ptt_preflight=lambda: None
+    )
+    await voice.start(asyncio.get_running_loop())
+    try:
+        assert not [
+            p
+            for t, p in events
+            if t == "daemon.error" and "Input Monitoring" in p.get("error", "")
+        ]
     finally:
         voice.stop()
