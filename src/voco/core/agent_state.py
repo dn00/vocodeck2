@@ -15,7 +15,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-DisplayState = Literal["gone", "blocked", "working", "listening", "stale", "idle"]
+DisplayState = Literal[
+    "gone", "disconnected", "blocked", "working", "listening", "stale", "idle"
+]
 
 
 def display_state(

@@ -167,6 +167,7 @@ class Daemon:
         self._state_save_task: asyncio.Task[None] | None = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._watcher_task: asyncio.Task[None] | None = None
+        self._session_liveness_task: asyncio.Task[None] | None = None
         # Workbench manifests (SPEC-WORKBENCH §8): durable pages + findings.
         from voco.adapters.manifest import WorkspaceManifest
 
@@ -1116,6 +1117,8 @@ class Daemon:
                 self.voice.speak_local(decision.speech, None)
             return
         turn_id, result = self.dispatch(text, decision, origin="typed")
+        if result in {"no_session", "disconnected"}:
+            raise ValueError("selected agent is disconnected; start its listener first")
         if self.voice is not None:
             self.voice.dispatch_feedback(turn_id, result)
             if decision.kind == "ack_forward" and decision.speech:
@@ -1434,6 +1437,12 @@ class Daemon:
             await asyncio.sleep(interval)
             await self._live_git_tick(host, git_status)
 
+    async def _session_liveness_loop(self) -> None:
+        """Publish listener-expiry transitions even when no other event fires."""
+        while True:
+            await asyncio.sleep(5.0)
+            self.registry.refresh_liveness()
+
     async def _live_git_tick(self, host: str, git_status: Any) -> None:
         """Refresh local workspaces concurrently with a small hard bound."""
         raw_limit = self.cfg.get("workbench", {}).get("live_git_concurrency", 4)
@@ -1628,6 +1637,7 @@ class Daemon:
         self._wire_terminal_pages()
         self._start_live_git(loop)
         self._start_watcher(loop)
+        self._session_liveness_task = loop.create_task(self._session_liveness_loop())
         try:
             runner = await run_server(self.bridge, host=host, port=port)
         except OSError as e:
@@ -1680,6 +1690,7 @@ class Daemon:
                 task
                 for task in (
                     self._watcher_task,
+                    self._session_liveness_task,
                     self._live_git_task,
                     self._state_save_task,
                     self._manifest_save_task,

@@ -157,6 +157,7 @@ span.add { color: var(--ok); } span.del { color: var(--bad); }
 .ar-state.working, .ar-state.listening { color: var(--ok); }
 .ar-state.blocked { color: var(--bad); }
 .ar-state.stale { color: var(--voice); }
+.ar-state.disconnected { color: var(--bad); }
 .rail-x { color: var(--ink3); padding: 0 2px; visibility: hidden; flex: none; }
 .agent-row:hover .rail-x, .page-row:hover .rail-x { visibility: visible; }
 .rail-x:hover { color: var(--bad); }
@@ -191,6 +192,7 @@ svg.ic { width: 14px; height: 14px; flex: none; display: block; }
 .ic.mstate.working, .ic.mstate.listening { color: var(--ok); }
 .ic.mstate.blocked { color: var(--bad); }
 .ic.mstate.stale { color: var(--voice); }
+.ic.mstate.disconnected { color: var(--bad); opacity: .7; }
 .ic.mstate.gone, .ic.mstate.none { opacity: .45; }
 .picon .ic { margin: 0 auto; }
 .agent-row > .ic { color: var(--ink3); }
@@ -206,6 +208,7 @@ svg.ic { width: 14px; height: 14px; flex: none; display: block; }
 .dot.blocked { background: var(--bad); }
 .dot.idle { background: var(--ink3); }
 .dot.stale { background: var(--voice); }
+.dot.disconnected { background: var(--bad); }
 .dot.gone { background: transparent; border: 1px solid var(--ink3); }
 .dot.none { background: transparent; border: 1px solid var(--ink3); opacity: .6; }
 

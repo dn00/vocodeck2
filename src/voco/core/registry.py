@@ -113,6 +113,9 @@ class Session:
     # Ephemeral transport truth. Restored tokens begin disconnected and only
     # become routing targets after the cached agent actually calls back in.
     connected: bool = True
+    # Listener-specific liveness. Registration grants a grace window; parked
+    # polls refresh it. Other verbs must not keep a dead listener looking live.
+    last_listener_seen: float = 0.0
 
     @property
     def state(self) -> SessionState:
@@ -142,7 +145,7 @@ class Session:
         return str(root) if root else None
 
 
-DispatchResult = Literal["live", "queued", "queued_idle", "no_session"]
+DispatchResult = Literal["live", "queued", "queued_idle", "disconnected", "no_session"]
 
 
 def _identity_key(identity: dict[str, Any]) -> tuple:
@@ -197,6 +200,7 @@ class Registry:
     # WORKING one gets the long window (mid-turn agents go quiet).
     SWEEP_IDLE_S = 60.0
     SWEEP_WORKING_S = 900.0
+    LISTENER_GRACE_S = 120.0
 
     def register(self, identity: dict[str, Any], capabilities: list[str]) -> Session:
         key = _identity_key(identity)
@@ -211,12 +215,14 @@ class Registry:
             s.last_seen = self._now()
             self._mark_connected(s)
             return s
+        now = self._now()
         s = Session(
             session_id=secrets.token_hex(16),
             identity=dict(identity),
             call_name=self._assign_name(key),
             capabilities=self._with_inject(identity, capabilities),
-            last_seen=self._now(),
+            last_seen=now,
+            last_listener_seen=now,
         )
         self._sessions[s.session_id] = s
         self._by_identity[key] = s.session_id
@@ -367,7 +373,9 @@ class Registry:
     @property
     def active(self) -> Session | None:
         s = self._sessions.get(self._active_id) if self._active_id else None
-        return s if s is not None and s.connected else None
+        return (
+            s if s is not None and s.connected and not self.is_disconnected(s) else None
+        )
 
     def by_call_name(self, name: str) -> Session | None:
         for s in self._sessions.values():
@@ -379,7 +387,7 @@ class Registry:
 
     def switch(self, name: str) -> Session | None:
         s = self.by_call_name(name)
-        if s is None or not s.connected:
+        if s is None or not s.connected or self.is_disconnected(s):
             return None
         self._active_id = s.session_id
         s.unread_digest = 0
@@ -425,6 +433,8 @@ class Registry:
         s = target or self.active
         if s is None or not s.connected:
             return "no_session"
+        if self.is_disconnected(s):
+            return "disconnected"
         input_bytes = utf8_size(text)
         if input_bytes > MAX_INPUT_BYTES:
             raise ValueError(f"input exceeds maximum size of {MAX_INPUT_BYTES} bytes")
@@ -477,6 +487,8 @@ class Registry:
 
         if not s.connected:
             return "gone"
+        if self.is_disconnected(s):
+            return "disconnected"
         return display_state(
             bridge_state=s.state,
             pane_hint=s.pane_hint,
@@ -487,14 +499,16 @@ class Registry:
     def _emit_session_state(self, s: Session) -> None:
         """Emit session.state only on actual change: a healthy listener
         re-parks every slice and must not spam identical events."""
-        if s.state != s.last_state_emitted:
-            s.last_state_emitted = s.state
+        display = self._display_state(s)
+        emitted = f"{s.state}:{display}"
+        if emitted != s.last_state_emitted:
+            s.last_state_emitted = emitted
             self._emit(
                 "session.state",
                 {
                     "session_id": s.session_id,
                     "state": s.state,
-                    "display_state": self._display_state(s),
+                    "display_state": display,
                 },
             )
 
@@ -512,6 +526,7 @@ class Registry:
             return None
         self._mark_connected(s)
         s.last_seen = self._now()
+        s.last_listener_seen = self._now()
         s.outstanding_turn_id = None  # a new listen ends the working turn
         s.reviewing = False  # ...and the review turn
         review = self.review_items(session_id)
@@ -562,6 +577,19 @@ class Registry:
         s = self._sessions.get(session_id)
         if s is not None:
             s.parked = False
+
+    def is_disconnected(self, s: Session) -> bool:
+        """Idle with no listener heartbeat beyond the registration grace."""
+        return (
+            s.connected
+            and s.state == "idle"
+            and self._now() - s.last_listener_seen > self.LISTENER_GRACE_S
+        )
+
+    def refresh_liveness(self) -> None:
+        """Emit display transitions caused only by elapsed wall time."""
+        for s in self._sessions.values():
+            self._emit_session_state(s)
 
     def record_say(self, session_id: str, text: str, turn_id: str | None) -> bool:
         """Returns True if this session is active (say should be spoken)."""

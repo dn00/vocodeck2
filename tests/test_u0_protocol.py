@@ -41,6 +41,28 @@ def test_no_session_dispatch_records_nothing():
     assert reg.dispatch("hello?", "t-1") == "no_session"
 
 
+def test_idle_session_becomes_disconnected_and_rejects_input():
+    clock = {"now": 10.0}
+    events: list[tuple[str, dict]] = []
+    reg = Registry(
+        now=lambda: clock["now"],
+        emit=lambda topic, payload: events.append((topic, payload)),
+    )
+    s = reg.register(IDENT, ["say", "listen"])
+    clock["now"] += reg.LISTENER_GRACE_S + 1
+    reg.refresh_liveness()
+    snap = reg.snapshot()["sessions"][0]
+    assert snap["display_state"] == "disconnected"
+    assert reg.switch(s.call_name) is None
+    assert reg.dispatch("lost forever", "t-1", target=s) == "disconnected"
+    assert s.queued == [] and list(s.input_log) == []
+    state_events = [payload for topic, payload in events if topic == "session.state"]
+    assert state_events[-1]["display_state"] == "disconnected"
+
+    reg.on_listen_start(s.session_id)
+    assert reg.snapshot()["sessions"][0]["display_state"] == "listening"
+
+
 def test_input_log_survives_dump_restore():
     reg = Registry()
     s = reg.register(IDENT, ["say"])

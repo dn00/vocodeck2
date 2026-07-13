@@ -11,10 +11,12 @@
 - **DF-9: Rail nav double-selects across workspaces; page doesn't switch.**
   Clicking "Files" or "Overview" in one workspace's rail also selects the same nav item in the other workspace (firstmate + CRM both highlight). Likely because phantom agents (DF-3/DF-4) share the same selection state or the nav handler matches by item type rather than workspace-scoped ID. The center panel also doesn't switch to the clicked page — required a full page refresh to recover. After refresh the double-select still persists. Would scale to N-select with more workspaces added. Probably related to the phantom agent sessions from DF-3.
 
-- **DF-10: "Idle" status misleading for dead sessions; messages silently queued.**
-  Sessions with no active listener (Dana, Silas) show as "idle", implying they're alive and waiting. In reality they're dead processes that will never drain queued messages. Text sent to them queues silently with no feedback. Needs: (a) a "disconnected" status (no listener heartbeat for N seconds) distinct from "idle" (listener parked, waiting for input), (b) auto-reap after a longer timeout, (c) the UI should warn or block sending to a disconnected session. Related to DF-3/DF-4/DF-6.
-
 ## Fixed
+
+- **DF-10: "Idle" status misleading for dead sessions; messages silently
+  queued.** Idle sessions with no listener heartbeat for two minutes now become
+  `disconnected`, render in red, cannot be activated, and reject new input
+  without changing queue/history. A returning listener restores `ready` state.
 
 - **DF-6: Separate workspace registration from agent registration.** Added
   `voco workspace add <path>` and a session-free workspace registration path.
