@@ -2,9 +2,6 @@
 
 ## Open
 
-- **DF-1: Annotation dialog at top of page instead of inline.**
-  In the file browser, after opening a file and clicking or selecting text, the annotation dialog appears at the top of the page instead of anchored inline next to the selected line.
-
 - **DF-3: Multiple sessions spawned instead of one; identity keeps changing.**
   A single Claude Code session created multiple daemon sessions with different names. `voice_init` registered as "Dana", the streaming listener registered a second session as "Ezra", and then `voice_screen` brought "Dana" back — now both Dana and Ezra appear under the firstmate repo. Expected: one stable session identity throughout. Root cause likely: each MCP tool call and the Monitor script each derive a different session identity (different TMUX_PANE or process context), so the daemon treats them as separate agents. Workspace association was also delayed until a page reload.
 
@@ -27,6 +24,11 @@
   Once a diff or doc is pushed to the workbench, there's no way to close or remove it — not from the UI (no close button on pages in the rail) and not from the CLI or MCP (no `page close` / `page_remove` command). Need both: a close button in the UI (with a confirm dialog for pages with annotations/findings) and a CLI/MCP verb (`voco page close <id>` / `page_close`) so agents can clean up too.
 
 ## Fixed
+
+- **DF-1: Annotation dialog at top of page instead of inline.** File
+  annotations now position from the selected range inside the scrolling center
+  panel instead of being inserted after the file header. Covered by Chromium
+  geometry regression testing.
 
 - **DF-2: Need an annotation mode toggle.** Added a persistent center-panel
   toggle. Normal selection/copy is the default; file, diff, document, screen,

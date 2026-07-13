@@ -184,6 +184,21 @@ test("live pages, diffs, findings, and asks round-trip in a real browser", async
   await page.locator(".page-row", { hasText: "Notes" }).click();
   await expect(page.locator(".view")).toContainText("new path content");
 
+  await page.getByText("files", { exact: true }).last().click();
+  await page.locator(".ftree-file", { hasText: "notes.md" }).click();
+  await page.getByRole("button", { name: "annotate off" }).click();
+  const code = page.locator(".file-src code");
+  await code.selectText();
+  await code.dispatchEvent("mouseup");
+  const codeBox = await code.boundingBox();
+  const editorBox = await page.locator(".file-annot-editor").boundingBox();
+  expect(codeBox).toBeTruthy();
+  expect(editorBox).toBeTruthy();
+  expect(editorBox.y).toBeGreaterThan(codeBox.y);
+  expect(editorBox.y - codeBox.y).toBeLessThan(240);
+  await page.locator(".file-annot-editor .tbtn", { hasText: "cancel" }).click();
+  await page.getByRole("button", { name: "annotate on" }).click();
+
   await page.locator(".page-row", { hasText: "Review diff" }).click();
   await expect(page.locator(".dfile-head")).toContainText("demo.py");
   await page.locator(".dfile-head").click();

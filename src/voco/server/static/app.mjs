@@ -927,13 +927,13 @@ async function renderFileSource(view, ws, st) {
       const full = code.textContent || "";
       const start = offsetIn(code, range.startContainer, range.startOffset);
       const end = offsetIn(code, range.endContainer, range.endOffset);
-      openFileEditor(view, head, {
+      openFileEditor(view, {
         kind: "file", file: st.path, exact,
         prefix: full.slice(Math.max(0, start - 40), start),
         suffix: full.slice(end, end + 40),
         startLine: full.slice(0, start).split("\n").length,
         endLine: full.slice(0, end).split("\n").length,
-      });
+      }, range.getBoundingClientRect());
     });
   } catch (e) {
     view.replaceChildren(
@@ -943,7 +943,7 @@ async function renderFileSource(view, ws, st) {
   }
 }
 
-function openFileEditor(view, afterEl, anchor) {
+function openFileEditor(view, anchor, anchorRect) {
   view.querySelectorAll(".annot-editor").forEach((n) => n.remove());
   let kind = "concern";
   const short = anchor.file.split("/").pop();
@@ -997,7 +997,14 @@ function openFileEditor(view, afterEl, anchor) {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); commit(); }
     if (e.key === "Escape") { e.preventDefault(); box.remove(); }
   });
-  afterEl.after(box);
+  // The old implementation inserted after the sticky file header, so every
+  // annotation appeared at the top regardless of the selected line. Position
+  // against the actual selection within the scrolling center panel instead.
+  const vr = view.getBoundingClientRect();
+  box.classList.add("floating", "file-annot-editor");
+  box.style.top = Math.max(0,
+    anchorRect.bottom - vr.top + view.scrollTop + 6) + "px";
+  view.append(box);
   ta.focus();
 }
 

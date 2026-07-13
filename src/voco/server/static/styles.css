@@ -242,7 +242,8 @@ svg.ic { width: 14px; height: 14px; flex: none; display: block; }
 .pg-prov b { color: var(--ink2); font-weight: 400; }
 .pg-hint { margin-left: auto; }
 .pgbar .work-actions { margin-left: 0; }
-.view { flex: 1; overflow: auto; padding: 14px 18px; background: var(--l1); }
+.view { position: relative; flex: 1; overflow: auto; padding: 14px 18px;
+  background: var(--l1); }
 .view.empty { display: flex; align-items: center; justify-content: center; }
 .empty-note { color: var(--ink3); padding: 16px 8px; text-align: center; }
 
@@ -767,6 +768,7 @@ svg.ic { width: 14px; height: 14px; flex: none; display: block; }
   padding: 10px 14px; max-width: 640px; margin-top: 8px; }
 .doc-editor.floating { position: absolute; left: 24px; right: 24px;
   z-index: 5; }
+.file-annot-editor { max-width: none; }
 .doc-editor textarea { width: 100%; min-height: 52px; resize: vertical;
   padding: 8px 10px; font: 12px/1.6 var(--mono);
   background: var(--l0); border: 1px solid var(--edge); }
