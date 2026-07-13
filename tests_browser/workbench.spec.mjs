@@ -188,6 +188,10 @@ test("live pages, diffs, findings, and asks round-trip in a real browser", async
   await expect(page.locator(".dfile-head")).toContainText("demo.py");
   await page.locator(".dfile-head").click();
   await page.locator(".drow.add").click();
+  await expect(page.locator(".annot-editor")).toHaveCount(0);
+  await page.getByRole("button", { name: "annotate off" }).click();
+  await expect(page.getByRole("button", { name: "annotate on" })).toBeVisible();
+  await page.locator(".drow.add").click();
   await page.locator(".annot-editor textarea").fill("Needs a regression test");
   await page.locator(".annot-editor .tbtn.primary").click();
   await page.locator(".ctab", { hasText: "annotations" }).click();

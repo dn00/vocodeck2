@@ -750,6 +750,8 @@ svg.ic { width: 14px; height: 14px; flex: none; display: block; }
   width: 130px; }
 .whbtn.danger { color: var(--bad);
   border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.annotate-toggle.on { color: var(--voice);
+  border-color: color-mix(in srgb, var(--voice) 60%, transparent); }
 
 /* U2R: in-deck danger confirm */
 .btn-primary.danger { background: var(--bad); border-color: var(--bad); }
@@ -760,6 +762,7 @@ svg.ic { width: 14px; height: 14px; flex: none; display: block; }
 .review-doc:not(.no-annotate) .review-prose
   :is(p, li, h1, h2, h3, h4, h5, h6, pre, blockquote, td, th):hover {
   background: color-mix(in srgb, var(--voice) 6%, transparent); }
+.diff.no-annotate .drow { cursor: text; }
 .doc-editor { background: var(--l1); border: 1px solid var(--edge2);
   padding: 10px 14px; max-width: 640px; margin-top: 8px; }
 .doc-editor.floating { position: absolute; left: 24px; right: 24px;

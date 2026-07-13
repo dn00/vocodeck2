@@ -5,9 +5,6 @@
 - **DF-1: Annotation dialog at top of page instead of inline.**
   In the file browser, after opening a file and clicking or selecting text, the annotation dialog appears at the top of the page instead of anchored inline next to the selected line.
 
-- **DF-2: Need an annotation mode toggle.**
-  Clicking/selecting text always triggers the annotation dialog, which conflicts with normal interactions like copying text. Add a toggle button (top-right of center panel or similar) to switch between annotation mode and normal select/copy mode. Should be available on all page types (files, diffs, docs, overview) except HTML rendered pages.
-
 - **DF-3: Multiple sessions spawned instead of one; identity keeps changing.**
   A single Claude Code session created multiple daemon sessions with different names. `voice_init` registered as "Dana", the streaming listener registered a second session as "Ezra", and then `voice_screen` brought "Dana" back — now both Dana and Ezra appear under the firstmate repo. Expected: one stable session identity throughout. Root cause likely: each MCP tool call and the Monitor script each derive a different session identity (different TMUX_PANE or process context), so the daemon treats them as separate agents. Workspace association was also delayed until a page reload.
 
@@ -30,6 +27,11 @@
   Once a diff or doc is pushed to the workbench, there's no way to close or remove it — not from the UI (no close button on pages in the rail) and not from the CLI or MCP (no `page close` / `page_remove` command). Need both: a close button in the UI (with a confirm dialog for pages with annotations/findings) and a CLI/MCP verb (`voco page close <id>` / `page_close`) so agents can clean up too.
 
 ## Fixed
+
+- **DF-2: Need an annotation mode toggle.** Added a persistent center-panel
+  toggle. Normal selection/copy is the default; file, diff, document, screen,
+  and overview surfaces only open annotation editors while annotation mode is
+  enabled. HTML artifacts remain on their existing element-annotation flow.
 
 - **DF-5: Error toast undismissable.** Fixed by using a semantic dismiss button
   with isolated click handling and keyboard focus styling. Covered by browser

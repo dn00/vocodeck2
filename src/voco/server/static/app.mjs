@@ -38,6 +38,10 @@ const persisted = (key, fallback) => {
 const persistSet = (key, set) =>
   localStorage.setItem(key, JSON.stringify([...set]));
 
+// Annotation is an explicit interaction mode. Normal selection/copy is
+// the default; the user's last choice persists across reloads.
+let annotationMode = !!persisted("voco.annotationMode", false);
+
 const store = new Store();
 // Console log tab (M6): a bounded ring of every bus event.
 const eventLog = [];
@@ -691,17 +695,36 @@ function renderWork(force = false) {
       + " revisions are marked stale, never dropped";
   const srnote = h("span", { class: "sr-note" });
   const actions = h("div", { class: "work-actions" });
-  const hint = page && (page.type === "doc" || page.type === "screen")
-    ? "annotate: click block · select text"
-    : page && page.type === "diff" ? "annotate: click a line"
-      : page && page.type === "html" ? "annotate: toggle, then click an element"
-        : "";
+  const canToggleAnnotations = !!ws && (!page
+    || page.type === "doc" || page.type === "screen" || page.type === "diff"
+    || isFiles);
+  const annotationToggle = canToggleAnnotations
+    ? h("button", {
+      class: "whbtn annotate-toggle" + (annotationMode ? " on" : ""),
+      type: "button",
+      "aria-pressed": String(annotationMode),
+      title: annotationMode
+        ? "annotation mode on — click to return to normal select/copy"
+        : "annotation mode off — normal select/copy",
+      onclick: () => {
+        annotationMode = !annotationMode;
+        localStorage.setItem("voco.annotationMode", JSON.stringify(annotationMode));
+        document.querySelectorAll(".annot-editor").forEach((n) => n.remove());
+        renderWork(true);
+      },
+    }, annotationMode ? "annotate on" : "annotate off") : null;
+  const hint = !annotationMode ? ""
+    : page && (page.type === "doc" || page.type === "screen")
+      ? "click block · select text"
+      : page && page.type === "diff" ? "click a line"
+        : isFiles ? "select code" : "";
   // export lives on the overview card + palette now (audit #1): it
   // writes interop FILES for external tools — agents already receive
   // annotations live, so it is not a step in the loop.
   work.append(tabbar,
     h("div", { class: "pgbar" }, prov, srnote,
       hint ? h("span", { class: "pg-hint" }, hint) : "",
+      annotationToggle || "",
       actions));
   const view = h("div", { class: "view" });
   // Capture the key this view was RENDERED for: saving under a live
@@ -884,13 +907,15 @@ async function renderFileSource(view, ws, st) {
     const head = h("div", { class: "file-head" },
       h("button", { class: "whbtn", onclick: back }, "← files"),
       h("span", { class: "mono" }, st.path),
-      h("span", { class: "micro" }, "select code to annotate"));
+      h("span", { class: "micro" }, annotationMode
+        ? "select code to annotate" : "normal select/copy mode"));
     view.replaceChildren(head, pre);
     highlightCode(/** @type {HTMLElement} */ (code),
       LANG_BY_EXT[ext.toLowerCase()] || "");
     // A3: select code → file finding ({kind:"file"} anchor, page-less;
     // reference note-bar concept on voco's finding seam)
     pre.addEventListener("mouseup", (e) => {
+      if (!annotationMode) return;
       if (/** @type {Element} */ (e.target).closest(".annot-editor")) return;
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || !sel.rangeCount) return;
@@ -1172,7 +1197,8 @@ async function renderPage(view, page, srnote, actions) {
       }
       await renderDocView(view, c.markdown || "", {
         title: page.title,
-        readOnly: !!(c.params && c.params.annotatable === false),
+        readOnly: !annotationMode
+          || !!(c.params && c.params.annotatable === false),
         reveal,
         onAnnotate: (anchor, text, kind, blocking) =>
           addFinding(page, anchor, text, kind, blocking),
@@ -1214,6 +1240,7 @@ async function renderPage(view, page, srnote, actions) {
       const reviewed = new Set(persisted(revKey, []));
       const api = renderDiff(view, c, {
         rev: page.rev,
+        annotationEnabled: annotationMode,
         findings,
         fold: fc.fold,
         reveal,

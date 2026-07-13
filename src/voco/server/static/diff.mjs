@@ -66,6 +66,7 @@ export function seedFolds(content, findings) {
  *   added:string[], removed:string[], unchanged:string[]}}} content
  * @param {{onAnnotate:(a:Anchor, text:string, kind:string, blocking:boolean)=>void,
  *   findings:any[], rev?:number, fold:Set<string>, reveal?:?string,
+ *   annotationEnabled?:boolean,
  *   scrollTo?:(el:HTMLElement)=>void, onFoldChange?:()=>void,
  *   highlight?:(codeEl:HTMLElement, path:string)=>any,
  *   reviewed?:Set<string>, onReviewToggle?:(path:string, on:boolean)=>void,
@@ -75,7 +76,9 @@ export function seedFolds(content, findings) {
  */
 export function renderDiff(view, content, ctx) {
   view.replaceChildren();
-  const wrap = el("div", { class: "diff" });
+  const wrap = el("div", {
+    class: "diff" + (ctx.annotationEnabled === false ? " no-annotate" : ""),
+  });
   let anchorStart = /** @type {?{file:string, side:string, line:number}} */ (null);
   const inter = content.interdiff;
   const fold = ctx.fold;
@@ -196,6 +199,7 @@ export function renderDiff(view, content, ctx) {
         inChange = changed;
         if (row.line != null) {
           tr.addEventListener("click", (e) => {
+            if (ctx.annotationEnabled === false) return;
             if (e.shiftKey && anchorStart && anchorStart.file === file.path
                 && anchorStart.side === row.side) {
               const lo = Math.min(anchorStart.line, row.line);
