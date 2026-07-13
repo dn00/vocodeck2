@@ -19,6 +19,10 @@ vad_threshold = 0.5
 provider = "faster-whisper"
 model_size = "small"
 device = "cpu"
+max_pending = 2                 # bound queued transcriptions under overload
+
+[state]
+session_ttl_s = 86400           # discard cached agent tokens after one day
 
 [tts]
 # kokoro-onnx runner (bundled runner lands in M3); any OpenAI-compatible

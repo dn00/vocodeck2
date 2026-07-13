@@ -218,12 +218,12 @@ async def test_page_publish_resolves_and_upserts(daemon, tmp_path):
     )
     assert result["ok"] is True and result["rev"] == 1
     assert result["root"] == str(repo.resolve())
-    # re-publish of the same source replaces in place: rev bumps
+    # identical re-publish is idempotent: findings stay current
     again = await daemon._control(
         "page.publish",
         {"workspace": opened["workspace"], "source": {"branch": ""}},
     )
-    assert again["page_id"] == result["page_id"] and again["rev"] == 2
+    assert again["page_id"] == result["page_id"] and again["rev"] == 1
 
 
 async def test_page_publish_errors_carry_context(daemon, tmp_path):

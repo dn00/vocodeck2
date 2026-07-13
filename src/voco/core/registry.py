@@ -10,8 +10,8 @@ INVARIANTS:
 - `working` never times out into stale (review finding 3); stale is a
   display flag computed from idle time only.
 - Exactly one active session or none; no auto-election on detach.
-- Dispatch to a non-parked session queues; queues are in-memory (v1,
-  documented loss on restart).
+- Dispatch to a non-parked session queues; queues are persisted, while a
+  restored session remains unroutable until its cached agent calls back in.
 - Call names come from a phonetically distinct pool, stable per identity.
 """
 
@@ -100,6 +100,9 @@ class Session:
     # Last session.state actually emitted (ephemeral): dedupe — a listen
     # slice re-parking every 50s must not spam identical events.
     last_state_emitted: str | None = None
+    # Ephemeral transport truth. Restored tokens begin disconnected and only
+    # become routing targets after the cached agent actually calls back in.
+    connected: bool = True
 
     @property
     def state(self) -> SessionState:
@@ -196,6 +199,7 @@ class Registry:
                 # lists (pre-review sessions) must not survive re-register.
                 s.capabilities = self._with_inject(identity, capabilities)
             s.last_seen = self._now()
+            self._mark_connected(s)
             return s
         s = Session(
             session_id=secrets.token_hex(16),
@@ -236,6 +240,7 @@ class Registry:
             return None
         old_key = _identity_key(s.identity)
         old_root = s.home_root
+        was_connected = s.connected
         s.identity.update(identity)
         new_key = _identity_key(s.identity)
         if new_key != old_key:
@@ -243,7 +248,7 @@ class Registry:
                 del self._by_identity[old_key]
             self._by_identity[new_key] = session_id  # newest claim wins
         s.last_seen = self._now()
-        if s.home_root != old_root:
+        if s.home_root != old_root and was_connected:
             # The rail groups sessions by home root — tell UIs it moved
             # (same upsert event a fresh attach emits).
             self._emit(
@@ -256,7 +261,26 @@ class Registry:
                     "root": s.home_root,
                 },
             )
+        self._mark_connected(s)
         return s
+
+    def _mark_connected(self, s: Session) -> None:
+        if s.connected:
+            return
+        s.connected = True
+        s.last_seen = self._now()
+        self._emit(
+            "session.attached",
+            {
+                "session_id": s.session_id,
+                "name": s.display_name,
+                "capabilities": s.capabilities,
+                "host": s.identity.get("host"),
+                "root": s.home_root,
+            },
+        )
+        if self._active_id == s.session_id:
+            self._emit("session.activated", {"session_id": s.session_id})
 
     @staticmethod
     def _with_inject(identity: dict[str, Any], capabilities: list[str]) -> list[str]:
@@ -332,7 +356,8 @@ class Registry:
 
     @property
     def active(self) -> Session | None:
-        return self._sessions.get(self._active_id) if self._active_id else None
+        s = self._sessions.get(self._active_id) if self._active_id else None
+        return s if s is not None and s.connected else None
 
     def by_call_name(self, name: str) -> Session | None:
         for s in self._sessions.values():
@@ -344,7 +369,7 @@ class Registry:
 
     def switch(self, name: str) -> Session | None:
         s = self.by_call_name(name)
-        if s is None:
+        if s is None or not s.connected:
             return None
         self._active_id = s.session_id
         s.unread_digest = 0
@@ -388,7 +413,7 @@ class Registry:
         origin: str = "voice",
     ) -> DispatchResult:
         s = target or self.active
-        if s is None:
+        if s is None or not s.connected:
             return "no_session"
         was_idle = s.state == "idle"
         payload = {
@@ -435,6 +460,8 @@ class Registry:
         """The rail dot (SPEC-WORKBENCH §6) — derived, total precedence."""
         from voco.core.agent_state import display_state
 
+        if not s.connected:
+            return "gone"
         return display_state(
             bridge_state=s.state,
             pane_hint=s.pane_hint,
@@ -468,6 +495,7 @@ class Registry:
         s = self._sessions.get(session_id)
         if s is None:
             return None
+        self._mark_connected(s)
         s.last_seen = self._now()
         s.outstanding_turn_id = None  # a new listen ends the working turn
         s.reviewing = False  # ...and the review turn
@@ -525,6 +553,7 @@ class Registry:
         s = self._sessions.get(session_id)
         if s is None:
             return False
+        self._mark_connected(s)
         line = SayLine(ts=self._now(), text=text, turn_id=turn_id)
         s.say_log.append(line)
         is_active = self._active_id == session_id
@@ -569,6 +598,7 @@ class Registry:
         s = self._sessions.get(session_id)
         if s is None:
             return
+        self._mark_connected(s)
         if mode == "append":
             s.screen_markdown += "\n" + markdown
         else:
@@ -614,7 +644,7 @@ class Registry:
             ],
         }
 
-    def restore(self, data: dict) -> int:
+    def restore(self, data: dict, *, max_age_s: float | None = None) -> int:
         """Rebuild from a dump; returns sessions restored. Defensive: a
         malformed entry is skipped, never fatal — losing one session beats
         refusing to boot. Restored sessions are never parked (no live poll
@@ -625,6 +655,9 @@ class Registry:
         restored = 0
         for raw in data.get("sessions", []):
             try:
+                last_seen = float(raw.get("last_seen", 0.0))
+                if max_age_s is not None and self._now() - last_seen > max_age_s:
+                    continue
                 s = Session(
                     session_id=str(raw["session_id"]),
                     identity=dict(raw["identity"]),
@@ -635,7 +668,8 @@ class Registry:
                     unread_digest=int(raw.get("unread_digest", 0)),
                     screen_title=raw.get("screen_title"),
                     screen_markdown=str(raw.get("screen_markdown", "")),
-                    last_seen=float(raw.get("last_seen", 0.0)),
+                    last_seen=last_seen,
+                    connected=False,
                 )
                 for line in raw.get("say_log", []):
                     s.say_log.append(SayLine(**line))
@@ -696,5 +730,5 @@ class Registry:
                 }
                 for s in self._sessions.values()
             ],
-            "active_session": self._active_id,
+            "active_session": self.active.session_id if self.active else None,
         }

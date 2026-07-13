@@ -22,6 +22,10 @@ vad_threshold = 0.5
 provider = "faster-whisper"
 model_size = "small"
 device = "cpu"                   # mlx providers land per SPEC §4.2
+max_pending = 2                   # bound queued transcriptions under overload
+
+[state]
+session_ttl_s = 86400             # discard cached agent tokens after one day
 
 [tts]
 # Existing mlx-audio server (SPEC §4.3)

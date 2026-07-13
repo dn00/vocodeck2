@@ -35,14 +35,21 @@ def test_dump_restore_round_trip_preserves_tokens_queues_and_names():
     assert r2.restore(json.loads(json.dumps(dump))) == 2  # JSON-safe
     assert {s.session_id for s in r2.all()} == {s.session_id for s in r1.all()}
     assert r2.call_names() == r1.call_names()
-    assert r2.active is not None and r2.active.call_name == r1.active.call_name
+    # Restored tokens are dormant until the cached agent actually calls back;
+    # voice must never route into a dead process merely because it was active.
+    assert r2.active is None and r2.snapshot()["active_session"] is None
     a2 = next(s for s in r2.all() if s.identity["cwd"] == "/repo/a")
+    assert r2.dispatch("new speech", r2.mint_turn_id(), target=a2) == "no_session"
     assert "inject" in a2.capabilities and a2.inject_target == "%4"
     assert a2.screen_markdown == "# plan\n- step one"
     assert not a2.parked  # no poll survived the old daemon
     # The queued input survives and delivers on the agent's next listen.
     payload = r2.on_listen_start(a2.session_id)
     assert payload is not None and payload["text"] == "run the linter"
+    assert r2.active is None  # a different restored agent held the mic
+    active2 = next(s for s in r2.all() if s.call_name == r1.active.call_name)
+    r2.on_listen_start(active2.session_id)
+    assert r2.active is not None and r2.active.call_name == r1.active.call_name
     # Turn counter continues — no id collisions after restore.
     assert r2.mint_turn_id() not in {payload["turn_id"]}
 
@@ -65,6 +72,16 @@ def test_restore_skips_garbage_and_wrong_version():
     }
     assert r.restore(dump) == 1
     assert r.get("ok1") is not None
+
+
+def test_restore_expires_old_session_tokens():
+    clock = {"t": 1000.0}
+    source = Registry(now=lambda: clock["t"])
+    source.register({"host": "m", "cwd": "/x"}, ["say"])
+    dumped = source.dump()
+    clock["t"] += 101
+    fresh = Registry(now=lambda: clock["t"])
+    assert fresh.restore(dumped, max_age_s=100) == 0
 
 
 def test_state_store_round_trip_perms_and_corruption(tmp_path):

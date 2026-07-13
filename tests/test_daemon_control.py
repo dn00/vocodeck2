@@ -88,6 +88,25 @@ async def test_sigterm_shuts_down_cleanly(tmp_path):
     await asyncio.wait_for(task, timeout=5)
 
 
+async def test_background_task_failures_are_observed(daemon):
+    d, _ = daemon
+    events = []
+    d.bus.subscribe(lambda env: events.append((env.type, env.payload)))
+
+    async def fail() -> None:
+        raise RuntimeError("boom")
+
+    task = d._spawn_background(fail(), name="test-failure")
+    await asyncio.gather(task, return_exceptions=True)
+    await asyncio.sleep(0)
+    assert not d._background_tasks
+    assert any(
+        event_type == "daemon.error"
+        and "background task test-failure failed" in payload["error"]
+        for event_type, payload in events
+    )
+
+
 # ---- attention refusal is visible to callers (P12 review BLOCKER) --------------
 
 

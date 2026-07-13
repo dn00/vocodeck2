@@ -40,8 +40,9 @@ class FakeStt:
 
 
 class FakeMic:
-    def __init__(self, on_frame, device=None) -> None:
+    def __init__(self, on_frame, device=None, on_error=None) -> None:
         self.started = False
+        self.on_error = on_error
 
     def start(self) -> None:
         self.started = True

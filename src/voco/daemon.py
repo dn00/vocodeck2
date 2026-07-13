@@ -164,6 +164,7 @@ class Daemon:
         )
         self._state_locked = False
         self._state_save_task: asyncio.Task[None] | None = None
+        self._background_tasks: set[asyncio.Task[Any]] = set()
         self._watcher_task: asyncio.Task[None] | None = None
         # Workbench manifests (SPEC-WORKBENCH §8): durable pages + findings.
         from voco.adapters.manifest import WorkspaceManifest
@@ -432,10 +433,13 @@ class Daemon:
         if session.inject_target is None:
             return
         host = session.identity.get("host_alias")  # None = local
-        loop = asyncio.get_running_loop()
-        loop.run_in_executor(
-            None, self._inject_safely, session.inject_target, "escape", host
-        )
+
+        async def inject() -> None:
+            await asyncio.get_running_loop().run_in_executor(
+                None, self._inject_safely, session.inject_target, "escape", host
+            )
+
+        self._spawn_background(inject(), name="inject-escape")
 
     def _schedule_nudge(self, session_id: str) -> None:
         """Self-healing rearm: if input is still queued shortly after landing
@@ -460,7 +464,7 @@ class Daemon:
                 None, self._inject_safely, s.inject_target, "nudge", host
             )
 
-        asyncio.get_running_loop().create_task(nudge())
+        self._spawn_background(nudge(), name=f"nudge-{session_id[:8]}")
 
     def _inject_safely(self, target: str, kind: str, host: str | None) -> None:
         try:
@@ -501,6 +505,23 @@ class Daemon:
         self.bus.emit("mic.state", self._mic_payload())
 
     # ---- control commands (CLI/WS) -----------------------------------------------
+
+    def _spawn_background(self, coro: Any, *, name: str) -> asyncio.Task[Any]:
+        """Own every fire-and-forget operation through daemon shutdown."""
+        task = asyncio.get_running_loop().create_task(coro, name=name)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_done)
+        return task
+
+    def _background_done(self, task: asyncio.Task[Any]) -> None:
+        self._background_tasks.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            message = f"background task {task.get_name()} failed: {error}"
+            log.error(message, exc_info=error)
+            self.bus.emit("daemon.error", {"error": message})
 
     @staticmethod
     async def _run_blocking(fn):
@@ -1092,7 +1113,8 @@ class Daemon:
         if err:
             self.bus.emit("daemon.error", {"error": f"state: {err}"})
         if data:
-            n = self.registry.restore(data)
+            ttl = float(self.cfg.get("state", {}).get("session_ttl_s", 86400.0))
+            n = self.registry.restore(data, max_age_s=max(0.0, ttl))
             if n:
                 log.info("restored %d session(s) from %s", n, self._state.path)
             for s in self.registry.all():
@@ -1189,7 +1211,9 @@ class Daemon:
         here = [
             s
             for s in self.registry.all()
-            if "review" in s.capabilities and self.workspaces.home_of(s.identity) is ws
+            if s.connected
+            and "review" in s.capabilities
+            and self.workspaces.home_of(s.identity) is ws
         ]
         if not here:
             return None
@@ -1239,7 +1263,7 @@ class Daemon:
         page = ws.pages.get(str(payload.get("page_id") or ""))
         if page is not None and page.scope == "agent" and page.call_name:
             s = self.registry.by_call_name(page.call_name)
-            if s is not None and "review" in s.capabilities:
+            if s is not None and s.connected and "review" in s.capabilities:
                 return s
             return None  # its agent is gone/ineligible; ledger still has it
         return self._primary_session(ws)
@@ -1582,14 +1606,22 @@ class Daemon:
             # cleanly), then close the server, then the audio shell.
             await self.bridge.shutdown()
             await runner.cleanup()
-            if self._watcher_task is not None:
-                self._watcher_task.cancel()
-            if self._live_git_task is not None:
-                self._live_git_task.cancel()
-            if self._state_save_task is not None:
-                self._state_save_task.cancel()
-            if self._manifest_save_task is not None:
-                self._manifest_save_task.cancel()
+            lifecycle_tasks = [
+                task
+                for task in (
+                    self._watcher_task,
+                    self._live_git_task,
+                    self._state_save_task,
+                    self._manifest_save_task,
+                    *self._background_tasks,
+                )
+                if task is not None
+            ]
+            for task in lifecycle_tasks:
+                task.cancel()
+            if lifecycle_tasks:
+                await asyncio.gather(*lifecycle_tasks, return_exceptions=True)
+            self._background_tasks.clear()
             if self._manifest_locked:
                 # Server closed + mutation tasks cancelled: nothing can
                 # touch the store anymore — flush and RELEASE THE LOCK
@@ -1602,7 +1634,7 @@ class Daemon:
             if self._floor is not None:
                 await self._floor.stop()  # the floor dies with its daemon
             if self.voice is not None:
-                self.voice.stop()
+                await self.voice.aclose()
             if self._state_locked:
                 try:
                     self._state.save(self.registry.dump())  # final synchronous save

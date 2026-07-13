@@ -17,6 +17,7 @@ import asyncio
 import re
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -176,6 +177,7 @@ class VoiceLoop:
         self._host = host
         audio_cfg = cfg.get("audio", {})
         stt_cfg = dict(cfg.get("stt", {"provider": "faster-whisper"}))
+        self._max_stt_pending = max(1, int(stt_cfg.pop("max_pending", 2)))
         tts_cfg = cfg.get(
             "tts",
             {
@@ -213,6 +215,9 @@ class VoiceLoop:
         )
         self.bank = PhraseBank(self.tts, cache)
         self.stt = deps.stt_builder(stt_cfg.pop("provider"), **stt_cfg)
+        self._stt_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="voco-stt"
+        )
 
         self._aec = EchoCanceller() if audio_cfg.get("aec") else None
         self._aec_ref = bytearray()  # 16kHz reference accumulator
@@ -268,7 +273,9 @@ class VoiceLoop:
             ),
         )
         self.mic = deps.mic_factory(
-            self._on_frame, device=audio_cfg.get("input_device")
+            self._on_frame,
+            device=audio_cfg.get("input_device"),
+            on_error=self._on_mic_error,
         )
         # P12 wake honesty: a detector either LOADS or the failure is a
         # named reason — "wake" mode with no working detector is a deaf
@@ -315,6 +322,9 @@ class VoiceLoop:
         self._deadline_task: asyncio.Task[None] | None = None
         self._deadline_wakeup = asyncio.Event()
         self._speculation: dict[tuple[int, int], asyncio.Task[None]] = {}
+        self._stt_gate = asyncio.Lock()
+        self._stt_active: asyncio.Task[None] | None = None
+        self._routing: set[asyncio.Task[None]] = set()
         self._playing = False  # mirrored from the player (loop thread)
         # mic.level throttle state (deck meters read real signal, never a
         # synthetic pulse): last emit time + last emitted value.
@@ -378,6 +388,28 @@ class VoiceLoop:
             self._ptt.stop()
         if self._deadline_task is not None:
             self._deadline_task.cancel()
+        for task in self._speculation.values():
+            task.cancel()
+        self._speculation.clear()
+        for task in self._routing:
+            task.cancel()
+        self._routing.clear()
+        self._stt_executor.shutdown(wait=False, cancel_futures=True)
+
+    async def aclose(self) -> None:
+        """Cancel and observe loop-owned tasks during daemon shutdown."""
+        tasks = [
+            task
+            for task in [
+                self._deadline_task,
+                *self._speculation.values(),
+                *self._routing,
+            ]
+            if task is not None
+        ]
+        self.stop()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     # ---- daemon-facing controls ----------------------------------------------
 
@@ -508,6 +540,18 @@ class VoiceLoop:
         assert self._loop is not None
         self._loop.call_soon_threadsafe(self._process_frame, frame)
 
+    def _on_mic_error(self, message: str) -> None:
+        """Marshal device-thread diagnostics onto the event loop."""
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return
+        try:
+            loop.call_soon_threadsafe(
+                self._bus.emit, "daemon.error", {"error": message}
+            )
+        except RuntimeError:
+            pass  # loop closed between the check and cross-thread scheduling
+
     def _on_pcm_played(self, pcm: bytes) -> None:
         # PortAudio output thread: resample + frame the AEC reference.
         if self._aec is None:  # tap is only wired when AEC is on; guard anyway
@@ -603,18 +647,64 @@ class VoiceLoop:
         self.capture.pause()
         pcm = self.capture.take()
         assert self._loop is not None
+        # A reopened capture supersedes older, not-yet-running revisions of
+        # the same utterance. Keep the one blocking provider call alive (a
+        # Python thread cannot be killed safely), but its result is ignored
+        # below when a newer revision exists.
+        for stale_key, stale in list(self._speculation.items()):
+            if stale_key[0] == key and stale_key[1] < revision:
+                if stale is self._stt_active:
+                    continue
+                self._speculation.pop(stale_key, None)
+                stale.cancel()
+        pending = [
+            (pending_key, task)
+            for pending_key, task in self._speculation.items()
+            if task is not self._stt_active
+        ]
+        while len(pending) >= self._max_stt_pending:
+            stale_key, stale = pending.pop(0)
+            if self._speculation.get(stale_key) is not stale:
+                continue
+            self._speculation.pop(stale_key, None)
+            stale.cancel()
+            self._bus.emit(
+                "daemon.error",
+                {"error": "stt backlog full; dropped a superseded revision"},
+            )
         task = self._loop.create_task(self._transcribe(key, revision, pcm))
         self._speculation[(key, revision)] = task
         self._kick_deadline()
 
     async def _transcribe(self, key: int, revision: int, pcm: bytes) -> None:
         loop = asyncio.get_running_loop()
+        current = asyncio.current_task()
+        assert current is not None
         try:
-            text = await loop.run_in_executor(None, self.stt.transcribe, pcm)
+            # Gate BEFORE executor submission. Otherwise cancelled asyncio
+            # wrappers leave cancelled work items accumulating in the
+            # ThreadPoolExecutor's unbounded internal queue.
+            async with self._stt_gate:
+                self._stt_active = current
+                try:
+                    text = await loop.run_in_executor(
+                        self._stt_executor, self.stt.transcribe, pcm
+                    )
+                finally:
+                    if self._stt_active is current:
+                        self._stt_active = None
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             self._bus.emit("daemon.error", {"error": f"stt: {e}"})
             text = ""
-        self._speculation.pop((key, revision), None)
+        if self._speculation.get((key, revision)) is current:
+            self._speculation.pop((key, revision), None)
+        if any(
+            pending_key == key and pending_revision > revision
+            for pending_key, pending_revision in self._speculation
+        ):
+            return
         self._bus.emit("stt.final", {"text": text})
         self.machine.stt_final(key, revision, text)
         self._kick_deadline()
@@ -632,7 +722,9 @@ class VoiceLoop:
 
     def _on_route_requested(self, key: int, revision: int, text: str) -> None:
         assert self._loop is not None
-        self._loop.create_task(self._route_turn(key, revision, text))
+        task = self._loop.create_task(self._route_turn(key, revision, text))
+        self._routing.add(task)
+        task.add_done_callback(self._routing.discard)
 
     async def _route_turn(self, key: int, revision: int, text: str) -> None:
         try:

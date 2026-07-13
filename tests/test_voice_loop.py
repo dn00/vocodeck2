@@ -9,6 +9,7 @@ player, and fast turn timings.
 from __future__ import annotations
 
 import asyncio
+import threading
 
 import numpy as np
 import pytest
@@ -687,3 +688,61 @@ def test_mic_level_is_throttled_and_settles_to_one_zero(tmp_path):
     levels = [p["level"] for t, p in events if t == "mic.level"]
     assert levels[-1] == 0.0
     assert levels.count(0.0) == 1
+
+
+@pytest.mark.asyncio
+async def test_stt_backlog_is_bounded_and_supersedes_old_revision(tmp_path):
+    class BlockingStt:
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.release = threading.Event()
+            self.calls = 0
+
+        def transcribe(self, pcm: bytes) -> str:
+            self.calls += 1
+            call = self.calls
+            self.started.set()
+            self.release.wait(timeout=2)
+            return f"done-{call}."
+
+    stt = BlockingStt()
+    bus = EventBus()
+    events = []
+    bus.subscribe(lambda env: events.append((env.type, env.payload)))
+    cfg = {
+        **CFG,
+        "audio": {**CFG["audio"], "phrase_bank_dir": str(tmp_path / "bank")},
+        "stt": {"provider": "fake", "max_pending": 1},
+    }
+    deps = VoiceLoopDeps(
+        load_vad_model=lambda path: ScriptedVad(),
+        stt_builder=lambda provider, **kw: stt,
+        tts_factory=FakeTts,
+        mic_factory=FakeMic,
+        player_factory=FakePlayer,
+        hotkey_factory=None,
+    )
+    voice = VoiceLoop(cfg, bus, host=Host(), deps=deps)
+    voice._loop = asyncio.get_running_loop()
+    voice.machine.stt_final = lambda key, revision, text: None
+    voice._on_capture_stopped(1, 1)
+    assert await asyncio.to_thread(stt.started.wait, 1)
+    voice._on_capture_stopped(1, 2)
+    queued = voice._speculation[(1, 2)]
+    voice._on_capture_stopped(1, 3)
+    await asyncio.sleep(0)
+    assert queued.cancelled()
+    assert list(voice._speculation) == [(1, 1), (1, 3)]
+    assert stt.calls == 1  # rev 3 waits outside the executor's internal queue
+    stt.release.set()
+    deadline = asyncio.get_running_loop().time() + 1
+    while (
+        not any(p.get("text") == "done-2." for t, p in events if t == "stt.final")
+        and asyncio.get_running_loop().time() < deadline
+    ):
+        await asyncio.sleep(0.01)
+    assert stt.calls == 2
+    finals = [p.get("text") for t, p in events if t == "stt.final"]
+    assert "done-1." not in finals  # superseded rev 1 was not published
+    assert "done-2." in finals
+    await voice.aclose()

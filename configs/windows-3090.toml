@@ -27,6 +27,10 @@ vad_threshold = 0.5
 provider = "faster-whisper"      # parakeet provider lands per SPEC §4.2
 model_size = "large-v3-turbo"
 device = "cuda"
+max_pending = 2                  # bound queued transcriptions under overload
+
+[state]
+session_ttl_s = 86400            # discard cached agent tokens after one day
 
 [tts]
 # faster-qwen3-tts OpenAI-compatible endpoint (measure TTFA at M0 exit —
