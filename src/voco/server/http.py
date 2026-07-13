@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import secrets
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -40,6 +41,7 @@ WS_EVENT_QUEUE_SIZE = 512
 WS_COMMAND_QUEUE_SIZE = 64
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]"}
+log = logging.getLogger(__name__)
 
 # The identity facts an adapter may assert — at register and, since the
 # 2026-07-06 stale-root dogfood failure, re-asserted on every workspace
@@ -72,17 +74,19 @@ async def _no_control(cmd: str, payload: dict) -> dict:
 async def error_middleware(request: web.Request, handler):
     """No bare 500s (dogfood 2026-07-06): agents act on error bodies, and
     a blank 500 sent one flailing through six blind retries. HTTPException
-    subclasses are deliberate replies and pass through; anything else
-    becomes a 500 with the exception named in a JSON body."""
+    subclasses are deliberate replies and pass through; unexpected failures
+    are logged with their traceback while the client receives a stable,
+    non-sensitive JSON error."""
     try:
         return await handler(request)
     except (web.HTTPException, asyncio.CancelledError):
         raise
-    except Exception as e:
+    except Exception:
         if request.headers.get("Upgrade", "").lower() == "websocket":
             raise  # can't send a fresh response on an upgraded socket
+        log.exception("unexpected HTTP failure: %s %s", request.method, request.path)
         return web.json_response(
-            {"ok": False, "error": f"{type(e).__name__}: {e}"}, status=500
+            {"ok": False, "error": "internal server error"}, status=500
         )
 
 
@@ -427,10 +431,11 @@ class BridgeServer:
                 result = await self._on_control(env.type, env.payload)
         except ValueError as e:
             return web.json_response({"ok": False, "error": str(e)}, status=400)
-        except Exception as e:
-            # Adapter failures (tmux missing, ssh down) are operator errors,
-            # not crashes: surface the message, keep the daemon calm.
-            return web.json_response({"ok": False, "error": str(e)}, status=500)
+        except Exception:
+            log.exception("unexpected control failure: %s", env.type)
+            return web.json_response(
+                {"ok": False, "error": "internal control error"}, status=500
+            )
         return web.json_response({"ok": True, **result})
 
     # ---- WS events (SPEC §10) -----------------------------------------------------
@@ -544,8 +549,13 @@ class BridgeServer:
             async with self._control_lock:
                 result = await self._on_control(env.type, env.payload)
             return CommandReply(id=req_id, ok=True, payload=result).to_dict()
-        except Exception as e:
+        except ValueError as e:
             return CommandReply(id=req_id, ok=False, error=str(e)).to_dict()
+        except Exception:
+            log.exception("unexpected WebSocket control failure: %s", env.type)
+            return CommandReply(
+                id=req_id, ok=False, error="internal control error"
+            ).to_dict()
 
 
 async def run_server(

@@ -121,6 +121,7 @@ class Daemon:
         )
         # Latest routing awaiting its dispatch turn_id (late-mate stamping).
         self._pending_late: dict[str, Any] | None = None
+        self._route_epoch = 0
         self._started_mono = time.monotonic()
         self.bridge = BridgeServer(
             self.registry,
@@ -141,9 +142,9 @@ class Daemon:
         # P3: the managed TTS floor (FloorSupervisor | None)
         self._floor: Any = None
         self._tmux_mgr: TmuxManager | None = None
-        # tmux session -> worktree path, for the sessions THIS run spawned
-        # with --worktree (in-memory by design: after a restart we no longer
-        # know we created it, and not-knowing fails safe — no removal).
+        # tmux session -> worktree path, for worktrees this daemon lineage
+        # created. This rides the protected state file so clean worktrees can
+        # still be reaped after a daemon restart.
         self._worktree_mgr: WorktreeManager | None = None
         self._spawned_worktrees: dict[str, str] = {}
         # PTY terminals this daemon run owns (W4). Lazy like tmux.
@@ -224,9 +225,9 @@ class Daemon:
         return None
 
     async def _reap_worktree(self, tmux_name: str) -> dict[str, Any]:
-        """After a kill: remove the worktree THIS daemon run created for
-        that session — clean ones only (W3; dirty work is sacred). Not
-        knowing the worktree (restart wiped the map) means keeping it."""
+        """After a kill, remove a worktree this daemon lineage created for
+        that session — clean ones only (W3; dirty work is sacred). Ownership
+        survives restart in the protected state file; unknown paths stay."""
         wt_path = self._spawned_worktrees.pop(tmux_name, None)
         if wt_path is None:
             return {}
@@ -237,6 +238,7 @@ class Daemon:
         except WorktreeError as e:
             self._spawned_worktrees[tmux_name] = wt_path  # still ours
             return {"worktree": wt_path, "worktree_kept": str(e)}
+        self._schedule_state_save()
         return {"worktree": wt_path, "worktree_removed": True}
 
     # ---- VoiceHost port (decisions stay here; audio reacts in VoiceLoop) ----
@@ -249,6 +251,15 @@ class Daemon:
         immediately and the mate finishes in the background
         (_on_late_mate) — it must never slow the action (triage
         2026-07-03)."""
+        # Every new turn invalidates the previous late callback. A model
+        # answer from an older turn may finish, but it can no longer speak or
+        # mutate current state.
+        self._route_epoch += 1
+        previous = self._pending_late
+        self._pending_late = None
+        if previous is not None and previous.get("channel") is not None:
+            previous["channel"].cancel()
+
         grounding = build_grounding(
             self.registry,
             self.voice.duplex.value if self.voice else "headless",
@@ -266,6 +277,7 @@ class Daemon:
             "channel": channel,
             "turn_id": None,
             "dispatched_to": None,
+            "epoch": self._route_epoch,
         }
         routed = await self.router.decide(
             text,
@@ -275,6 +287,10 @@ class Daemon:
             on_late=lambda d: self._on_late_mate(d, ctx),
         )
         if routed.late_pending:
+            if ctx["epoch"] != self._route_epoch:
+                if channel is not None:
+                    channel.cancel()
+                return routed
             # Mate still running: leave its speech channel open (it may be
             # mid-sentence); dispatch() stamps the turn; the late handler
             # finishes or cancels.
@@ -304,30 +320,23 @@ class Daemon:
 
     def _on_late_mate(self, decision: RouteDecision | None, ctx: dict) -> None:
         """Mate finished after dispatch went with the fast path. Late is
-        still useful: actions execute (idempotent deck ops), answers and
-        acks speak (TTL + rule-3 police staleness), and a targeted
-        decision that disagrees with where the words landed re-dispatches
-        with a spoken correction."""
-        if self._pending_late is ctx:
-            self._pending_late = None
+        acknowledgement-only: it may speak for the same dispatched turn,
+        but it can never execute an action or dispatch the command again."""
         channel = ctx.get("channel")
+        if self._pending_late is not ctx or ctx.get("epoch") != self._route_epoch:
+            if channel is not None:
+                channel.cancel()
+            return
+        self._pending_late = None
         if decision is None:  # mate failed/garbled: nothing to add
             if channel is not None:
                 channel.cancel()
             return
-        if decision.action is not None:
-            try:
-                execute_action(
-                    decision.action,
-                    self.registry,
-                    set_mic=self._set_duplex,
-                    set_muted=self._set_muted,
-                )
-            except Exception as e:
-                self.bus.emit("daemon.error", {"error": f"late mate action: {e}"})
-        if self._late_reroute(decision, ctx):
-            return
         turn_id = ctx.get("turn_id")
+        if turn_id is None:
+            if channel is not None:
+                channel.cancel()
+            return
         streamed = False
         if channel is not None:
             if decision.kind in ("answer", "ack_forward"):
@@ -341,40 +350,6 @@ class Daemon:
             and self.voice is not None
         ):
             self.voice.speak_local(decision.speech, turn_id)
-
-    def _late_reroute(self, decision: RouteDecision, ctx: dict) -> bool:
-        """Late mate says the words belonged to someone else: send them
-        there too, say so, and drop the (wrong-context) streamed ack."""
-        target = decision.target
-        if decision.kind not in ("forward", "ack_forward") or not target:
-            return False
-        session = self.registry.by_call_name(target)
-        if session is None:
-            return False
-        landed = ctx.get("dispatched_to") or ""
-        if target.lower() == landed.lower():
-            return False
-        turn_id = self.registry.mint_turn_id()
-        self.bus.emit(
-            "route.decision",
-            {
-                "turn_id": turn_id,
-                "kind": "forward",
-                "text": ctx["text"],
-                "origin": "voice",
-                "late_reroute": True,
-            },
-        )
-        result = self.registry.dispatch(ctx["text"], turn_id, target=session)
-        channel = ctx.get("channel")
-        if channel is not None:
-            channel.cancel()
-        if self.voice is not None:
-            self.voice.dispatch_feedback(turn_id, result)
-            self.voice.speak_local(
-                f"That was for {session.call_name} — rerouted.", turn_id
-            )
-        return True
 
     def run_phrase(self, cmd: PhraseCommand) -> None:
         if cmd.kind == "stop":
@@ -400,7 +375,7 @@ class Daemon:
         session = target or self.registry.active
         result = self.registry.dispatch(text, turn_id, target=target, origin=origin)
         # A pending late-mate routing gets its turn identity the moment the
-        # fast path dispatches — rules 2/3 + reroute checks need it.
+        # fast path dispatches so an acknowledgement can be attributed.
         ctx = self._pending_late
         if ctx is not None and ctx.get("text") == text and ctx.get("turn_id") is None:
             ctx["turn_id"] = turn_id
@@ -669,6 +644,7 @@ class Daemon:
                 raise
             if wt_path is not None:
                 self._spawned_worktrees[name] = wt_path
+                self._schedule_state_save()
             out = {"backend": backend}
             out["term" if backend == "pty" else "tmux_session"] = name
             if wt_path is not None:
@@ -1099,6 +1075,11 @@ class Daemon:
         "digest.updated",
     }
 
+    def _dump_state(self) -> dict[str, Any]:
+        data = self.registry.dump()
+        data["spawned_worktrees"] = dict(self._spawned_worktrees)
+        return data
+
     def _restore_state(self) -> None:
         try:
             self._state.acquire(wait_s=6.0)
@@ -1115,6 +1096,16 @@ class Daemon:
         if data:
             ttl = float(self.cfg.get("state", {}).get("session_ttl_s", 86400.0))
             n = self.registry.restore(data, max_age_s=max(0.0, ttl))
+            owned = data.get("spawned_worktrees", {})
+            if isinstance(owned, dict):
+                self._spawned_worktrees = {
+                    name: path
+                    for name, path in owned.items()
+                    if isinstance(name, str)
+                    and bool(name)
+                    and isinstance(path, str)
+                    and Path(path).is_absolute()
+                }
             if n:
                 log.info("restored %d session(s) from %s", n, self._state.path)
             for s in self.registry.all():
@@ -1351,7 +1342,7 @@ class Daemon:
 
         async def save_soon() -> None:
             await asyncio.sleep(0.5)
-            data = self.registry.dump()
+            data = self._dump_state()
             try:
                 await self._run_blocking(lambda: self._state.save(data))
             except Exception as e:
@@ -1381,15 +1372,31 @@ class Daemon:
 
         while True:
             await asyncio.sleep(interval)
-            for ws in self.workspaces.all():
-                if not self._live_workspaces.get(ws.key, True):
-                    continue  # workspace.live {live: false}
-                if ws.host != host or ws.kind != "workspace":
-                    continue  # a remote disk is not ours to resolve
+            await self._live_git_tick(host, git_status)
+
+    async def _live_git_tick(self, host: str, git_status: Any) -> None:
+        """Refresh local workspaces concurrently with a small hard bound."""
+        raw_limit = self.cfg.get("workbench", {}).get("live_git_concurrency", 4)
+        try:
+            limit = max(1, min(16, int(raw_limit)))
+        except (TypeError, ValueError):
+            limit = 4
+        semaphore = asyncio.Semaphore(limit)
+
+        async def refresh_workspace(ws: Workspace) -> None:
+            if not self._live_workspaces.get(ws.key, True):
+                return  # workspace.live {live: false}
+            if ws.host != host or ws.kind != "workspace":
+                return  # a remote disk is not ours to resolve
+            async with semaphore:
                 # B1c: the rail's git facts ride the same tick; set_git
                 # converges, so an unchanged status emits nothing.
                 root = ws.root
-                st = await self._run_blocking(lambda r=root: git_status(r))
+                try:
+                    st = await self._run_blocking(lambda r=root: git_status(r))
+                except Exception as e:
+                    self.bus.emit("daemon.error", {"error": f"live-git {ws.key}: {e}"})
+                    return
                 self.workspaces.set_git(ws.key, st)
                 for page in list(ws.pages.values()):
                     if page.type != "diff" or page.closed:
@@ -1400,6 +1407,8 @@ class Daemon:
                         await self._live_refresh(ws, page)
                     except Exception as e:
                         self.bus.emit("daemon.error", {"error": f"live-git: {e}"})
+
+        await asyncio.gather(*(refresh_workspace(ws) for ws in self.workspaces.all()))
 
     async def _live_refresh(self, ws: Workspace, page) -> None:
         from voco.core.diff import parse_diff
@@ -1637,7 +1646,7 @@ class Daemon:
                 await self.voice.aclose()
             if self._state_locked:
                 try:
-                    self._state.save(self.registry.dump())  # final synchronous save
+                    self._state.save(self._dump_state())  # final synchronous save
                 except Exception as e:
                     log.error("state save failed: %s", e)
                 finally:

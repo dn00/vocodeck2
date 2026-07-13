@@ -18,14 +18,18 @@ jobs:
       - name: Install (PortAudio needed by sounddevice import on Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libportaudio2
+      - run: uv lock --check
       - run: uv sync --extra dev --extra mcp
-      - run: uv run ruff check src clients tests scripts
-      - run: uv run ruff format --check src clients tests scripts
+      - run: uv run ruff check src clients tests tests_release scripts
+      - run: uv run ruff format --check src clients tests tests_release scripts
       - run: uv run mypy
       - run: uv run pytest tests/ -q
       - name: PROTOCOL.md must match the protocol package
         if: runner.os == 'Linux'
         run: uv run python scripts/gen_protocol.py && git diff --exit-code PROTOCOL.md
+      - name: README status must match docs/status.json
+        if: runner.os == 'Linux'
+        run: uv run python scripts/gen_status.py --check
       # Buildless client type-check (SPEC-WORKBENCH §7): TypeScript is a
       # dev linter over JSDoc — no bundle, no emit. Pinned, Linux-only.
       - name: Type-check the workbench client (JSDoc + tsc)
@@ -38,4 +42,33 @@ jobs:
         run: npx -y -p typescript@5.6.3 tsc -p src/voco/server/static/tsconfig.json
       - name: Workbench state unit tests
         if: runner.os == 'Linux'
-        run: node --test tests_js/*.test.mjs
+        run: npm run test:unit
+      - name: Install browser test dependencies
+        if: runner.os == 'Linux'
+        run: npm ci
+      - name: Install Chromium
+        if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+      - name: Workbench browser end-to-end
+        if: runner.os == 'Linux'
+        run: npm run test:e2e
+      - name: Build wheel
+        run: uv build
+      - name: Install built wheel
+        run: uv venv .wheel-venv && uv pip install --python .wheel-venv dist/voco-0.0.1-py3-none-any.whl
+      - name: Run installed CLI
+        run: uv run --python .wheel-venv --no-project voco --help
+
+  installed-wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: sudo apt-get update && sudo apt-get install -y libportaudio2
+      - run: uv lock --check
+      - run: uv build
+      # openwakeword's Linux tflite-runtime wheel currently stops at cp311.
+      - run: uv venv .release-venv --python 3.11
+      - run: uv pip install --python .release-venv/bin/python 'dist/voco-0.0.1-py3-none-any.whl[mcp,stt,ptt,wake,floor]'
+      - run: .release-venv/bin/python tests_release/mcp_wheel_smoke.py
+      - run: .release-venv/bin/python tests_release/voice_extras_smoke.py

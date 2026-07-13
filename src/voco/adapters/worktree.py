@@ -11,7 +11,7 @@ injection); worktrees land as SIBLINGS of the main checkout
 (`<parent>/<repo>-<branch-slug>`), never inside it; removal REFUSES a
 dirty tree (uncommitted work is the agent's work product — losing it is
 the one unforgivable failure) and only ever removes paths this daemon
-run created.
+lineage recorded as creating.
 """
 
 from __future__ import annotations

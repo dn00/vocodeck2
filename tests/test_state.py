@@ -127,6 +127,19 @@ def test_daemon_restart_preserves_queued_input(tmp_path):
     assert payload is not None and payload["text"] == "do the thing"
 
 
+def test_daemon_restart_preserves_worktree_ownership(tmp_path):
+    cfg = {"state": {"dir": str(tmp_path)}}
+    d1 = Daemon(cfg, no_audio=True)
+    owned = str((tmp_path / "repo-feature").resolve())
+    d1._spawned_worktrees["voco-feature"] = owned
+    d1._state.save(d1._dump_state())
+
+    d2 = Daemon(cfg, no_audio=True)
+    d2._restore_state()
+    assert d2._spawned_worktrees == {"voco-feature": owned}
+    d2._state.release()
+
+
 def test_queue_drain_is_a_durable_state_event():
     assert "input.drained" in Daemon._STATE_EVENTS
 

@@ -1,6 +1,10 @@
 # BACKLOG — audit of 2026-07-08 + the implementation list
 
-Source of truth for what is BROKEN and what is MISSING, from the
+> Historical audit backlog, retained for design context. It is not the
+> current readiness source; use `docs/status.json` and the generated README
+> status block. Several items below have since shipped.
+
+Original audit of what was BROKEN and what was MISSING, from the
 code-reading audit (deck client + daemon vs the diff-annotate reference
 at `~/Code/claude-setup/skills/diff-annotate` and vs daily-product use).
 Work through it top to bottom; every UI item ends browser-verified —

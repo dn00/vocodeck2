@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import re
+import sys
 import time
 from pathlib import Path
 
@@ -27,7 +28,7 @@ PHRASES = [
 ]
 
 
-async def main() -> None:
+async def main() -> int:
     from voco.adapters.silero import load_silero
     from voco.adapters.stt import FasterWhisperStt
     from voco.core.vad import FRAME_SAMPLES, VadConfig, VadGate
@@ -91,7 +92,8 @@ async def main() -> None:
         print(f"     similarity {similarity:.2f}\n")
 
     print(f"{len(PHRASES) - failures}/{len(PHRASES)} round trips passed")
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))

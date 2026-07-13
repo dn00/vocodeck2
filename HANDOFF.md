@@ -1,4 +1,7 @@
-# HANDOFF — session of 2026-07-04 → next session
+# HANDOFF — session of 2026-07-04 → next session (historical)
+
+> This handoff records an older implementation point and is not current
+> status. Use `docs/status.json` and the generated README status block.
 
 Read BUILD.md "Triage decisions" + journal first. Working rules: NO
 subagents ever; commit per slice; push to origin/main; journal BUILD.md

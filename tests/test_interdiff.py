@@ -12,6 +12,7 @@ rereview.test.mjs: same three-rev scenario, same assertions).
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -236,6 +237,27 @@ async def test_live_refresh_skips_transient_and_empty_states(live_daemon):
     d.bridge.diff_resolver.text = "not a diff at all"  # parses to no files
     await d._live_refresh(ws, page)
     assert page.rev == 1  # conservative: never clobber with empty
+
+
+async def test_live_git_tick_bounds_workspace_concurrency(monkeypatch):
+    d = Daemon({"workbench": {"live_git_concurrency": 2}}, no_audio=True)
+    for n in range(5):
+        d.workspaces.resolve({"host": "m", "worktree": f"/repo/{n}"})
+    active = 0
+    peak = 0
+
+    async def blocking(_fn):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.02)
+        active -= 1
+        return {"branch": "main", "dirty": False}
+
+    monkeypatch.setattr(d, "_run_blocking", blocking)
+    await d._live_git_tick("m", lambda _root: {})
+    assert peak == 2
+    assert all(ws.git is not None for ws in d.workspaces.all())
 
 
 async def test_workspace_live_toggle(live_daemon):

@@ -467,8 +467,9 @@ async def test_bridge_errors_never_bare_500(client, monkeypatch):
         json={"session_id": sid, "type": "diff", "source": {"branch": "main"}},
     )
     assert resp.status == 500
-    body = await resp.json()  # a JSON body with the exception named, not blank
-    assert body["ok"] is False and "kaput" in body["error"]
+    body = await resp.json()  # structured but does not leak exception details
+    assert body == {"ok": False, "error": "internal server error"}
+    assert "kaput" not in body["error"]
 
 
 def test_dead_workspace_root_names_itself_not_git():

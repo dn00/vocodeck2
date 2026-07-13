@@ -1,5 +1,9 @@
 # BUILD-PROD — the production-readiness campaign (plan + journal)
 
+> Historical campaign journal. Current machine-readable readiness lives in
+> `docs/status.json`; checklist states and test counts below describe the
+> dated entries where they appear.
+
 Goal: voco installs from a wheel on a clean machine and runs as a
 managed, diagnosable, hardened local service — "production ready" for
 a local-first voice control plane (ADR-0002 Tier 0/1 posture, minus
