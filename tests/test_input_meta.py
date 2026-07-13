@@ -4,7 +4,10 @@ of stale transcripts)."""
 
 from __future__ import annotations
 
-from voco.core.registry import Registry
+import pytest
+
+from voco.core.limits import MAX_INPUT_BYTES, MAX_QUEUED_INPUTS
+from voco.core.registry import QueuedInput, Registry
 from voco_cli.main import format_transcript
 
 
@@ -44,6 +47,53 @@ def test_queue_events_converge_count_after_drain():
         "input.drained",
         {"session_id": s.session_id, "queued": 0},
     )
+
+
+def test_queue_limit_rejects_new_input_without_side_effects():
+    events: list[tuple[str, dict]] = []
+    r = Registry(emit=lambda topic, payload: events.append((topic, payload)))
+    s = r.register(ident(), ["say", "listen"])
+
+    for index in range(MAX_QUEUED_INPUTS):
+        r.dispatch(f"command {index}", r.mint_turn_id())
+
+    queue_before = list(s.queued)
+    history_before = list(s.input_log)
+    events_before = list(events)
+    with pytest.raises(ValueError, match="input queue is full"):
+        r.dispatch("rejected", r.mint_turn_id())
+
+    assert s.queued == queue_before
+    assert list(s.input_log) == history_before
+    assert events == events_before
+
+
+def test_live_delivery_succeeds_when_old_queue_is_at_cap():
+    r = Registry()
+    s = r.register(ident(), ["say", "listen"])
+    s.queued = [
+        QueuedInput(ts=0, turn_id=f"t-{index}", text=str(index))
+        for index in range(MAX_QUEUED_INPUTS)
+    ]
+    delivered: list[dict] = []
+    r.try_deliver = lambda sid, payload: (delivered.append(payload), True)[1]
+    s.parked = True
+
+    assert r.dispatch("live", r.mint_turn_id()) == "live"
+    assert delivered[0]["text"] == "live"
+    assert s.queued == []
+
+
+def test_input_limit_uses_utf8_bytes():
+    r = Registry()
+    s = r.register(ident(), ["say", "listen"])
+    exact = "é" * (MAX_INPUT_BYTES // 2)
+    assert r.dispatch(exact, r.mint_turn_id()) == "queued_idle"
+    assert s.queued[-1].text == exact
+
+    with pytest.raises(ValueError, match="input exceeds maximum size"):
+        r.dispatch(exact + "é", r.mint_turn_id())
+    assert len(s.queued) == 1
 
 
 def test_live_dispatch_is_fresh_and_marks_origin():

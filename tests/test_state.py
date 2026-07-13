@@ -9,6 +9,7 @@ import stat
 import pytest
 
 from voco.adapters.state_store import StateLockError, StateStore
+from voco.core.limits import MAX_INPUT_BYTES, MAX_QUEUED_INPUTS
 from voco.core.registry import Registry
 from voco.daemon import Daemon
 
@@ -72,6 +73,52 @@ def test_restore_skips_garbage_and_wrong_version():
     }
     assert r.restore(dump) == 1
     assert r.get("ok1") is not None
+
+
+def test_restore_bounds_legacy_queue_and_keeps_newest_valid_items():
+    queued = [
+        {"ts": index, "turn_id": f"t-{index}", "text": f"command {index}"}
+        for index in range(MAX_QUEUED_INPUTS + 5)
+    ]
+    queued.insert(3, {"ts": 3, "turn_id": "oversize", "text": "é" * MAX_INPUT_BYTES})
+    dump = {
+        "v": 1,
+        "sessions": [
+            {
+                "session_id": "bounded",
+                "identity": {"host": "m", "cwd": "/x"},
+                "call_name": "Iris",
+                "capabilities": ["say"],
+                "queued": queued,
+            }
+        ],
+    }
+
+    r = Registry()
+    assert r.restore(dump) == 1
+    restored = r.get("bounded")
+    assert restored is not None
+    assert len(restored.queued) == MAX_QUEUED_INPUTS
+    assert restored.queued[0].turn_id == "t-5"
+    assert restored.queued[-1].turn_id == f"t-{MAX_QUEUED_INPUTS + 4}"
+    assert all(item.turn_id != "oversize" for item in restored.queued)
+
+
+def test_dump_restore_preserves_in_limit_queue():
+    source = Registry()
+    session = source.register({"host": "m", "cwd": "/x"}, ["say"])
+    for index in range(3):
+        source.dispatch(f"command {index}", source.mint_turn_id())
+
+    restored = Registry()
+    assert restored.restore(source.dump()) == 1
+    restored_session = restored.get(session.session_id)
+    assert restored_session is not None
+    assert [item.text for item in restored_session.queued] == [
+        "command 0",
+        "command 1",
+        "command 2",
+    ]
 
 
 def test_restore_expires_old_session_tokens():

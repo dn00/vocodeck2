@@ -25,6 +25,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from voco.core.limits import MAX_INPUT_BYTES, MAX_QUEUED_INPUTS, utf8_size
+
 NAME_POOL = [
     "Helena",
     "Marcus",
@@ -86,6 +88,8 @@ class Session:
     # wakes mint no turn_id, but the agent IS busy — state must say so or
     # voice input during review work reads as queued-to-idle and nudges.
     reviewing: bool = False
+    # Persisted command backlog. New commands are rejected once this reaches
+    # MAX_QUEUED_INPUTS; accepted commands are never silently discarded.
     queued: list[QueuedInput] = field(default_factory=list)
     say_log: deque[SayLine] = field(default_factory=lambda: deque(maxlen=50))
     # The user half of the transcript (DESIGN-DECK U0): same bound, same
@@ -415,6 +419,11 @@ class Registry:
         s = target or self.active
         if s is None or not s.connected:
             return "no_session"
+        input_bytes = utf8_size(text)
+        if input_bytes > MAX_INPUT_BYTES:
+            raise ValueError(
+                f"input exceeds maximum size of {MAX_INPUT_BYTES} bytes"
+            )
         was_idle = s.state == "idle"
         payload = {
             "status": "transcript",
@@ -438,6 +447,10 @@ class Registry:
             )
             self._emit_session_state(s)
             return "live"
+        if len(s.queued) >= MAX_QUEUED_INPUTS:
+            raise ValueError(
+                f"input queue is full ({MAX_QUEUED_INPUTS} commands)"
+            )
         s.queued.append(
             QueuedInput(ts=self._now(), turn_id=turn_id, text=text, origin=origin)
         )
@@ -618,6 +631,32 @@ class Registry:
 
     STATE_VERSION = 1
 
+    @staticmethod
+    def _restore_queued(raw_items: object) -> list[QueuedInput]:
+        """Keep only valid, bounded legacy queue entries, newest first by tail."""
+        if not isinstance(raw_items, list):
+            return []
+        valid: list[QueuedInput] = []
+        for raw in raw_items:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                ts = float(raw["ts"])
+                turn_id = raw["turn_id"]
+                item_text = raw["text"]
+                origin = raw.get("origin", "voice")
+            except (KeyError, TypeError, ValueError):
+                continue
+            values = (turn_id, item_text, origin)
+            if not all(isinstance(value, str) for value in values):
+                continue
+            if utf8_size(item_text) > MAX_INPUT_BYTES:
+                continue
+            valid.append(
+                QueuedInput(ts=ts, turn_id=turn_id, text=item_text, origin=origin)
+            )
+        return valid[-MAX_QUEUED_INPUTS:]
+
     def dump(self) -> dict:
         """Full persistable state — tokens included (the store must hold it
         at 0600). Pure: dict out, no fs."""
@@ -664,7 +703,7 @@ class Registry:
                     call_name=str(raw["call_name"]),
                     capabilities=list(raw["capabilities"]),
                     outstanding_turn_id=raw.get("outstanding_turn_id"),
-                    queued=[QueuedInput(**q) for q in raw.get("queued", [])],
+                    queued=self._restore_queued(raw.get("queued", [])),
                     unread_digest=int(raw.get("unread_digest", 0)),
                     screen_title=raw.get("screen_title"),
                     screen_markdown=str(raw.get("screen_markdown", "")),
