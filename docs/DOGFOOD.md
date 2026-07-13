@@ -5,10 +5,12 @@
 - **DF-7: Diff base defaults to full branch divergence instead of merge-base.**
   `page diff --branch staging` showed 1.7k files (full divergence) instead of just the PR's changes. Default should be merge-base diff. The UI should also let you select a different base.
 
-- **DF-9: Rail nav double-selects across workspaces; page doesn't switch.**
-  Clicking "Files" or "Overview" in one workspace's rail also selects the same nav item in the other workspace (firstmate + CRM both highlight). Likely because phantom agents (DF-3/DF-4) share the same selection state or the nav handler matches by item type rather than workspace-scoped ID. The center panel also doesn't switch to the clicked page — required a full page refresh to recover. After refresh the double-select still persists. Would scale to N-select with more workspaces added. Probably related to the phantom agent sessions from DF-3.
-
 ## Fixed
+
+- **DF-9: Rail nav double-selects across workspaces; page doesn't switch.**
+  Overview, Files, and page rows now scope selection styling to their workspace
+  and select that workspace before changing the center page. Shared sentinel
+  page ids no longer highlight across every expanded workspace.
 
 - **DF-4: Stale/idle session not selectable and not auto-cleaned.** Existing
   manual detach controls remain available, and idle sessions are now marked

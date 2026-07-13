@@ -510,16 +510,25 @@ function linkChips(ws) {
 // mk3 decision (BUILD-CONSOLE.md): the diff file sub-tree left the tree —
 // the diff view's own collapsed file index owns per-file navigation.
 function pagesTree(ws) {
+  const selectedHere = store.selectedWorkspace === ws.key;
   const tree = h("div", { class: "pages" });
   tree.append(h("div", {
-    class: "page-row" + (store.selectedPage == null ? " sel" : ""),
-    onclick: (e) => { e.stopPropagation(); store.selectPage(null); } },
+    class: "page-row" + (selectedHere && store.selectedPage == null ? " sel" : ""),
+    onclick: (e) => {
+      e.stopPropagation();
+      selectWork(ws);
+      store.selectPage(null);
+    } },
     h("span", { class: "picon" }, ic("overview")),
     h("span", { class: "page-title" }, "overview")));
   if (ws && ws.kind === "workspace")
     tree.append(h("div", {
-      class: "page-row" + (store.selectedPage === "__files__" ? " sel" : ""),
-      onclick: (e) => { e.stopPropagation(); store.selectPage("__files__"); } },
+      class: "page-row" + (selectedHere && store.selectedPage === "__files__" ? " sel" : ""),
+      onclick: (e) => {
+        e.stopPropagation();
+        selectWork(ws);
+        store.selectPage("__files__");
+      } },
       h("span", { class: "picon" }, ic("files")),
       h("span", { class: "page-title" }, "files")));
   const pages = ws
@@ -530,7 +539,11 @@ function pagesTree(ws) {
   for (const p of pages) {
     const row = h("div", {
       class: "page-row" + (p.page_id === store.selectedPage ? " sel" : ""),
-      onclick: (e) => { e.stopPropagation(); store.selectPage(p.page_id); } },
+      onclick: (e) => {
+        e.stopPropagation();
+        selectWork(ws);
+        store.selectPage(p.page_id);
+      } },
       h("span", { class: "picon" }, ic(PAGE_ICON_SVG[p.type] || "doc")),
       h("span", { class: "page-title" }, p.title),
       p.rev > 1 ? h("span", { class: "rev",

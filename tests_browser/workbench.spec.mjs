@@ -11,6 +11,7 @@ let daemon;
 let daemonOutput = "";
 let root;
 let repo;
+let repoTwo;
 let baseUrl;
 let sessionId;
 let identity;
@@ -69,7 +70,9 @@ test.beforeAll(async () => {
   test.setTimeout(30_000);
   root = mkdtempSync(path.join(tmpdir(), "voco-browser-e2e-"));
   repo = path.join(root, "repo");
+  repoTwo = path.join(root, "repo-two");
   mkdirSync(repo);
+  mkdirSync(repoTwo);
   execFileSync("git", ["init", "-b", "main"], { cwd: repo });
   git("config", "user.email", "e2e@example.invalid");
   git("config", "user.name", "Voco E2E");
@@ -77,6 +80,12 @@ test.beforeAll(async () => {
   writeFileSync(path.join(repo, "demo.py"), "value = 'old'\n");
   git("add", ".");
   git("commit", "-m", "seed");
+  execFileSync("git", ["init", "-b", "main"], { cwd: repoTwo });
+  execFileSync("git", ["config", "user.email", "e2e@example.invalid"], { cwd: repoTwo });
+  execFileSync("git", ["config", "user.name", "Voco E2E"], { cwd: repoTwo });
+  writeFileSync(path.join(repoTwo, "other.md"), "# Other\n");
+  execFileSync("git", ["add", "."], { cwd: repoTwo });
+  execFileSync("git", ["commit", "-m", "seed"], { cwd: repoTwo });
 
   const port = await freePort();
   baseUrl = `http://127.0.0.1:${port}`;
@@ -95,6 +104,7 @@ test.beforeAll(async () => {
   daemon.stdout.on("data", (chunk) => { daemonOutput += chunk; });
   daemon.stderr.on("data", (chunk) => { daemonOutput += chunk; });
   await waitForDaemon();
+  await json("/v1/control/workspace.open", { path: repoTwo });
 
   identity = {
     host: os.hostname().split(".")[0],
@@ -146,6 +156,20 @@ test("live pages, diffs, findings, and asks round-trip in a real browser", async
   page.on("pageerror", (error) => pageErrors.push(String(error)));
   await page.goto(baseUrl + "/");
   await expect(page.locator(".statusline > .cmd-led")).toHaveClass(/on/);
+
+  const secondWork = page.locator(".work-row", { hasText: "main" }).filter({
+    has: page.locator(".wr-label", { hasText: "main" }),
+  }).last();
+  await secondWork.click();
+  await secondWork.locator(".tw").click();
+  const firstWork = page.locator(".work-row").first();
+  await firstWork.click();
+  await firstWork.locator(".tw").click();
+  await secondWork.locator("xpath=..").locator(".page-row", { hasText: "files" }).click();
+  await expect(page.locator(".work-row.sel")).toHaveCount(1);
+  await expect(page.locator(".page-row.sel")).toHaveCount(1);
+  await expect(page.locator(".page-row.sel")).toHaveText(/files/);
+  await firstWork.click();
 
   await page.evaluate(() => {
     const toast = document.createElement("div");
