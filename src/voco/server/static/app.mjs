@@ -102,9 +102,16 @@ app.append(presence, body, gripDeck, deckEl, statusline);
 /** @returns {HTMLElement} the toast node (P4: daemon alerts dedupe on it) */
 function toast(msg, sticky = false) {
   const t = h("div", { class: "toast-msg" + (sticky ? " sticky" : "") }, msg);
-  if (sticky)
-    t.append(h("span", { class: "toast-x", title: "dismiss",
-      onclick: () => t.remove() }, "✕"));
+  if (sticky) {
+    const dismiss = h("button", { class: "toast-x", type: "button",
+      title: "dismiss", "aria-label": "dismiss notification",
+      onclick: (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        t.remove();
+      } }, "✕");
+    t.append(dismiss);
+  }
   document.body.append(t);
   if (!sticky) setTimeout(() => t.remove(), 4000);
   return t;

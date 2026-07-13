@@ -147,6 +147,26 @@ test("live pages, diffs, findings, and asks round-trip in a real browser", async
   await page.goto(baseUrl + "/");
   await expect(page.locator(".statusline > .cmd-led")).toHaveClass(/on/);
 
+  await page.evaluate(() => {
+    const toast = document.createElement("div");
+    toast.className = "toast-msg sticky";
+    toast.textContent = "test error";
+    const dismiss = document.createElement("button");
+    dismiss.className = "toast-x";
+    dismiss.type = "button";
+    dismiss.setAttribute("aria-label", "dismiss notification");
+    dismiss.textContent = "✕";
+    dismiss.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toast.remove();
+    });
+    toast.append(dismiss);
+    document.body.append(toast);
+  });
+  await page.getByRole("button", { name: "dismiss notification" }).click();
+  await expect(page.locator(".toast-msg", { hasText: "test error" })).toHaveCount(0);
+
   await page.locator(".page-row", { hasText: "Plan" }).click();
   await expect(page.locator(".view")).toContainText("First section");
   await json("/v1/bridge/screen", {

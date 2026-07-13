@@ -563,9 +563,11 @@ svg.ic { width: 14px; height: 14px; flex: none; display: block; }
   background: var(--l2); border: 1px solid var(--edge); color: var(--ink);
   padding: 8px 12px; z-index: 100; max-width: 60vw; font-size: 12.5px; }
 .toast-msg.sticky { border-left: 2px solid var(--bad); }
-.toast-x { font-size: 12px; color: var(--ink2); cursor: pointer;
-  padding: 0 4px; }
+.toast-x { appearance: none; border: 0; background: transparent;
+  font: inherit; font-size: 12px; line-height: 1; color: var(--ink2);
+  cursor: pointer; padding: 4px; margin: -4px; }
 .toast-x:hover { color: var(--ink); }
+.toast-x:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
 
 /* ---- diff view (diff.mjs classes, quiet skin; U2 adds the file index) ---------- */
 .diff { font-size: 12.5px; }

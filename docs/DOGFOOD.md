@@ -14,9 +14,6 @@
 - **DF-4: Stale/idle session not selectable and not auto-cleaned.**
   The "Dana" session shows as idle in the workbench and cannot be selected (mic cannot be passed to it). Stale sessions from split identity (DF-3) should either be auto-cleaned after a timeout or have a manual dismiss/remove option in the UI.
 
-- **DF-5: Error toast undismissable.**
-  Clicking a stale agent on the deck shows an error toast: `activate failed: no session named 'Dana (ip-172-31-10-253:firstmate)'`. The X button on the toast does nothing — the toast stays stuck on screen with no way to dismiss it.
-
 - **DF-6: Separate workspace registration from agent registration.**
   Currently every interaction (page_push, voice_init, listen) spawns an agent session. This creates phantom agents for repos you're just reviewing. Proposed split: `voco workspace add <path>` registers a repo/worktree as a review surface (diffs, files, pages) with no agent. `voice_init` / `voco listen` registers a live agent inside an already-known workspace. The rail groups by workspace; agents appear as dots inside their workspace. A workspace with no agent is the normal review-only state. This is architectural — it would also resolve DF-3 and DF-4 at the root.
 
@@ -33,3 +30,7 @@
   Once a diff or doc is pushed to the workbench, there's no way to close or remove it — not from the UI (no close button on pages in the rail) and not from the CLI or MCP (no `page close` / `page_remove` command). Need both: a close button in the UI (with a confirm dialog for pages with annotations/findings) and a CLI/MCP verb (`voco page close <id>` / `page_close`) so agents can clean up too.
 
 ## Fixed
+
+- **DF-5: Error toast undismissable.** Fixed by using a semantic dismiss button
+  with isolated click handling and keyboard focus styling. Covered by browser
+  regression testing.
