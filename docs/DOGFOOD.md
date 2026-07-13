@@ -20,10 +20,11 @@
 - **DF-10: "Idle" status misleading for dead sessions; messages silently queued.**
   Sessions with no active listener (Dana, Silas) show as "idle", implying they're alive and waiting. In reality they're dead processes that will never drain queued messages. Text sent to them queues silently with no feedback. Needs: (a) a "disconnected" status (no listener heartbeat for N seconds) distinct from "idle" (listener parked, waiting for input), (b) auto-reap after a longer timeout, (c) the UI should warn or block sending to a disconnected session. Related to DF-3/DF-4/DF-6.
 
-- **DF-8: No way to close/remove a page.**
-  Once a diff or doc is pushed to the workbench, there's no way to close or remove it — not from the UI (no close button on pages in the rail) and not from the CLI or MCP (no `page close` / `page_remove` command). Need both: a close button in the UI (with a confirm dialog for pages with annotations/findings) and a CLI/MCP verb (`voco page close <id>` / `page_close`) so agents can clean up too.
-
 ## Fixed
+
+- **DF-8: No way to close/remove a page.** The existing browser close controls
+  now confirm when a page has annotations. Added `voco page close <id>` and the
+  MCP `page_close` tool. Closed pages remain durable and reopen when republished.
 
 - **DF-1: Annotation dialog at top of page instead of inline.** File
   annotations now position from the selected range inside the scrolling center

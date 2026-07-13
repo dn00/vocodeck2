@@ -253,6 +253,18 @@ def build_server():
                 },
             ),
             Tool(
+                name="page_close",
+                description=(
+                    "Close a non-pinned page in the user's workbench by page id. "
+                    "The page remains restorable by publishing it again."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {"page_id": {"type": "string"}},
+                    "required": ["page_id"],
+                },
+            ),
+            Tool(
                 name="review_findings",
                 description=(
                     "List the review items (findings + questions) the user "
@@ -322,6 +334,9 @@ def build_server():
             return [TextContent(type="text", text=result)]
         if name == "page_push":
             result = await loop.run_in_executor(None, _page_push, client, arguments)
+            return [TextContent(type="text", text=result)]
+        if name == "page_close":
+            result = await loop.run_in_executor(None, _page_close, client, arguments)
             return [TextContent(type="text", text=result)]
         if name == "review_findings":
             result = await loop.run_in_executor(
@@ -393,6 +408,18 @@ def _page_push(client: Client, args: dict) -> str:
         return f"published: page {r.get('page_id')} rev {r.get('rev')}{where}"
     except Exception as e:
         return f"page_push failed: {_http_hint(e)}"
+
+
+def _page_close(client: Client, args: dict) -> str:
+    page_id = str(args.get("page_id") or "").strip()
+    if not page_id:
+        return "page_close needs page_id"
+    try:
+        result = client.page_close(page_id)
+        page = result.get("page") or {}
+        return f"closed: page {page.get('page_id', page_id)}"
+    except Exception as e:
+        return f"page_close failed: {_http_hint(e)}"
 
 
 def _review_findings(client: Client, all_: bool) -> str:

@@ -309,6 +309,7 @@ const PAGE_ICON = { screen: "▦", diff: "±", doc: "¶", terminal: "❯", html:
 const PAGE_ICON_SVG = {
   screen: "screen", diff: "diff", doc: "doc", terminal: "term", html: "screen",
 };
+const pageCloseable = (p) => p.type !== "screen" && p.type !== "terminal";
 
 function groupKey(ws) { return ws.common_dir || ws.key; }
 
@@ -535,7 +536,7 @@ function pagesTree(ws) {
       p.rev > 1 ? h("span", { class: "rev",
         title: `revision ${p.rev} — republished ${p.rev - 1}×` },
         "r" + p.rev) : "");
-    if (!p.pinned)
+    if (pageCloseable(p))
       row.append(h("span", { class: "rail-x", title: "close page",
         onclick: (e) => { e.stopPropagation(); closePage(p); } }, "✕"));
     tree.append(row);
@@ -666,7 +667,7 @@ function renderWork(force = false) {
       h("span", { class: "g" }, ic(PAGE_ICON_SVG[p.type] || "doc")),
       h("span", { class: "tab-title" }, p.title),
       p.rev > 1 ? h("span", { class: "g" }, "@r" + p.rev) : "");
-    if (!p.pinned)
+    if (pageCloseable(p))
       t.append(h("span", { class: "tab-x", title: "close page",
         onclick: (e) => { e.stopPropagation(); closePage(p); } }, "✕"));
     tabbar.append(t);
@@ -1344,6 +1345,19 @@ async function addFinding(page, anchor, text, kind, blocking) {
 }
 
 async function closePage(p) {
+  const findings = store.selectedWorkspace
+    ? store.findingsFor(store.selectedWorkspace)
+      .filter((f) => f.page_id === p.page_id && f.status !== "withdrawn")
+    : [];
+  if (findings.length) {
+    const yes = await confirmDanger(
+      `close ${p.title}?`,
+      `${findings.length} annotation${findings.length === 1 ? "" : "s"} `
+        + "will remain in the ledger. Republishing the page reopens it.",
+      "close",
+    );
+    if (!yes) return;
+  }
   try { await bus.command("page.close", { page_id: p.page_id }); }
   catch (e) { toast("close failed: " + errMsg(e), true); }
 }

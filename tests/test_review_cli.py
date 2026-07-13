@@ -5,7 +5,7 @@ the HTTP routes themselves are covered in test_workbench_http.py)."""
 from __future__ import annotations
 
 from voco_cli.main import format_review, format_review_item, format_transcript
-from voco_mcp.main import _page_push, _review_findings, _review_reply
+from voco_mcp.main import _page_close, _page_push, _review_findings, _review_reply
 
 FINDING = {
     "finding_id": "f-1a",
@@ -97,6 +97,10 @@ class StubClient:
         self.calls.append(("page_push", body))
         return {"ok": True, "page_id": "pg-7", "rev": 2}
 
+    def page_close(self, page_id) -> dict:
+        self.calls.append(("page_close", page_id))
+        return {"page": {"page_id": page_id, "closed": True}}
+
 
 def test_review_findings_lists_findings_and_asks():
     c = StubClient()
@@ -159,6 +163,16 @@ def test_page_push_doc_and_diff_shapes():
 
 def test_page_push_without_args_is_a_hint_not_an_error():
     assert "needs a doc" in _page_push(StubClient(), {})
+
+
+def test_page_close_calls_client_and_names_page():
+    c = StubClient()
+    assert _page_close(c, {"page_id": "pg-7"}) == "closed: page pg-7"
+    assert c.calls[-1] == ("page_close", "pg-7")
+
+
+def test_page_close_requires_id():
+    assert _page_close(StubClient(), {}) == "page_close needs page_id"
 
 
 # ---- identity re-assertion + cache keying (dogfood failure, 2026-07-06) --------

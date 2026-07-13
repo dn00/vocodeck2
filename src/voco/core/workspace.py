@@ -712,8 +712,8 @@ class WorkspaceStore:
         page = self._pages_by_id.get(page_id)
         if page is None:
             raise ValueError(f"unknown page: {page_id}")
-        if page.pinned and closed:
-            raise ValueError("pinned pages cannot be closed")
+        if page.type in {"screen", "terminal"} and closed:
+            raise ValueError(f"{page.type} pages cannot be closed")
         ws = self.workspace_of_page(page_id)
         assert ws is not None
         if page.closed != closed:

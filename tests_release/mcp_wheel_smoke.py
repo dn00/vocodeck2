@@ -78,6 +78,7 @@ async def exercise_mcp(executable: Path, base: str, repo: Path, cache: Path) -> 
                 "voice_init",
                 "voice_screen",
                 "page_push",
+                "page_close",
                 "review_findings",
                 "review_reply",
             } <= names

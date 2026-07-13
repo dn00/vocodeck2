@@ -220,6 +220,12 @@ test("live pages, diffs, findings, and asks round-trip in a real browser", async
   expect(revised.rev).toBe(2);
   await expect(page.locator(".fstate.stale")).toHaveText("stale r1→r2");
 
+  const reviewRow = page.locator(".page-row", { hasText: "Review diff" });
+  await page.locator(".tab", { hasText: "Review diff" }).locator(".tab-x").click();
+  await expect(page.locator(".modal")).toContainText("1 annotation will remain");
+  await page.locator(".modal .btn-primary", { hasText: "close" }).click();
+  await expect(reviewRow).toHaveCount(0);
+
   await page.locator(".ctab", { hasText: "asks" }).click();
   await page.locator(".ask-input").fill("Does the agent see this?");
   await page.locator(".ask-input").press("Enter");

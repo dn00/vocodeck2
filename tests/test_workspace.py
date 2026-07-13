@@ -235,6 +235,18 @@ def test_close_reopen_and_pinned_guard():
     with pytest.raises(ValueError):
         store.set_closed(screen.page_id, True)
 
+    diff = store.upsert_diff(
+        ws,
+        ref="branch:main",
+        title="main diff",
+        files=[],
+        source={"branch": "main"},
+        diff_key="empty",
+    )
+    assert diff.pinned
+    store.set_closed(diff.page_id, True)
+    assert diff.closed
+
 
 def test_snapshot_carries_metadata_never_content():
     store, _ = store_and_events()

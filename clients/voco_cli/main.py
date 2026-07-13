@@ -416,6 +416,12 @@ class Client:
             )
         )
 
+    def page_close(self, page_id: str) -> dict:
+        """Close one non-pinned workbench page by id."""
+        return self._request(
+            "POST", "/v1/control/page.close", {"page_id": page_id}, timeout=10
+        )
+
     def listen(self) -> dict:
         """Park until a transcript or review wake arrives; self-heals
         through daemon restarts up to RETRY_WINDOW_S of sustained failure."""
@@ -515,6 +521,15 @@ def cmd_page(args, client: Client) -> int:
     """`voco page …` — push a doc or diff page (SPEC-WORKBENCH §3.2).
     Paths resolve to absolute HERE (the agent's cwd may be a subdir of
     the workspace root the daemon confines against)."""
+    if args.pcmd == "close":
+        try:
+            result = client.page_close(args.page_id)
+            page = result.get("page") or {}
+            print(f"closed page {page.get('page_id', args.page_id)}")
+            return 0
+        except Exception as e:
+            print(f"error: {_http_error(e)}", file=sys.stderr)
+            return 1
     if args.pcmd == "doc":
         body: dict = {"type": "doc", "path": str(Path(args.path).resolve())}
         if args.name:
@@ -687,6 +702,8 @@ def main() -> None:
     )
     pg_diff.add_argument("--staged", action="store_true")
     pg_diff.add_argument("--file", default=None, help="a unified-diff file")
+    pg_close = psub.add_parser("close", help="close a non-pinned page")
+    pg_close.add_argument("page_id")
     sub.add_parser("watch")
     p_input = sub.add_parser("input")  # typed input path (say_as_user)
     p_input.add_argument("text")
