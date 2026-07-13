@@ -424,6 +424,7 @@ class WorkbenchRoutes:
         finally:
             pp.unsubscribe(queue)
             sender.cancel()
+            await asyncio.gather(sender, return_exceptions=True)
         return ws
 
     # ---- the page bridge verb (SPEC-WORKBENCH §3.2) ---------------------------

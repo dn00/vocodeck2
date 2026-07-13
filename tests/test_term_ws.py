@@ -213,3 +213,18 @@ async def test_term_ws_404_without_streaming_terminal(client):
     )
     resp = await client.get(f"/v1/term/{s.session_id}")
     assert resp.status == 404
+
+
+async def test_term_ws_repeated_disconnects_leave_no_sender_tasks(client):
+    sid, _handle = await spawn_and_register(client.daemon)
+    baseline = set(asyncio.all_tasks())
+    for _ in range(3):
+        ws = await client.ws_connect(f"/v1/term/{sid}")
+        await ws.close()
+        await asyncio.sleep(0)
+    leaked = [
+        task
+        for task in asyncio.all_tasks() - baseline
+        if not task.done() and task.get_coro().__qualname__.endswith("pump")
+    ]
+    assert leaked == []

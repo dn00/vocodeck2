@@ -55,7 +55,7 @@ jobs:
       - name: Build wheel
         run: uv build
       - name: Install built wheel
-        run: uv venv .wheel-venv && uv pip install --python .wheel-venv dist/voco-0.0.1-py3-none-any.whl
+        run: uv run python scripts/install_single_wheel.py .wheel-venv --create
       - name: Run installed CLI
         run: uv run --python .wheel-venv --no-project voco --help
 
@@ -69,6 +69,9 @@ jobs:
       - run: uv build
       # openwakeword's Linux tflite-runtime wheel currently stops at cp311.
       - run: uv venv .release-venv --python 3.11
-      - run: uv pip install --python .release-venv/bin/python 'dist/voco-0.0.1-py3-none-any.whl[mcp,stt,ptt,wake,floor]'
+      - run: >-
+          uv run python scripts/install_single_wheel.py
+          .release-venv/bin/python
+          --extras mcp,stt,ptt,wake,floor
       - run: .release-venv/bin/python tests_release/mcp_wheel_smoke.py
       - run: .release-venv/bin/python tests_release/voice_extras_smoke.py

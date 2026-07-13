@@ -7,7 +7,8 @@
 
 /**
  * @param {import("./store.mjs").Store} store
- * @param {{onCommandReply?: (m:any)=>void, onEvent?: (env:any)=>void}} [opts]
+ * @param {{onCommandReply?: (m:any)=>void, onEvent?: (env:any)=>void,
+ *   commandTimeoutMs?: number}} [opts]
  */
 export function connectBus(store, opts = {}) {
   const onCommandReply = opts.onCommandReply;
@@ -15,6 +16,8 @@ export function connectBus(store, opts = {}) {
   let ws = /** @type {?WebSocket} */ (null);
   let backoff = 500;
   let reqId = 0;
+  let reconciling = false;
+  const commandTimeoutMs = opts.commandTimeoutMs ?? 60000;
   /** @type {Map<string, {resolve:Function, reject:Function}>} */
   const pending = new Map();
 
@@ -54,7 +57,10 @@ export function connectBus(store, opts = {}) {
       store.connected = false;
       store.retryAt = Date.now() + backoff; // the countdown's truth
       store._notify("conn");
-      for (const { reject } of pending.values()) reject(new Error("socket closed"));
+      if (pending.size) reconciling = true;
+      for (const { reject } of pending.values()) {
+        reject(new OutcomeUnknownError("socket closed before command outcome"));
+      }
       pending.clear();
       if (!sawSnapshot) probeStaleToken();
       setTimeout(open, backoff);
@@ -65,6 +71,7 @@ export function connectBus(store, opts = {}) {
       let msg; try { msg = JSON.parse(ev.data); } catch { return; }
       if (msg.type === "snapshot") {
         sawSnapshot = true;
+        reconciling = false;
         store.staleToken = false;
         store.applySnapshot(msg.payload);
         if (opts.onEvent) opts.onEvent(msg);
@@ -88,17 +95,36 @@ export function connectBus(store, opts = {}) {
   /** @param {string} cmd @param {object} payload @returns {Promise<any>} */
   function command(cmd, payload = {}) {
     return new Promise((resolve, reject) => {
+      if (reconciling)
+        return reject(new OutcomeUnknownError(
+          "previous operation outcome is unknown; wait for resynchronization",
+        ));
       if (!ws || ws.readyState !== WebSocket.OPEN)
         return reject(new Error("not connected"));
       const id = "c" + ++reqId;
       pending.set(id, { resolve, reject });
       ws.send(JSON.stringify({ id, cmd, payload }));
       setTimeout(() => {
-        if (pending.has(id)) { pending.delete(id); reject(new Error("timeout")); }
-      }, 15000);
+        if (pending.has(id)) {
+          pending.delete(id);
+          reconciling = true;
+          reject(new OutcomeUnknownError(
+            "operation may still complete; wait for resynchronization before retrying",
+          ));
+          if (ws) ws.close();
+        }
+      }, commandTimeoutMs);
     });
   }
 
   open();
   return { command };
+}
+
+export class OutcomeUnknownError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "OutcomeUnknownError";
+    this.code = "outcome_unknown";
+  }
 }
