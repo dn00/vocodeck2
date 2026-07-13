@@ -6,7 +6,10 @@ import asyncio
 import json
 import stat
 
-from voco.adapters.state_store import StateStore
+import pytest
+
+from voco.adapters.state_store import StateLockError, StateStore
+from voco.core.limits import MAX_INPUT_BYTES, MAX_QUEUED_INPUTS, MAX_SCREEN_BYTES
 from voco.core.registry import Registry
 from voco.daemon import Daemon
 
@@ -33,14 +36,21 @@ def test_dump_restore_round_trip_preserves_tokens_queues_and_names():
     assert r2.restore(json.loads(json.dumps(dump))) == 2  # JSON-safe
     assert {s.session_id for s in r2.all()} == {s.session_id for s in r1.all()}
     assert r2.call_names() == r1.call_names()
-    assert r2.active is not None and r2.active.call_name == r1.active.call_name
+    # Restored tokens are dormant until the cached agent actually calls back;
+    # voice must never route into a dead process merely because it was active.
+    assert r2.active is None and r2.snapshot()["active_session"] is None
     a2 = next(s for s in r2.all() if s.identity["cwd"] == "/repo/a")
+    assert r2.dispatch("new speech", r2.mint_turn_id(), target=a2) == "no_session"
     assert "inject" in a2.capabilities and a2.inject_target == "%4"
     assert a2.screen_markdown == "# plan\n- step one"
     assert not a2.parked  # no poll survived the old daemon
     # The queued input survives and delivers on the agent's next listen.
     payload = r2.on_listen_start(a2.session_id)
     assert payload is not None and payload["text"] == "run the linter"
+    assert r2.active is None  # a different restored agent held the mic
+    active2 = next(s for s in r2.all() if s.call_name == r1.active.call_name)
+    r2.on_listen_start(active2.session_id)
+    assert r2.active is not None and r2.active.call_name == r1.active.call_name
     # Turn counter continues — no id collisions after restore.
     assert r2.mint_turn_id() not in {payload["turn_id"]}
 
@@ -65,6 +75,85 @@ def test_restore_skips_garbage_and_wrong_version():
     assert r.get("ok1") is not None
 
 
+def test_restore_bounds_legacy_queue_and_keeps_newest_valid_items():
+    queued = [
+        {"ts": index, "turn_id": f"t-{index}", "text": f"command {index}"}
+        for index in range(MAX_QUEUED_INPUTS + 5)
+    ]
+    queued.insert(3, {"ts": 3, "turn_id": "oversize", "text": "é" * MAX_INPUT_BYTES})
+    dump = {
+        "v": 1,
+        "sessions": [
+            {
+                "session_id": "bounded",
+                "identity": {"host": "m", "cwd": "/x"},
+                "call_name": "Iris",
+                "capabilities": ["say"],
+                "queued": queued,
+            }
+        ],
+    }
+
+    r = Registry()
+    assert r.restore(dump) == 1
+    restored = r.get("bounded")
+    assert restored is not None
+    assert len(restored.queued) == MAX_QUEUED_INPUTS
+    assert restored.queued[0].turn_id == "t-5"
+    assert restored.queued[-1].turn_id == f"t-{MAX_QUEUED_INPUTS + 4}"
+    assert all(item.turn_id != "oversize" for item in restored.queued)
+
+
+def test_dump_restore_preserves_in_limit_queue():
+    source = Registry()
+    session = source.register({"host": "m", "cwd": "/x"}, ["say"])
+    for index in range(3):
+        source.dispatch(f"command {index}", source.mint_turn_id())
+
+    restored = Registry()
+    assert restored.restore(source.dump()) == 1
+    restored_session = restored.get(session.session_id)
+    assert restored_session is not None
+    assert [item.text for item in restored_session.queued] == [
+        "command 0",
+        "command 1",
+        "command 2",
+    ]
+
+
+def test_registry_screen_limit_and_restore_recovery():
+    events: list[tuple[str, dict]] = []
+    source = Registry(emit=lambda topic, payload: events.append((topic, payload)))
+    session = source.register({"host": "m", "cwd": "/x"}, ["say"])
+    exact = "é" * (MAX_SCREEN_BYTES // 2)
+    source.set_screen(session.session_id, exact, "Exact", "show")
+    assert session.screen_markdown == exact
+    event_count = len(events)
+
+    with pytest.raises(ValueError, match="screen exceeds maximum size"):
+        source.set_screen(session.session_id, "x", None, "append")
+    assert session.screen_markdown == exact
+    assert len(events) == event_count
+
+    dumped = source.dump()
+    dumped["sessions"][0]["screen_markdown"] = "é" * MAX_SCREEN_BYTES
+    restored = Registry()
+    assert restored.restore(dumped) == 1
+    restored_session = restored.get(session.session_id)
+    assert restored_session is not None
+    assert restored_session.screen_markdown == ""
+
+
+def test_restore_expires_old_session_tokens():
+    clock = {"t": 1000.0}
+    source = Registry(now=lambda: clock["t"])
+    source.register({"host": "m", "cwd": "/x"}, ["say"])
+    dumped = source.dump()
+    clock["t"] += 101
+    fresh = Registry(now=lambda: clock["t"])
+    assert fresh.restore(dumped, max_age_s=100) == 0
+
+
 def test_state_store_round_trip_perms_and_corruption(tmp_path):
     store = StateStore(tmp_path / "voco")
     store.save({"v": 1, "sessions": []})
@@ -79,6 +168,18 @@ def test_state_store_round_trip_perms_and_corruption(tmp_path):
     # Fresh boot after corruption: (None, None).
     data, err = store.load()
     assert data is None and err is None
+
+
+def test_state_store_lock_blocks_live_foreign_holder(tmp_path):
+    from voco.adapters.manifest import _proc_start
+
+    root = tmp_path / "voco"
+    root.mkdir()
+    (root / "registry.lock").write_text(
+        json.dumps({"pid": 1, "start": _proc_start(1)}), encoding="utf-8"
+    )
+    with pytest.raises(StateLockError):
+        StateStore(root).acquire()
 
 
 def test_daemon_restart_preserves_queued_input(tmp_path):
@@ -96,8 +197,26 @@ def test_daemon_restart_preserves_queued_input(tmp_path):
     assert payload is not None and payload["text"] == "do the thing"
 
 
+def test_daemon_restart_preserves_worktree_ownership(tmp_path):
+    cfg = {"state": {"dir": str(tmp_path)}}
+    d1 = Daemon(cfg, no_audio=True)
+    owned = str((tmp_path / "repo-feature").resolve())
+    d1._spawned_worktrees["voco-feature"] = owned
+    d1._state.save(d1._dump_state())
+
+    d2 = Daemon(cfg, no_audio=True)
+    d2._restore_state()
+    assert d2._spawned_worktrees == {"voco-feature": owned}
+    d2._state.release()
+
+
+def test_queue_drain_is_a_durable_state_event():
+    assert "input.drained" in Daemon._STATE_EVENTS
+
+
 async def test_debounced_saver_writes_after_bus_event(tmp_path):
     d = Daemon({"state": {"dir": str(tmp_path)}}, no_audio=True)
+    d._restore_state()
     d._wire_state_saver()
     d.registry.register({"host": "m", "cwd": "/w", "harness": "codex"}, ["say"])
     d.bus.emit("digest.updated", {"session_id": "x", "unread": 1})
@@ -105,3 +224,4 @@ async def test_debounced_saver_writes_after_bus_event(tmp_path):
     await asyncio.sleep(0.8)
     data, err = d._state.load()
     assert err is None and data is not None and len(data["sessions"]) == 1
+    d._state.release()

@@ -8,9 +8,9 @@ decision, SPEC §14.9).
 INVARIANTS: the first-mate tier is consulted through a port with a hard
 timeout; any failure, timeout, or malformed output coerces to plain
 `forward` (SPEC §7.3) — but a timeout no longer CANCELS the mate: dispatch
-goes with the fast path and the mate finishes in the background (triage
-2026-07-03: the mate must never slow the action; its late decision still
-speaks/acts/corrects). The router never rewrites transcript text.
+goes with the fast path and the mate finishes in the background. A daemon
+may use that result for a turn-scoped acknowledgement only; it must never
+dispatch or mutate state late. The router never rewrites transcript text.
 """
 
 from __future__ import annotations

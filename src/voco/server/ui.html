@@ -185,7 +185,7 @@
   <span class="hint">Enter ↵</span>
 </footer>
 <div id="toast"></div>
-<script>
+<script nonce="{{nonce}}">
 "use strict";
 const $ = id => document.getElementById(id);
 const S = {
@@ -200,8 +200,13 @@ let ws = null, syncTimer = null, autoTimer = null;
 /* ---- connection ---------------------------------------------------------- */
 
 function wsUrl() {
+  const params = new URLSearchParams();
   const token = localStorage.getItem("voco_token");
-  const q = token ? "?token=" + encodeURIComponent(token) : "";
+  if (token) params.set("token", token);
+  // §8.5: WS commands from a browser page need the workbench token the
+  // daemon injected when it served this page.
+  if (window.__VOCO_WB__) params.set("wb", window.__VOCO_WB__);
+  const q = params.toString() ? "?" + params.toString() : "";
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   return proto + "//" + location.host + "/v1/events" + q;
 }

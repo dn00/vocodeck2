@@ -35,10 +35,17 @@ Every event is one JSON object:
 Payload shapes are stable per type; see SPEC §10 for semantics.
 
 - `agent.say` *(turn-scoped: payload carries `turn_id`)*
+- `ask.answered`
+- `ask.created`
 - `daemon.error`
 - `digest.updated`
+- `finding.added`
+- `finding.updated`
+- `input.drained`
 - `input.queued` *(turn-scoped: payload carries `turn_id`)*
+- `mic.level`
 - `mic.state`
+- `page.updated`
 - `pane.hint`
 - `route.decision` *(turn-scoped: payload carries `turn_id`)*
 - `screen.updated`
@@ -51,23 +58,48 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 - `speech.expired` *(turn-scoped: payload carries `turn_id`)*
 - `speech.finished` *(turn-scoped: payload carries `turn_id`)*
 - `speech.interrupted` *(turn-scoped: payload carries `turn_id`)*
+- `speech.sentence`
 - `speech.started` *(turn-scoped: payload carries `turn_id`)*
 - `stt.final`
 - `stt.partial`
+- `term.closed`
+- `term.opened`
 - `turn.patience` *(turn-scoped: payload carries `turn_id`)*
 - `turn.state` *(turn-scoped: payload carries `turn_id`)*
+- `workspace.updated`
 
 ## Commands (clients → daemon)
 
+- `ask.create`
+- `ask.list`
+- `attach.snippet`
 - `config.get`
 - `config.set`
+- `finding.add`
+- `finding.list`
+- `finding.status`
+- `finding.update`
+- `finding.withdraw`
 - `interrupt`
 - `mic.set`
+- `page.close`
+- `page.publish`
+- `page.reopen`
+- `ptt.press`
+- `ptt.release`
+- `review.export`
+- `review.primary`
 - `say_as_user`
 - `session.detach`
 - `session.kill`
 - `session.panes`
 - `session.peek`
 - `session.spawn`
+- `session.transcript`
 - `state.get`
 - `switch_session`
+- `workspace.files`
+- `workspace.link`
+- `workspace.list`
+- `workspace.live`
+- `workspace.open`

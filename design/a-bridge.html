@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A · BRIDGE — vocodeck UI direction</title>
+<style>
+  /* ============ A · BRIDGE — mission control ============
+     Thesis: the deck as a ship's bridge. Dark command-room, phosphor
+     signal colors, monospace-forward, dense and glanceable from across
+     the room. Voice is a live instrument, not a widget. */
+  :root {
+    --bg0:#06090e; --bg1:#0a0f16; --bg2:#0f1620; --bg3:#141d2a;
+    --edge:#1d2938; --edge-hot:#2c3d52;
+    --ink0:#d8e4f0; --ink1:#8ba0b8; --ink2:#54677d;
+    --phos:#39d5c4;            /* phosphor cyan — selection, live */
+    --amber:#ffb454;           /* voice-live, needs-you */
+    --grn:#4ade80; --red:#ff5d5d; --blu:#5aa9ff; --vio:#b18cff;
+    --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg0);color:var(--ink0);font:13px/1.45 var(--sans)}
+  .note{max-width:1280px;margin:28px auto 14px;padding:0 20px}
+  .note h1{font:700 15px var(--mono);color:var(--phos);letter-spacing:.08em}
+  .note p{color:var(--ink1);margin-top:6px;max-width:70ch}
+  .note a{color:var(--phos)}
+  /* ---------- deck frame ---------- */
+  .deck{width:1280px;height:780px;margin:16px auto;border:1px solid var(--edge);
+    display:grid;grid-template-rows:52px 1fr 26px;background:var(--bg0);
+    box-shadow:0 0 80px rgba(57,213,196,.05), 0 24px 60px rgba(0,0,0,.6)}
+  .mid{display:grid;grid-template-columns:252px 1fr 300px;min-height:0}
+  /* ---------- presence strip ---------- */
+  .strip{display:flex;align-items:center;gap:14px;padding:0 14px;
+    background:linear-gradient(180deg,var(--bg2),var(--bg1));border-bottom:1px solid var(--edge)}
+  .orb{width:34px;height:34px;border-radius:50%;position:relative;flex:none;
+    background:radial-gradient(circle at 35% 30%, #164b46, #0a1f22 70%);
+    border:2px solid var(--amber);box-shadow:0 0 14px rgba(255,180,84,.55), inset 0 0 8px rgba(57,213,196,.4)}
+  .orb::after{content:"";position:absolute;inset:-7px;border-radius:50%;
+    border:1px solid rgba(255,180,84,.35);animation:ring 2.4s infinite}
+  @keyframes ring{0%{transform:scale(.85);opacity:.9}100%{transform:scale(1.25);opacity:0}}
+  .mic-label{font:11px var(--mono);color:var(--amber);letter-spacing:.14em;text-transform:uppercase}
+  .mic-label b{display:block;font-size:13px;color:var(--ink0);letter-spacing:.02em}
+  .caption{flex:1;font:12.5px var(--mono);color:var(--ink1);
+    border-left:1px solid var(--edge);padding-left:14px}
+  .caption .live{color:var(--phos)}
+  .say{width:340px;background:var(--bg0);border:1px solid var(--edge-hot);
+    padding:7px 10px;font:12.5px var(--mono);color:var(--ink2)}
+  .say b{color:var(--phos);font-weight:400}
+  .sbtn{width:30px;height:30px;border:1px solid var(--edge-hot);background:var(--bg1);
+    color:var(--ink1);font:14px var(--mono);display:grid;place-items:center;cursor:pointer}
+  /* ---------- rail ---------- */
+  .rail{background:var(--bg1);border-right:1px solid var(--edge);overflow:auto;padding:10px 0}
+  .rgroup{font:10px var(--mono);color:var(--ink2);letter-spacing:.22em;text-transform:uppercase;
+    padding:10px 14px 4px;display:flex;justify-content:space-between}
+  .rgroup .ops{color:var(--ink2)}
+  .wrow{padding:7px 14px;cursor:pointer;border-left:2px solid transparent}
+  .wrow:hover{background:var(--bg2)}
+  .wrow.sel{background:var(--bg3);border-left-color:var(--phos)}
+  .wname{font:12.5px var(--mono);color:var(--ink0);display:flex;gap:8px;align-items:center}
+  .chip{font:10px var(--mono);padding:1px 5px;border:1px solid var(--edge-hot);color:var(--blu)}
+  .chip.pr{color:var(--vio)}
+  .flag{margin-left:auto;font:10px var(--mono);color:var(--amber)}
+  .agent{display:flex;gap:7px;align-items:center;padding:3px 14px 3px 28px;font:12px var(--mono)}
+  .dot{width:7px;height:7px;border-radius:50%}
+  .dot.work{background:var(--grn);box-shadow:0 0 6px var(--grn)}
+  .dot.stale{background:var(--ink2)}
+  .aname{color:var(--ink1)} .aname.mic{color:var(--amber)}
+  .astate{color:var(--ink2);font-size:10px}
+  .page{display:flex;gap:8px;padding:2px 14px 2px 40px;font:11.5px var(--mono);color:var(--ink1);cursor:pointer}
+  .page.sel{color:var(--phos)}
+  .page .ic{width:12px;color:var(--ink2)} .page.sel .ic{color:var(--phos)}
+  .page .rev{margin-left:auto;color:var(--ink2);font-size:10px}
+  .grey{opacity:.5}
+  .railfoot{margin-top:14px;padding:8px 14px;border-top:1px solid var(--edge);
+    font:11px var(--mono);color:var(--ink2)}
+  .railfoot span{color:var(--phos)}
+  /* ---------- work center ---------- */
+  .work{background:var(--bg0);overflow:auto;position:relative;min-height:0}
+  .crumb{position:sticky;top:0;display:flex;gap:10px;align-items:baseline;padding:10px 22px;
+    background:linear-gradient(180deg,var(--bg1),rgba(10,15,22,.92));border-bottom:1px solid var(--edge);
+    font:11px var(--mono);color:var(--ink2);letter-spacing:.1em;text-transform:uppercase}
+  .crumb b{color:var(--ink0);letter-spacing:.02em;text-transform:none;font:12.5px var(--mono)}
+  .crumb .rev{color:var(--phos)}
+  .doc{max-width:720px;padding:28px 22px 60px;font:14px/1.75 var(--sans);color:var(--ink0)}
+  .doc h2{font:700 19px var(--sans);margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid var(--edge)}
+  .doc ul{margin:0 0 16px 20px}
+  .doc li{margin:5px 0;padding:2px 6px;border-radius:2px;cursor:pointer}
+  .doc li:hover{background:rgba(57,213,196,.06);outline:1px dashed rgba(57,213,196,.35)}
+  .doc code{font:12.5px var(--mono);color:var(--phos);background:var(--bg2);padding:1px 5px}
+  .doc .ann-hl{background:rgba(255,180,84,.16);border-bottom:1px dotted var(--amber)}
+  .marker{display:inline-grid;place-items:center;width:15px;height:15px;margin-left:6px;
+    background:var(--amber);color:#20160a;font:700 10px var(--mono);vertical-align:2px;border-radius:2px}
+  .doc .selected{background:rgba(57,213,196,.22);outline:1px solid var(--phos)}
+  /* annotation editor — diff-annotate parity, BRIDGE skin */
+  .editor{width:460px;margin:10px 0 18px;background:var(--bg2);border:1px solid var(--phos);
+    box-shadow:0 0 24px rgba(57,213,196,.15), 0 14px 34px rgba(0,0,0,.5)}
+  .ed-target{padding:7px 12px;font:10px var(--mono);color:var(--phos);letter-spacing:.14em;
+    text-transform:uppercase;border-bottom:1px solid var(--edge)}
+  .editor textarea{width:100%;height:64px;background:var(--bg0);border:none;resize:none;
+    padding:10px 12px;font:12.5px var(--mono);color:var(--ink0)}
+  .ed-row{display:flex;gap:6px;align-items:center;padding:9px 12px;border-top:1px solid var(--edge)}
+  .pill{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;padding:3px 9px;
+    border:1px solid var(--edge-hot);color:var(--ink1);cursor:pointer}
+  .pill.on{border-color:var(--amber);color:var(--amber);background:rgba(255,180,84,.08)}
+  .blocking{font:11px var(--mono);color:var(--ink2);margin-left:4px}
+  .blocking b{color:var(--red)}
+  .ed-actions{margin-left:auto;display:flex;gap:6px}
+  .btn{font:11px var(--mono);letter-spacing:.08em;padding:5px 14px;cursor:pointer;
+    border:1px solid var(--edge-hot);background:var(--bg1);color:var(--ink1)}
+  .btn.primary{border-color:var(--phos);color:#052a26;background:var(--phos);font-weight:700}
+  .tip{padding:6px 12px;font:10px var(--mono);color:var(--ink2);border-top:1px solid var(--edge)}
+  /* ---------- dock ---------- */
+  .dock{background:var(--bg1);border-left:1px solid var(--edge);display:flex;flex-direction:column;min-height:0}
+  .scope{padding:10px 14px;font:10px var(--mono);color:var(--ink2);letter-spacing:.16em;text-transform:uppercase;
+    border-bottom:1px solid var(--edge)}
+  .scope b{display:block;font:12px var(--mono);color:var(--ink0);letter-spacing:.02em;text-transform:none;margin-top:2px}
+  .tabs{display:flex;border-bottom:1px solid var(--edge)}
+  .tab{flex:1;text-align:center;padding:8px;font:10px var(--mono);letter-spacing:.16em;
+    text-transform:uppercase;color:var(--ink2);cursor:pointer}
+  .tab.on{color:var(--phos);border-bottom:2px solid var(--phos)}
+  .anns{overflow:auto;flex:1}
+  .ann{padding:10px 14px;border-bottom:1px solid var(--edge);cursor:pointer}
+  .ann:hover{background:var(--bg2)}
+  .ann-meta{display:flex;gap:8px;font:10px var(--mono);letter-spacing:.08em;text-transform:uppercase}
+  .k-concern{color:var(--red)} .k-question{color:var(--blu)} .k-nit{color:var(--ink2)}
+  .b-flag{color:var(--amber)}
+  .ann-text{margin-top:4px;font:12px/1.5 var(--sans);color:var(--ink1)}
+  .ann-loc{margin-top:4px;font:10.5px var(--mono);color:var(--ink2)}
+  .ann.done .ann-text{text-decoration:line-through;color:var(--ink2)}
+  .export{padding:9px 14px;border-top:1px solid var(--edge);font:11px var(--mono);color:var(--phos);cursor:pointer}
+  /* ---------- status line ---------- */
+  .status{display:flex;gap:18px;align-items:center;padding:0 14px;background:var(--bg1);
+    border-top:1px solid var(--edge);font:10.5px var(--mono);color:var(--ink2)}
+  .status .ok{color:var(--grn)} .status .mic{color:var(--amber)} .status .cnt b{color:var(--ink0)}
+  /* ---------- detail samples below frame ---------- */
+  .samples{max-width:1280px;margin:26px auto 80px;padding:0 20px;display:grid;
+    grid-template-columns:1fr 1fr;gap:18px}
+  .sample{border:1px solid var(--edge);background:var(--bg1)}
+  .sample h3{font:10px var(--mono);color:var(--ink2);letter-spacing:.2em;text-transform:uppercase;
+    padding:9px 14px;border-bottom:1px solid var(--edge)}
+  .drow{display:grid;grid-template-columns:44px 44px 1fr;font:12px/1.7 var(--mono)}
+  .dline{color:var(--ink2);text-align:right;padding-right:10px;background:var(--bg0)}
+  .drow .code{padding-left:12px;white-space:pre}
+  .drow.add .code{background:rgba(74,222,128,.07);color:var(--ink0)}
+  .drow.add .sign{color:var(--grn)}
+  .drow.del .code{background:rgba(255,93,93,.07);color:var(--ink1)}
+  .drow.del .sign{color:var(--red)}
+  .drow.flagged .code{box-shadow:inset 2px 0 var(--amber)}
+  .sign{text-align:center}
+  .tree{font:12px/1.8 var(--mono);padding:10px 14px;color:var(--ink1)}
+  .tree .dir{color:var(--ink0)} .tree .sel{color:var(--phos)}
+  .tree .stat{color:var(--grn)} .tree .statd{color:var(--red)}
+  .code-s{font:12px/1.7 var(--mono);padding:10px 14px;white-space:pre;overflow:auto}
+  .kw{color:var(--vio)} .fn{color:var(--blu)} .str{color:var(--grn)} .cm{color:var(--ink2)} .num{color:var(--amber)}
+</style>
+</head>
+<body>
+<div class="note">
+  <h1>A · BRIDGE — mission control</h1>
+  <p>The deck as a ship's bridge: dense, dark, phosphor-lit. Monospace carries the
+  signal; amber means a voice is live; cyan means "you are here". Built to be read
+  from across the room while you talk. <a href="index.html">← all directions</a></p>
+</div>
+
+<div class="deck">
+  <!-- presence strip -->
+  <div class="strip">
+    <div class="orb"></div>
+    <div class="mic-label">mic → <b>Hugo</b></div>
+    <div class="caption"><span class="live">▮ listening</span> — "flag the orb bullet, it's stale…"</div>
+    <input class="say" value="say “deck …” or type — routes to Hugo" readonly>
+    <div class="sbtn">■</div><div class="sbtn">⚙</div>
+  </div>
+
+  <div class="mid">
+    <!-- rail -->
+    <div class="rail">
+      <div class="rgroup"><span>vocodeck2</span><span class="ops">＋review ＋agent</span></div>
+      <div class="wrow"><div class="wname">workbench <span class="chip pr">pr#7</span><span class="flag">3⚑</span></div></div>
+      <div class="agent"><span class="dot work"></span><span class="aname mic">⚡ Hugo</span><span class="astate">working</span></div>
+      <div class="page"><span class="ic">◈</span>overview</div>
+      <div class="page"><span class="ic">▤</span>files</div>
+      <div class="page"><span class="ic">±</span>branch: <span class="rev">r11</span></div>
+
+      <div class="rgroup"><span>voco-demo</span><span class="ops">＋review ＋agent</span></div>
+      <div class="wrow grey"><div class="wname">fix-pty</div></div>
+      <div class="wrow sel"><div class="wname">workbench-strip <span class="chip">#3</span><span class="chip pr">pr#7</span><span class="flag">8⚑</span></div></div>
+      <div class="page"><span class="ic">±</span>branch: main <span class="rev">r8</span></div>
+      <div class="page sel"><span class="ic">▦</span>strip status <span class="rev">r4</span></div>
+
+      <div class="rgroup"><span>sessions</span></div>
+      <div class="agent"><span class="dot stale"></span><span class="aname">Freya</span><span class="astate">stale · 4 queued</span></div>
+      <div class="agent"><span class="dot stale"></span><span class="aname">Iris</span><span class="astate">stale · 1 queued</span></div>
+      <div class="railfoot">connect → <span>voco attach …</span></div>
+    </div>
+
+    <!-- work -->
+    <div class="work">
+      <div class="crumb">workbench-strip / <b>strip status</b> <span class="rev">rev 4</span><span style="margin-left:auto">annotate: click a block · select text</span></div>
+      <div class="doc">
+        <h2>strip status</h2>
+        <ul>
+          <li><span class="ann-hl">orb states: <b>done</b></span><span class="marker">1</span></li>
+          <li>captions: done</li>
+          <li class="selected">tests: 3 green</li>
+        </ul>
+
+        <!-- the hero: diff-annotate parity editor, opened from the selection -->
+        <div class="editor">
+          <div class="ed-target">strip status · "tests: 3 green"</div>
+          <textarea>3 green — but the suite gained 12 tests since r3. Re-run and re-push this doc; stale counts read as fresh signal.</textarea>
+          <div class="ed-row">
+            <span class="pill on">concern</span><span class="pill">question</span><span class="pill">nit</span>
+            <span class="blocking">☐ <b>blocking</b></span>
+            <div class="ed-actions"><span class="btn">cancel</span><span class="btn primary">add annotation</span></div>
+          </div>
+          <div class="tip">anchors survive edits — re-anchored on next push, stale-not-dropped</div>
+        </div>
+
+        <p>next: wire <code>speech.sentence</code> karaoke</p>
+      </div>
+    </div>
+
+    <!-- dock -->
+    <div class="dock">
+      <div class="scope">scope<b>workbench-strip · voco-demo</b></div>
+      <div class="tabs"><div class="tab on">annotations</div><div class="tab">transcript</div></div>
+      <div class="anns">
+        <div class="ann">
+          <div class="ann-meta"><span class="k-concern">concern</span><span class="b-flag">⚑ blocking</span></div>
+          <div class="ann-text">orb must reflect attention mode, not just VAD — muted should read differently from idle</div>
+          <div class="ann-loc">± presence.mjs:4</div>
+        </div>
+        <div class="ann">
+          <div class="ann-meta"><span class="k-question">question</span></div>
+          <div class="ann-text">is "orb states: done" still true after the attention-mode rework?</div>
+          <div class="ann-loc">▦ strip status · "orb states: done"</div>
+        </div>
+        <div class="ann done">
+          <div class="ann-meta"><span class="k-nit">nit · resolved</span></div>
+          <div class="ann-text">caption quotes render straight, should be curly</div>
+          <div class="ann-loc">± presence.mjs:31</div>
+        </div>
+      </div>
+      <div class="export">export ↓</div>
+    </div>
+  </div>
+
+  <!-- status line -->
+  <div class="status">
+    <span class="ok">● 127.0.0.1:7777</span>
+    <span class="mic">mic → Hugo</span>
+    <span>ptt_only · half_duplex</span>
+    <span class="cnt"><b>1</b> working · <b>0</b> listening</span>
+    <span class="cnt"><b>3</b> annotations</span>
+  </div>
+</div>
+
+<!-- system samples -->
+<div class="samples">
+  <div class="sample">
+    <h3>diff treatment · flagged row</h3>
+    <div class="drow del"><span class="dline">33</span><span class="sign">−</span><span class="code">timeout_ms = 800</span></div>
+    <div class="drow add"><span class="dline">33</span><span class="sign">+</span><span class="code"># timeout_ms = 800</span></div>
+    <div class="drow add flagged"><span class="dline">34</span><span class="sign">+</span><span class="code"># late_window_ms = 8000</span></div>
+    <div class="drow"><span class="dline">35</span><span class="sign"></span><span class="code">stream = true</span></div>
+    <div class="drow add"><span class="dline">36</span><span class="sign">+</span><span class="code"># [bridge]</span></div>
+  </div>
+  <div class="sample">
+    <h3>file tree · syntax highlighting</h3>
+    <div style="display:grid;grid-template-columns:230px 1fr">
+      <div class="tree">
+        <div class="dir">▾ src/voco/server/</div>
+        <div>&nbsp;&nbsp;▸ adapters/</div>
+        <div class="sel">&nbsp;&nbsp;workbench.py <span class="stat">+698</span></div>
+        <div>&nbsp;&nbsp;http.py <span class="stat">+218</span> <span class="statd">−33</span></div>
+        <div class="dir">▾ static/</div>
+        <div>&nbsp;&nbsp;docview.mjs <span class="stat">+184</span></div>
+      </div>
+      <div class="code-s"><span class="kw">async def</span> <span class="fn">serve_file</span>(req):
+    <span class="cm"># tracked-only: ls-files --error-unmatch</span>
+    path = <span class="fn">confine</span>(req.query[<span class="str">"path"</span>])
+    <span class="kw">if not</span> tracked(path): <span class="kw">raise</span> <span class="fn">NotFound</span>()
+    <span class="kw">return</span> <span class="fn">read_capped</span>(path, <span class="num">512_000</span>)</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

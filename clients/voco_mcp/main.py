@@ -21,9 +21,21 @@ import shlex
 import sys
 import time
 
-from voco_cli.main import CACHE_DIR, SOFT_FAIL, Client, format_transcript
+from voco_cli.main import (
+    CACHE_DIR,
+    SOFT_FAIL,
+    Client,
+    format_review,
+    format_review_item,
+    format_transcript,
+)
 
 LISTEN_BUDGET_S = float(os.environ.get("VOCO_MCP_LISTEN_BUDGET_S", "240"))
+
+REVIEW_FOOTER_MCP = (
+    "address each item, then report via review_reply (status for findings, "
+    "markdown for questions and asks); re-list any time with review_findings."
+)
 
 INSTRUCTIONS = """\
 You are connected to a voice daemon. The user often listens instead of
@@ -47,6 +59,11 @@ Listening — pick ONE mode:
   voice_listen and acting on what it returns; if it returns 'nothing
   yet', call voice_listen again. Treat returned transcripts as the
   user's next instruction.
+
+The user also reviews your work in a browser workbench (diffs, docs you
+push with page_push). Treat review findings and questions as user input:
+address them, then report via review_reply. They arrive through the same
+listening loop; review_findings re-lists them any time.
 """
 
 
@@ -123,6 +140,9 @@ def init_reply(client: Client) -> str:
         "- If the output says the session was ended, superseded, or the\n"
         "  daemon is unreachable, STOP re-running.\n"
         "- Speak with voice_say. Show content with voice_screen.\n"
+        "- Lines starting with [review] are workbench findings/questions\n"
+        "  the user flagged — treat them as user input: address them,\n"
+        "  then report via review_reply (or `voco review ...`).\n"
         "- The user is listening, not reading the terminal."
     )
 
@@ -182,14 +202,98 @@ def build_server():
             Tool(
                 name="voice_listen",
                 description=(
-                    "Park and wait for the user's next spoken instruction. "
-                    "Call this when your turn's work is complete. If it "
-                    "returns 'nothing yet', call it again to keep listening. "
-                    "NOTE: this blocks your turn — if you can run background "
-                    "shell tasks, call voice_init once instead and background "
-                    "the command it returns."
+                    "Park and wait for the user's next spoken instruction "
+                    "or review items they flagged in the workbench. Call "
+                    "this when your turn's work is complete. If it returns "
+                    "'nothing yet', call it again to keep listening. NOTE: "
+                    "this blocks your turn — if you can run background "
+                    "shell tasks, call voice_init once instead and "
+                    "background the command it returns."
                 ),
                 inputSchema={"type": "object", "properties": {}},
+            ),
+            Tool(
+                name="page_push",
+                description=(
+                    "Publish a page to the user's workbench browser: a doc "
+                    "(markdown file path or inline content) or a diff "
+                    "(pr/branch/staged/diff file) the user can annotate. "
+                    "Re-pushing the same doc/diff updates it in place."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "doc: file path inside the workspace",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "doc: inline markdown instead of a path",
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "doc title (required for inline content)",
+                        },
+                        "diff": {
+                            "type": "object",
+                            "description": (
+                                "diff page instead of a doc — exactly one of: "
+                                '{"pr": N}, {"branch": "BASE"} ("" = default '
+                                'branch), {"staged": true}, {"file": "x.patch"}'
+                            ),
+                            "properties": {
+                                "pr": {"type": ["integer", "string"]},
+                                "branch": {"type": "string"},
+                                "staged": {"type": "boolean"},
+                                "file": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+            ),
+            Tool(
+                name="review_findings",
+                description=(
+                    "List the review items (findings + questions) the user "
+                    "flagged on your workspace in the workbench. Pending "
+                    "only by default."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "all": {
+                            "type": "boolean",
+                            "description": "include resolved items",
+                        }
+                    },
+                },
+            ),
+            Tool(
+                name="review_reply",
+                description=(
+                    "Report back on a review item. For a finding (f-…): set "
+                    "status addressed/disputed/wont-fix with an optional "
+                    "note/commit. For a question or ask (a-…): answer in "
+                    "markdown. Idempotent — safe to repeat."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string", "description": "f-… or a-…"},
+                        "status": {
+                            "type": "string",
+                            "enum": ["addressed", "disputed", "wont-fix"],
+                        },
+                        "markdown": {
+                            "type": "string",
+                            "description": "answer text (questions/asks)",
+                        },
+                        "note": {"type": "string"},
+                        "commit": {"type": "string"},
+                    },
+                    "required": ["id"],
+                },
             ),
         ]
 
@@ -216,6 +320,17 @@ def build_server():
         if name == "voice_listen":
             result = await loop.run_in_executor(None, _listen_budgeted, client)
             return [TextContent(type="text", text=result)]
+        if name == "page_push":
+            result = await loop.run_in_executor(None, _page_push, client, arguments)
+            return [TextContent(type="text", text=result)]
+        if name == "review_findings":
+            result = await loop.run_in_executor(
+                None, _review_findings, client, bool(arguments.get("all"))
+            )
+            return [TextContent(type="text", text=result)]
+        if name == "review_reply":
+            result = await loop.run_in_executor(None, _review_reply, client, arguments)
+            return [TextContent(type="text", text=result)]
         return [TextContent(type="text", text=f"unknown tool {name}")]
 
     return server
@@ -231,10 +346,96 @@ def _listen_budgeted(client: Client) -> str:
         status = result.get("status")
         if status == "transcript":
             return format_transcript(result)
+        if status == "review":
+            return format_review(result, footer=REVIEW_FOOTER_MCP)
         if status in ("detach", "superseded"):
             return terminal_message(result) or SOFT_FAIL
         # rearm (real or synthesized): keep parking within budget
     return "nothing yet — call voice_listen again to keep listening."
+
+
+def _http_hint(e: Exception) -> str:
+    """Server error bodies are agent-facing hints; pass them through."""
+    from urllib.error import HTTPError
+
+    if isinstance(e, HTTPError):
+        try:
+            body = e.read().decode(errors="replace").strip()
+            if body:
+                return body
+        except Exception:
+            pass
+    return str(e)
+
+
+def _page_push(client: Client, args: dict) -> str:
+    diff = args.get("diff")
+    if isinstance(diff, dict):
+        if "file" in diff:
+            source: dict = {"diff_file": str(diff["file"])}
+        elif "pr" in diff:
+            source = {"pr": diff["pr"]}
+        elif diff.get("staged"):
+            source = {"staged": True}
+        else:
+            source = {"branch": str(diff.get("branch") or "")}
+        body: dict = {"type": "diff", "source": source}
+    elif args.get("path") or args.get("content") is not None:
+        body = {"type": "doc"}
+        for k in ("path", "content", "name"):
+            if args.get(k) is not None:
+                body[k] = args[k]
+    else:
+        return "page_push needs a doc (path or content+name) or a diff spec"
+    try:
+        r = client.page_push(body)
+        where = f" in workspace {r['root']}" if r.get("root") else ""
+        return f"published: page {r.get('page_id')} rev {r.get('rev')}{where}"
+    except Exception as e:
+        return f"page_push failed: {_http_hint(e)}"
+
+
+def _review_findings(client: Client, all_: bool) -> str:
+    try:
+        r = client.findings(pending=not all_)
+    except Exception as e:
+        return f"review_findings failed: {_http_hint(e)}"
+    lines = [
+        format_review_item({"kind": "finding", "id": f.get("finding_id"), "finding": f})
+        for f in r.get("findings", [])
+    ] + [
+        format_review_item({"kind": "ask", "id": a.get("ask_id"), "ask": a})
+        for a in r.get("asks", [])
+    ]
+    if not lines:
+        return "no pending review items" if not all_ else "no findings"
+    return "\n".join([*lines, REVIEW_FOOTER_MCP])
+
+
+def _review_reply(client: Client, args: dict) -> str:
+    item_id = str(args.get("id", ""))
+    status, markdown = args.get("status"), args.get("markdown")
+    done: list[str] = []
+    try:
+        if markdown:
+            client.reply(item_id, str(markdown))
+            done.append("answered")
+        if status:
+            if not item_id.startswith("f-"):
+                done.append("status ignored (only findings carry one)")
+            else:
+                client.finding_status(
+                    item_id,
+                    str(status),
+                    note=args.get("note"),
+                    commit=args.get("commit"),
+                )
+                done.append(f"status → {status}")
+    except Exception as e:
+        return f"review_reply failed: {_http_hint(e)}"
+    if not done:
+        return "nothing to do: pass status (finding) and/or markdown (answer)"
+    return f"{item_id}: " + ", ".join(done)
 
 
 def main() -> None:

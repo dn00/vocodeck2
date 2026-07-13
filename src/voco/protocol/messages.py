@@ -32,13 +32,30 @@ EVENT_TYPES = {
     "speech.interrupted",
     "speech.finished",
     "speech.expired",
+    # Per-sentence playback progress (DESIGN-DECK U0): emitted as the
+    # player pulls into each sentence of an agent say — drives the
+    # transcript's karaoke highlight. Not turn-scoped: it is playback
+    # progress, not a turn lifecycle edge.
+    "speech.sentence",
     "agent.say",
     "screen.updated",
     "input.queued",
+    "input.drained",
     "digest.updated",
     "pane.hint",
     "mic.state",
+    "mic.level",
     "daemon.error",
+    # Workbench (SPEC-WORKBENCH §9). screen.updated stays alongside
+    # page.updated for screen pages — exact legacy payload, kept.
+    "workspace.updated",
+    "page.updated",
+    "finding.added",
+    "finding.updated",
+    "ask.created",
+    "ask.answered",
+    "term.opened",
+    "term.closed",
 }
 
 # Turn-scoped events MUST carry payload.turn_id (review finding 5).
@@ -58,6 +75,10 @@ COMMAND_TYPES = {
     "switch_session",
     "interrupt",
     "mic.set",
+    # mk3.1: client hold-PTT — the deck's hold button / key ride the
+    # same turn-machine path as the native hotkey.
+    "ptt.press",
+    "ptt.release",
     "session.spawn",
     "session.kill",
     "session.panes",
@@ -67,6 +88,31 @@ COMMAND_TYPES = {
     "state.get",
     "config.get",
     "config.set",
+    # Workbench (SPEC-WORKBENCH §9): browser mutations ride commands so
+    # the debug UI and tests reach them too.
+    "workspace.list",
+    "workspace.live",
+    # DESIGN-DECK U0: agentless review + the transcript read path.
+    "workspace.open",
+    "page.publish",
+    "session.transcript",
+    # DESIGN-DECK rev 5 (U2a): GitHub links + the connect modal's snippet.
+    "workspace.link",
+    "attach.snippet",
+    # U2c: human status path — undo-over-confirm needs re-open.
+    "finding.status",
+    # B1c: the file viewer's tracked-file list.
+    "workspace.files",
+    "page.close",
+    "page.reopen",
+    "finding.list",
+    "finding.add",
+    "finding.update",
+    "finding.withdraw",
+    "ask.create",
+    "ask.list",
+    "review.export",
+    "review.primary",
 }
 
 

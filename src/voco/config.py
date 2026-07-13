@@ -56,6 +56,9 @@ SCHEMA: dict[str, dict[str, tuple[type, ...]]] = {
         "voice": (str,),
         "sample_rate": (int,),
         "api_key": (str,),
+        # P3: supervise the bundled floor (default: auto — managed
+        # exactly when base_url is loopback:8880, the floor's port)
+        "manage_floor": (bool,),
     },
     "stt": {"provider": (str,)},
     "first_mate": {
@@ -69,7 +72,13 @@ SCHEMA: dict[str, dict[str, tuple[type, ...]]] = {
         "voice": (str,),
     },
     "bridge": {"token": (str,)},
+    "server": {"allowed_origins": (list,)},
     "state": {"dir": (str,)},
+    # Workbench persistence (SPEC-WORKBENCH §8) + live-git tracking (W5;
+    # live_git_s: re-resolve interval in seconds, 0 disables globally).
+    "workbench": {"data_dir": (str,), "live_git_s": (int, float)},
+    # Managed-session terminals (SPEC-WORKBENCH §5): tmux | pty.
+    "terminal": {"default_backend": (str,)},
     "watcher": {
         "enabled": (bool,),
         "interval_s": (int, float),

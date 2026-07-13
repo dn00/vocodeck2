@@ -36,7 +36,12 @@ Runner = Callable[[list[str]], RunResult]
 
 
 def _default_runner(argv: list[str]) -> RunResult:
-    proc = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    except FileNotFoundError:
+        # A missing binary is an environment fact, not a crash: surface
+        # it through the same error path as any failed invocation.
+        return RunResult(127, "", f"{argv[0]}: not installed (or not on PATH)")
     return RunResult(proc.returncode, proc.stdout, proc.stderr)
 
 
@@ -59,8 +64,14 @@ class TmuxManager:
     def _tmux(self, args: list[str], host: str | None) -> RunResult:
         argv = ["tmux", *args]
         if host:
+            # hosts can arrive from agent-supplied identity: a value shaped
+            # like an option (-oProxyCommand=…) must never reach ssh's
+            # argument parser (same dash-reject gate as diffsource)
+            if host.startswith("-"):
+                raise RuntimeError(f"invalid ssh host {host!r}")
             # ssh -T: no pty needed; tmux server runs detached on the host.
-            argv = ["ssh", "-T", host, *argv]
+            # `--` ends option parsing so the host is always a hostname.
+            argv = ["ssh", "-T", "--", host, *argv]
         result = self._run(argv)
         if result.returncode != 0:
             raise RuntimeError(

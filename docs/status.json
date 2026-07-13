@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "as_of": "2026-07-12",
+  "core_state": "production-ready",
+  "tests": {
+    "pytest": 491,
+    "javascript": 4,
+    "browser_e2e": 1
+  },
+  "verified": [
+    "real Chromium screen, document, diff, stale-finding, annotation, and ask flows",
+    "clean wheel install, daemon startup, packaged assets, MCP pages, findings, and replies",
+    "wheel installation of STT, PTT, wake, floor, and MCP optional profiles on Python 3.11",
+    "bounded multi-client commands, event resync, STT work, and live Git refresh",
+    "restart-safe session and worktree ownership persistence"
+  ],
+  "limitations": [
+    "physical microphone, speaker, AEC, and end-to-end latency still require hardware validation",
+    "wake extra requires Python 3.11 on Linux because upstream tflite-runtime lacks cp312 wheels",
+    "native Windows ConPTY, tray, and OS notifications remain deferred",
+    "review records are retained indefinitely; automatic destructive pruning requires an explicit operator policy"
+  ]
+}

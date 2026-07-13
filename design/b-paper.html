@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B · PAPER — vocodeck UI direction</title>
+<style>
+  /* ============ B · PAPER — the review room ============
+     Thesis: reviewing an agent's work should feel like marking up a
+     manuscript in a quiet study. Warm paper, ink, serif headings,
+     annotations as true margin notes with connector lines. Voice is a
+     breathing ink dot and an italic caption — present, never loud. */
+  :root {
+    --paper:#f6f2ea; --paper2:#efe9dd; --paper3:#e7dfd0; --card:#fbf8f2;
+    --ink:#211d16; --ink1:#5a5244;
+    --ink2:#8e8471; --rule:#d8cfbd; --rule2:#c4b89f;
+    --acc:#8a3ffc;             /* one accent: iris violet */
+    --red:#b3261e; --grn:#1e6f42; --amber:#9a6a00; --blu:#2a5db0;
+    --serif:"Iowan Old Style","Palatino",Georgia,serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --mono:"SF Mono",ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--paper2);color:var(--ink);font:13.5px/1.5 var(--sans)}
+  .note{max-width:1280px;margin:28px auto 14px;padding:0 20px}
+  .note h1{font:600 20px var(--serif);color:var(--ink)}
+  .note h1 em{color:var(--acc);font-style:normal}
+  .note p{color:var(--ink1);margin-top:6px;max-width:70ch}
+  .note a{color:var(--acc)}
+  /* ---------- deck frame ---------- */
+  .deck{width:1280px;height:780px;margin:16px auto;background:var(--paper);
+    display:grid;grid-template-rows:54px 1fr 28px;
+    border:1px solid var(--rule2);border-radius:6px;overflow:hidden;
+    box-shadow:0 30px 70px rgba(60,48,20,.18)}
+  .mid{display:grid;grid-template-columns:246px 1fr 316px;min-height:0}
+  /* ---------- presence strip ---------- */
+  .strip{display:flex;align-items:center;gap:16px;padding:0 18px;
+    background:var(--paper);border-bottom:1px solid var(--rule)}
+  .breath{width:12px;height:12px;border-radius:50%;background:var(--amber);flex:none;
+    animation:bre 2.8s ease-in-out infinite}
+  @keyframes bre{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(1.35);opacity:1}}
+  .micline{font:13px var(--sans);color:var(--ink1)}
+  .micline b{color:var(--ink);font-weight:600}
+  .caption{flex:1;font:italic 13.5px var(--serif);color:var(--ink1);
+    border-left:1px solid var(--rule);padding-left:16px}
+  .say{width:330px;background:var(--card);border:1px solid var(--rule2);border-radius:4px;
+    padding:7px 12px;font:12.5px var(--sans);color:var(--ink2)}
+  .sbtn{width:30px;height:30px;border:1px solid var(--rule2);border-radius:4px;background:var(--card);
+    color:var(--ink1);display:grid;place-items:center;cursor:pointer;font-size:13px}
+  /* ---------- rail = table of contents ---------- */
+  .rail{background:var(--paper2);border-right:1px solid var(--rule);overflow:auto;padding:14px 0}
+  .rgroup{font:600 11px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);
+    padding:12px 18px 6px;display:flex;justify-content:space-between}
+  .rgroup .ops{font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink2)}
+  .wrow{padding:6px 18px;cursor:pointer}
+  .wrow:hover{background:var(--paper3)}
+  .wrow.sel{background:var(--paper);box-shadow:inset 3px 0 var(--acc)}
+  .wname{font:600 13px var(--serif);display:flex;gap:8px;align-items:baseline}
+  .chip{font:10.5px var(--sans);padding:0 6px;border:1px solid var(--rule2);border-radius:8px;color:var(--blu);background:var(--card)}
+  .chip.pr{color:var(--acc)}
+  .flag{margin-left:auto;font:11px var(--sans);color:var(--amber)}
+  .agent{display:flex;gap:8px;align-items:center;padding:3px 18px 3px 30px;font:12.5px var(--sans);color:var(--ink1)}
+  .dot{width:7px;height:7px;border-radius:50%}
+  .dot.work{background:var(--grn)} .dot.stale{background:var(--rule2)}
+  .aname.mic{color:var(--amber);font-weight:600}
+  .astate{color:var(--ink2);font-size:11px}
+  .page{display:flex;gap:9px;padding:3px 18px 3px 34px;font:12.5px var(--sans);color:var(--ink1);cursor:pointer}
+  .page.sel{color:var(--acc);font-weight:600}
+  .page .ic{width:12px;color:var(--ink2)}
+  .page .rev{margin-left:auto;color:var(--ink2);font-size:11px}
+  .grey{opacity:.55}
+  .railfoot{margin-top:16px;padding:10px 18px;border-top:1px solid var(--rule);font:12px var(--sans);color:var(--ink2)}
+  .railfoot span{color:var(--acc)}
+  /* ---------- work = manuscript with margin ---------- */
+  .work{background:var(--paper);overflow:auto;min-height:0}
+  .crumb{position:sticky;top:0;padding:12px 26px;background:rgba(246,242,234,.95);
+    border-bottom:1px solid var(--rule);font:12px var(--sans);color:var(--ink2);display:flex;gap:8px;align-items:baseline}
+  .crumb b{font:600 14px var(--serif);color:var(--ink)}
+  .crumb .rev{color:var(--acc)}
+  .sheet{display:grid;grid-template-columns:minmax(0,620px) 210px;gap:22px;padding:30px 26px 70px}
+  .doc{font:15px/1.85 var(--serif);color:var(--ink)}
+  .doc h2{font:600 24px var(--serif);margin-bottom:16px}
+  .doc h2::after{content:"";display:block;width:52px;height:2px;background:var(--acc);margin-top:10px}
+  .doc ul{margin:0 0 18px 22px}
+  .doc li{margin:6px 0;cursor:pointer;padding:1px 4px}
+  .doc li:hover{background:#fff8e6;outline:1px dashed var(--rule2)}
+  .doc code{font:13px var(--mono);background:var(--paper2);padding:1px 6px;border-radius:3px;color:var(--ink)}
+  .ann-hl{background:#ffe9a8;box-shadow:0 1px 0 var(--amber)}
+  .selected{background:#e9ddfb;box-shadow:0 1px 0 var(--acc)}
+  .margin{position:relative;font:12px/1.5 var(--sans)}
+  .mnote{position:relative;background:var(--card);border:1px solid var(--rule2);border-radius:4px;
+    padding:8px 10px;margin-bottom:12px;color:var(--ink1)}
+  .mnote::before{content:"";position:absolute;left:-23px;top:14px;width:22px;height:1px;background:var(--rule2)}
+  .mnote .who{font-weight:600;color:var(--ink);display:flex;gap:6px;align-items:baseline}
+  .mnote .kind{font-size:10px;letter-spacing:.05em;text-transform:uppercase}
+  .kind.q{color:var(--blu)} .kind.c{color:var(--red)}
+  /* editor as a margin note being written */
+  .editor{background:var(--card);border:1.5px solid var(--acc);border-radius:5px;
+    box-shadow:0 10px 26px rgba(60,40,10,.16)}
+  .ed-target{padding:7px 10px;font:10.5px var(--sans);letter-spacing:.04em;color:var(--acc);border-bottom:1px solid var(--rule)}
+  .editor textarea{width:100%;height:78px;border:none;resize:none;background:transparent;
+    padding:8px 10px;font:italic 13px/1.6 var(--serif);color:var(--ink)}
+  .ed-row{display:flex;flex-wrap:wrap;gap:5px;align-items:center;padding:8px 10px;border-top:1px solid var(--rule)}
+  .pill{font:10.5px var(--sans);padding:2px 9px;border:1px solid var(--rule2);border-radius:10px;color:var(--ink1);cursor:pointer;background:var(--paper)}
+  .pill.on{border-color:var(--red);color:var(--red);background:#fdeeed}
+  .blocking{font:11px var(--sans);color:var(--ink2);width:100%}
+  .ed-actions{display:flex;gap:6px;margin-left:auto;padding:0 10px 9px}
+  .btn{font:12px var(--sans);padding:4px 12px;border-radius:4px;border:1px solid var(--rule2);background:var(--paper);color:var(--ink1);cursor:pointer}
+  .btn.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+  /* ---------- dock = the ledger ---------- */
+  .dock{background:var(--paper2);border-left:1px solid var(--rule);display:flex;flex-direction:column;min-height:0}
+  .scope{padding:12px 16px;border-bottom:1px solid var(--rule)}
+  .scope small{font:11px var(--sans);letter-spacing:.05em;text-transform:uppercase;color:var(--ink2)}
+  .scope b{display:block;font:600 14px var(--serif)}
+  .tabs{display:flex;gap:16px;padding:0 16px;border-bottom:1px solid var(--rule)}
+  .tab{padding:9px 0;font:12px var(--sans);color:var(--ink2);cursor:pointer}
+  .tab.on{color:var(--ink);font-weight:600;box-shadow:inset 0 -2px var(--acc)}
+  .anns{overflow:auto;flex:1;padding:6px 0}
+  .ann{padding:10px 16px;cursor:pointer}
+  .ann:hover{background:var(--paper3)}
+  .ann + .ann{border-top:1px solid var(--rule)}
+  .ann-meta{display:flex;gap:8px;font:10.5px var(--sans);letter-spacing:.05em;text-transform:uppercase}
+  .k-concern{color:var(--red)} .k-question{color:var(--blu)} .k-nit{color:var(--ink2)}
+  .b-flag{color:var(--amber)}
+  .ann-text{margin-top:3px;font:13px/1.55 var(--serif);color:var(--ink)}
+  .ann-loc{margin-top:3px;font:11px var(--mono);color:var(--ink2)}
+  .ann.done .ann-text{text-decoration:line-through;color:var(--ink2)}
+  .export{padding:10px 16px;border-top:1px solid var(--rule);font:12px var(--sans);color:var(--acc);cursor:pointer}
+  /* ---------- status ---------- */
+  .status{display:flex;gap:20px;align-items:center;padding:0 18px;background:var(--paper);
+    border-top:1px solid var(--rule);font:11.5px var(--sans);color:var(--ink2)}
+  .status .ok{color:var(--grn)} .status .mic{color:var(--amber)}
+  /* ---------- samples ---------- */
+  .samples{max-width:1280px;margin:26px auto 80px;padding:0 20px;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .sample{border:1px solid var(--rule2);border-radius:6px;background:var(--paper);overflow:hidden}
+  .sample h3{font:600 11px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);
+    padding:10px 16px;border-bottom:1px solid var(--rule)}
+  .drow{display:grid;grid-template-columns:46px 40px 1fr;font:12.5px/1.75 var(--mono)}
+  .dline{color:var(--ink2);text-align:right;padding-right:10px}
+  .drow .code{padding-left:12px;white-space:pre}
+  .drow.add .code{background:#e8f2e6}
+  .drow.add .sign{color:var(--grn)}
+  .drow.del .code{background:#f7e6e4;color:var(--ink1)}
+  .drow.del .sign{color:var(--red)}
+  .drow.flagged .code{box-shadow:inset 3px 0 var(--amber)}
+  .sign{text-align:center}
+  .tree{font:12.5px/1.85 var(--mono);padding:12px 16px;color:var(--ink1)}
+  .tree .sel{color:var(--acc);font-weight:600}
+  .tree .stat{color:var(--grn)} .tree .statd{color:var(--red)}
+  .code-s{font:12.5px/1.7 var(--mono);padding:12px 16px;white-space:pre;overflow:auto;background:var(--card)}
+  .kw{color:var(--acc)} .fn{color:var(--blu)} .str{color:var(--grn)} .cm{color:var(--ink2);font-style:italic} .num{color:var(--amber)}
+</style>
+</head>
+<body>
+<div class="note">
+  <h1>B · <em>PAPER</em> — the review room</h1>
+  <p>Marking up an agent's work like a manuscript in a quiet study: warm paper, ink,
+  serif prose, annotations as real margin notes tied to the text by connector lines.
+  The calmest of the three — voice presence breathes, nothing glows.
+  <a href="index.html">← all directions</a></p>
+</div>
+
+<div class="deck">
+  <div class="strip">
+    <div class="breath"></div>
+    <div class="micline">speaking with <b>Hugo</b></div>
+    <div class="caption">"flag the orb bullet, it's stale…"</div>
+    <input class="say" value="say “deck …” or type — routes to Hugo" readonly>
+    <div class="sbtn">■</div><div class="sbtn">⚙</div>
+  </div>
+
+  <div class="mid">
+    <div class="rail">
+      <div class="rgroup"><span>vocodeck2</span><span class="ops">＋review ＋agent</span></div>
+      <div class="wrow"><div class="wname">workbench <span class="chip pr">pr#7</span><span class="flag">3 notes</span></div></div>
+      <div class="agent"><span class="dot work"></span><span class="aname mic">Hugo ⚡</span><span class="astate">working</span></div>
+      <div class="page"><span class="ic">◈</span>overview</div>
+      <div class="page"><span class="ic">▤</span>files</div>
+      <div class="page"><span class="ic">±</span>branch <span class="rev">r11</span></div>
+
+      <div class="rgroup"><span>voco-demo</span><span class="ops">＋review ＋agent</span></div>
+      <div class="wrow grey"><div class="wname">fix-pty</div></div>
+      <div class="wrow sel"><div class="wname">workbench-strip <span class="chip">#3</span><span class="chip pr">pr#7</span><span class="flag">8 notes</span></div></div>
+      <div class="page"><span class="ic">±</span>branch: main <span class="rev">r8</span></div>
+      <div class="page sel"><span class="ic">¶</span>strip status <span class="rev">r4</span></div>
+
+      <div class="rgroup"><span>sessions</span></div>
+      <div class="agent"><span class="dot stale"></span><span class="aname">Freya</span><span class="astate">stale · 4 queued</span></div>
+      <div class="agent"><span class="dot stale"></span><span class="aname">Iris</span><span class="astate">stale · 1 queued</span></div>
+      <div class="railfoot">connect → <span>voco attach …</span></div>
+    </div>
+
+    <div class="work">
+      <div class="crumb">workbench-strip / <b>strip status</b> <span class="rev">rev 4</span><span style="margin-left:auto">annotate: click a block · select text</span></div>
+      <div class="sheet">
+        <div class="doc">
+          <h2>strip status</h2>
+          <ul>
+            <li><span class="ann-hl">orb states: <b>done</b></span></li>
+            <li>captions: done</li>
+            <li><span class="selected">tests: 3 green</span></li>
+          </ul>
+          <p>next: wire <code>speech.sentence</code> karaoke</p>
+        </div>
+        <div class="margin">
+          <div class="mnote">
+            <div class="who">you <span class="kind q">question</span></div>
+            still true after the attention-mode rework?
+          </div>
+          <div class="editor">
+            <div class="ed-target">"tests: 3 green"</div>
+            <textarea>3 green — but the suite gained 12 tests since r3. Re-run and re-push; stale counts read as fresh signal.</textarea>
+            <div class="ed-row">
+              <span class="pill on">concern</span><span class="pill">question</span><span class="pill">nit</span>
+              <span class="blocking">☐ blocking — holds the merge</span>
+            </div>
+            <div class="ed-actions"><span class="btn">cancel</span><span class="btn primary">add note</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dock">
+      <div class="scope"><small>reviewing</small><b>workbench-strip · voco-demo</b></div>
+      <div class="tabs"><div class="tab on">annotations</div><div class="tab">transcript</div></div>
+      <div class="anns">
+        <div class="ann">
+          <div class="ann-meta"><span class="k-concern">concern</span><span class="b-flag">blocking</span></div>
+          <div class="ann-text">orb must reflect attention mode, not just VAD — muted should read differently from idle</div>
+          <div class="ann-loc">± presence.mjs:4</div>
+        </div>
+        <div class="ann">
+          <div class="ann-meta"><span class="k-question">question</span></div>
+          <div class="ann-text">is "orb states: done" still true after the attention-mode rework?</div>
+          <div class="ann-loc">¶ strip status · "orb states: done"</div>
+        </div>
+        <div class="ann done">
+          <div class="ann-meta"><span class="k-nit">nit · resolved</span></div>
+          <div class="ann-text">caption quotes render straight, should be curly</div>
+          <div class="ann-loc">± presence.mjs:31</div>
+        </div>
+      </div>
+      <div class="export">export ↓</div>
+    </div>
+  </div>
+
+  <div class="status">
+    <span class="ok">● 127.0.0.1:7777</span>
+    <span class="mic">mic → Hugo</span>
+    <span>push-to-talk · half-duplex</span>
+    <span>1 working · 0 listening</span>
+    <span>3 annotations</span>
+  </div>
+</div>
+
+<div class="samples">
+  <div class="sample">
+    <h3>diff treatment · flagged row</h3>
+    <div class="drow del"><span class="dline">33</span><span class="sign">−</span><span class="code">timeout_ms = 800</span></div>
+    <div class="drow add"><span class="dline">33</span><span class="sign">+</span><span class="code"># timeout_ms = 800</span></div>
+    <div class="drow add flagged"><span class="dline">34</span><span class="sign">+</span><span class="code"># late_window_ms = 8000</span></div>
+    <div class="drow"><span class="dline">35</span><span class="sign"></span><span class="code">stream = true</span></div>
+    <div class="drow add"><span class="dline">36</span><span class="sign">+</span><span class="code"># [bridge]</span></div>
+  </div>
+  <div class="sample">
+    <h3>file tree · syntax highlighting</h3>
+    <div style="display:grid;grid-template-columns:230px 1fr">
+      <div class="tree">
+        <div>▾ src/voco/server/</div>
+        <div>&nbsp;&nbsp;▸ adapters/</div>
+        <div class="sel">&nbsp;&nbsp;workbench.py <span class="stat">+698</span></div>
+        <div>&nbsp;&nbsp;http.py <span class="stat">+218</span> <span class="statd">−33</span></div>
+        <div>▾ static/</div>
+        <div>&nbsp;&nbsp;docview.mjs <span class="stat">+184</span></div>
+      </div>
+      <div class="code-s"><span class="kw">async def</span> <span class="fn">serve_file</span>(req):
+    <span class="cm"># tracked-only: ls-files --error-unmatch</span>
+    path = <span class="fn">confine</span>(req.query[<span class="str">"path"</span>])
+    <span class="kw">if not</span> tracked(path): <span class="kw">raise</span> <span class="fn">NotFound</span>()
+    <span class="kw">return</span> <span class="fn">read_capped</span>(path, <span class="num">512_000</span>)</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

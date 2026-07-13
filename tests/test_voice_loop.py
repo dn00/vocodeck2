@@ -9,6 +9,7 @@ player, and fast turn timings.
 from __future__ import annotations
 
 import asyncio
+import threading
 
 import numpy as np
 import pytest
@@ -65,7 +66,7 @@ def silence_frame() -> np.ndarray:
 
 # Canned transcript is punctuated like real Whisper output for a finished
 # utterance — unpunctuated text now triggers incomplete_hold_ms patience.
-def make_loop(tmp_path, canned="run the tests.", attention="always"):
+def make_loop(tmp_path, canned="run the tests.", attention="always", **dep_overrides):
     bus = EventBus()
     events: list = []
     bus.subscribe(lambda env: events.append((env.type, env.payload)))
@@ -78,7 +79,7 @@ def make_loop(tmp_path, canned="run the tests.", attention="always"):
             "attention": attention,
         },
     }
-    deps = VoiceLoopDeps(
+    dep_args: dict = dict(
         load_vad_model=lambda path: ScriptedVad(),
         stt_builder=lambda provider, **kw: FakeStt(canned),
         tts_factory=FakeTts,
@@ -86,6 +87,8 @@ def make_loop(tmp_path, canned="run the tests.", attention="always"):
         player_factory=FakePlayer,
         hotkey_factory=None,  # no global hooks in tests
     )
+    dep_args.update(dep_overrides)
+    deps = VoiceLoopDeps(**dep_args)
     voice = VoiceLoop(cfg, bus, host=host, deps=deps)
     return voice, host, events
 
@@ -454,3 +457,292 @@ async def test_full_duplex_speech_barges_in_on_playback(tmp_path):
         assert any(t == "speech.interrupted" for t, _ in events)
     finally:
         voice.stop()
+
+
+# ---- PTT permission preflight (BUILD-PROD P4) --------------------------------
+
+
+class FakePtt:
+    """Constructs and starts cleanly — preflight only runs after a
+    successful start, so the disabled-factory default can't reach it."""
+
+    def __init__(self, loop, *, on_press, on_release, key):
+        self.key = key
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_ptt_denied_permission_reaches_the_deck(tmp_path):
+    """pynput never raises on a missing macOS Input Monitoring grant —
+    it warns to stderr and PTT silently does nothing. The preflight
+    turns that into an actionable daemon.error the deck can toast."""
+    voice, _host, events = make_loop(
+        tmp_path, hotkey_factory=FakePtt, ptt_preflight=lambda: False
+    )
+    await voice.start(asyncio.get_running_loop())
+    try:
+        denied = [
+            p
+            for t, p in events
+            if t == "daemon.error" and "Input Monitoring" in p.get("error", "")
+        ]
+        assert denied, "denied preflight never reached the bus"
+        assert "restart voco-d" in denied[0]["error"]  # actionable, not vague
+    finally:
+        voice.stop()
+
+
+@pytest.mark.asyncio
+async def test_ptt_unknown_permission_is_not_denied(tmp_path):
+    # None = "cannot tell" (non-mac, missing symbol) — the loop must
+    # NOT cry wolf about permissions it cannot actually check
+    voice, _host, events = make_loop(
+        tmp_path, hotkey_factory=FakePtt, ptt_preflight=lambda: None
+    )
+    await voice.start(asyncio.get_running_loop())
+    try:
+        assert not [
+            p
+            for t, p in events
+            if t == "daemon.error" and "Input Monitoring" in p.get("error", "")
+        ]
+    finally:
+        voice.stop()
+
+
+# ---- wake word (P12: wiring + honesty) ----------------------------------------
+
+
+def test_wake_loader_default_is_the_real_detector():
+    """THE P12 regression pin: wake_loader defaulted to None and nothing
+    ever wired it — the adapter was dead code and wake mode a silent
+    lie. The real loader is now the default (lazy import inside)."""
+    from voco.adapters.wake import load_openwakeword
+
+    assert VoiceLoopDeps().wake_loader is load_openwakeword
+
+
+@pytest.mark.asyncio
+async def test_wake_mode_without_model_falls_back_honestly(tmp_path):
+    from voco.core.attention import AttentionMode
+
+    voice, _host, events = make_loop(tmp_path, attention="wake", wake_loader=None)
+    await voice.start(asyncio.get_running_loop())
+    try:
+        assert voice.attention.mode is AttentionMode.PTT_ONLY  # not deaf-wake
+        errs = [
+            p["error"]
+            for t, p in events
+            if t == "daemon.error" and "wake attention unavailable" in p["error"]
+        ]
+        assert errs and "wake_model" in errs[0]  # names the fix
+    finally:
+        voice.stop()
+
+
+@pytest.mark.asyncio
+async def test_wake_model_load_failure_names_the_missing_extra(tmp_path):
+    from voco.core.attention import AttentionMode
+
+    def loader_raises(path):
+        raise ImportError("No module named 'openwakeword'")
+
+    bus = EventBus()
+    events: list = []
+    bus.subscribe(lambda env: events.append((env.type, env.payload)))
+    cfg = {
+        **CFG,
+        "audio": {
+            **CFG["audio"],
+            "phrase_bank_dir": str(tmp_path / "bank"),
+            "attention": "wake",
+            "wake_model": "models/voco.onnx",
+        },
+    }
+    deps = VoiceLoopDeps(
+        load_vad_model=lambda path: ScriptedVad(),
+        stt_builder=lambda provider, **kw: FakeStt("x"),
+        tts_factory=FakeTts,
+        mic_factory=FakeMic,
+        player_factory=FakePlayer,
+        hotkey_factory=None,
+        wake_loader=loader_raises,
+    )
+    voice = VoiceLoop(cfg, bus, host=Host(), deps=deps)
+    await voice.start(asyncio.get_running_loop())
+    try:
+        assert voice.attention.mode is AttentionMode.PTT_ONLY
+        errs = [p["error"] for t, p in events if t == "daemon.error"]
+        assert any("--extra wake" in e for e in errs)  # actionable reason
+    finally:
+        voice.stop()
+
+
+@pytest.mark.asyncio
+async def test_runtime_switch_to_wake_without_detector_is_refused(tmp_path):
+    from voco.core.attention import AttentionMode
+
+    voice, _host, events = make_loop(tmp_path, wake_loader=None)  # always mode
+    await voice.start(asyncio.get_running_loop())
+    try:
+        assert voice.set_attention(AttentionMode.WAKE) is False  # refused
+        assert voice.attention.mode is AttentionMode.ALWAYS  # unchanged
+        assert any(
+            t == "daemon.error" and "wake attention unavailable" in p["error"]
+            for t, p in events
+        )
+        # a mode with a WORKING path still switches (the refusal is
+        # wake-specific, not a frozen control)
+        assert voice.set_attention(AttentionMode.MUTED) is True
+        assert voice.attention.mode is AttentionMode.MUTED
+    finally:
+        voice.stop()
+
+
+@pytest.mark.asyncio
+async def test_muted_stays_muted_when_wake_is_refused(tmp_path):
+    # Review pin: only always->wake was covered. A MUTED deck whose wake
+    # detector can't arm must NOT slide into wake on a refused switch —
+    # it stays muted, and a mode with a working path still applies.
+    from voco.core.attention import AttentionMode
+
+    voice, _host, _events = make_loop(tmp_path, attention="muted", wake_loader=None)
+    await voice.start(asyncio.get_running_loop())
+    try:
+        assert voice.set_attention(AttentionMode.WAKE) is False
+        assert voice.attention.mode is AttentionMode.MUTED  # not deaf-wake
+        assert voice.set_attention(AttentionMode.PTT_ONLY) is True
+        assert voice.attention.mode is AttentionMode.PTT_ONLY
+    finally:
+        voice.stop()
+
+
+@pytest.mark.asyncio
+async def test_wake_model_set_but_loader_absent_names_the_build(tmp_path):
+    # wake_model IS configured but no loader is wired: the reason must not
+    # tell the user to set a key they already set — it names the build.
+    from voco.core.attention import AttentionMode
+
+    bus = EventBus()
+    events: list = []
+    bus.subscribe(lambda env: events.append((env.type, env.payload)))
+    cfg = {
+        **CFG,
+        "audio": {
+            **CFG["audio"],
+            "phrase_bank_dir": str(tmp_path / "bank"),
+            "attention": "wake",
+            "wake_model": "models/voco.onnx",
+        },
+    }
+    deps = VoiceLoopDeps(
+        load_vad_model=lambda path: ScriptedVad(),
+        stt_builder=lambda provider, **kw: FakeStt("x"),
+        tts_factory=FakeTts,
+        mic_factory=FakeMic,
+        player_factory=FakePlayer,
+        hotkey_factory=None,
+        wake_loader=None,
+    )
+    voice = VoiceLoop(cfg, bus, host=Host(), deps=deps)
+    await voice.start(asyncio.get_running_loop())
+    try:
+        assert voice.attention.mode is AttentionMode.PTT_ONLY  # honest degrade
+        errs = [
+            p["error"]
+            for t, p in events
+            if t == "daemon.error" and "wake attention unavailable" in p["error"]
+        ]
+        assert errs
+        assert "set [audio].wake_model" not in errs[0]  # the config IS set
+        assert "disabled in this build" in errs[0]  # names the real miss
+    finally:
+        voice.stop()
+
+
+# ---- mic.level (index7 honest meters) ------------------------------------------
+
+
+def test_mic_level_is_throttled_and_settles_to_one_zero(tmp_path):
+    """The deck meter reads SIGNAL: ~10Hz while the level moves, one
+    trailing zero at silence, then nothing — never an idle event storm."""
+    voice, _host, events = make_loop(tmp_path)
+    loud = np.full(512, 6000, dtype=np.int16)
+    voice._level_ts = 0.0
+    voice._emit_mic_level(loud)
+    levels = [p["level"] for t, p in events if t == "mic.level"]
+    assert levels and 0.2 < levels[-1] <= 1.0
+    n_before = len(levels)
+    voice._emit_mic_level(loud)  # within the 100ms window: throttled
+    assert len([1 for t, _p in events if t == "mic.level"]) == n_before
+    quiet = np.zeros(512, dtype=np.int16)
+    voice._level_ts = 0.0
+    voice._emit_mic_level(quiet)
+    voice._level_ts = 0.0
+    voice._emit_mic_level(quiet)  # silence repeats are suppressed
+    levels = [p["level"] for t, p in events if t == "mic.level"]
+    assert levels[-1] == 0.0
+    assert levels.count(0.0) == 1
+
+
+@pytest.mark.asyncio
+async def test_stt_backlog_is_bounded_and_supersedes_old_revision(tmp_path):
+    class BlockingStt:
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.release = threading.Event()
+            self.calls = 0
+
+        def transcribe(self, pcm: bytes) -> str:
+            self.calls += 1
+            call = self.calls
+            self.started.set()
+            self.release.wait(timeout=2)
+            return f"done-{call}."
+
+    stt = BlockingStt()
+    bus = EventBus()
+    events = []
+    bus.subscribe(lambda env: events.append((env.type, env.payload)))
+    cfg = {
+        **CFG,
+        "audio": {**CFG["audio"], "phrase_bank_dir": str(tmp_path / "bank")},
+        "stt": {"provider": "fake", "max_pending": 1},
+    }
+    deps = VoiceLoopDeps(
+        load_vad_model=lambda path: ScriptedVad(),
+        stt_builder=lambda provider, **kw: stt,
+        tts_factory=FakeTts,
+        mic_factory=FakeMic,
+        player_factory=FakePlayer,
+        hotkey_factory=None,
+    )
+    voice = VoiceLoop(cfg, bus, host=Host(), deps=deps)
+    voice._loop = asyncio.get_running_loop()
+    voice.machine.stt_final = lambda key, revision, text: None
+    voice._on_capture_stopped(1, 1)
+    assert await asyncio.to_thread(stt.started.wait, 1)
+    voice._on_capture_stopped(1, 2)
+    queued = voice._speculation[(1, 2)]
+    voice._on_capture_stopped(1, 3)
+    await asyncio.sleep(0)
+    assert queued.cancelled()
+    assert list(voice._speculation) == [(1, 1), (1, 3)]
+    assert stt.calls == 1  # rev 3 waits outside the executor's internal queue
+    stt.release.set()
+    deadline = asyncio.get_running_loop().time() + 1
+    while (
+        not any(p.get("text") == "done-2." for t, p in events if t == "stt.final")
+        and asyncio.get_running_loop().time() < deadline
+    ):
+        await asyncio.sleep(0.01)
+    assert stt.calls == 2
+    finals = [p.get("text") for t, p in events if t == "stt.final"]
+    assert "done-1." not in finals  # superseded rev 1 was not published
+    assert "done-2." in finals
+    await voice.aclose()

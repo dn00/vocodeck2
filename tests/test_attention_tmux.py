@@ -85,9 +85,19 @@ def test_remote_spawn_goes_through_ssh():
     runner = FakeRunner()
     mgr = TmuxManager(runner, sleep=lambda s: None)
     mgr.spawn("codex", name="ws", host="workspace")
-    assert runner.calls[0][:4] == ["ssh", "-T", "workspace", "tmux"]
+    # `--` ends ssh option parsing: the host slot can never be an option
+    assert runner.calls[0][:5] == ["ssh", "-T", "--", "workspace", "tmux"]
     # Verification calls ride the same ssh transport.
-    assert all(c[:3] == ["ssh", "-T", "workspace"] for c in runner.calls)
+    assert all(c[:4] == ["ssh", "-T", "--", "workspace"] for c in runner.calls)
+
+
+def test_option_shaped_ssh_host_is_rejected():
+    # identity-supplied host: -oProxyCommand=… must never reach ssh
+    runner = FakeRunner()
+    mgr = TmuxManager(runner, sleep=lambda s: None)
+    with pytest.raises(RuntimeError, match="invalid ssh host"):
+        mgr.spawn("codex", name="ws", host="-oProxyCommand=touch /tmp/pwn")
+    assert not runner.calls  # nothing was executed
 
 
 class ScriptedRunner:

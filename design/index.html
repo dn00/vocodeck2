@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vocodeck — UI overhaul directions</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#101014;color:#ececf1;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    padding:48px 24px 80px}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{font-size:22px}
+  h1 span{color:#7c5cff}
+  .sub{color:#a3a3b2;margin:10px 0 34px;max-width:76ch}
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  a.card{display:block;text-decoration:none;color:inherit;border:1px solid #2a2a34;border-radius:14px;
+    overflow:hidden;background:#17171d;transition:transform .12s,border-color .12s}
+  a.card:hover{transform:translateY(-3px);border-color:#7c5cff}
+  .thumb{height:150px;display:grid;grid-template-columns:24% 1fr 26%;gap:2px;padding:12px}
+  .thumb i{border-radius:3px}
+  .t-a{background:#06090e}
+  .t-a i:nth-child(1){background:#0f1620}
+  .t-a i:nth-child(2){background:linear-gradient(180deg,#0a0f16 30%,#06090e);box-shadow:inset 0 3px 0 #39d5c4}
+  .t-a i:nth-child(3){background:#0f1620;box-shadow:inset -3px 0 0 #ffb454}
+  .t-b{background:#efe9dd}
+  .t-b i:nth-child(1){background:#e7dfd0}
+  .t-b i:nth-child(2){background:#f6f2ea;box-shadow:inset 0 3px 0 #8a3ffc}
+  .t-b i:nth-child(3){background:#e7dfd0;box-shadow:inset -3px 0 0 #9a6a00}
+  .t-c{background:#0e0e12}
+  .t-c i:nth-child(1){background:#15151b;border-radius:8px}
+  .t-c i:nth-child(2){background:#1b1b23;border-radius:8px;box-shadow:inset 0 3px 0 #7c5cff}
+  .t-c i:nth-child(3){background:#15151b;border-radius:8px;box-shadow:inset -3px 0 0 #ffb224}
+  .body{padding:16px 18px 20px;border-top:1px solid #2a2a34}
+  .body h2{font-size:15px}
+  .body h2 em{font-style:normal;color:#7c5cff}
+  .body p{color:#a3a3b2;font-size:13px;margin-top:6px}
+  .hint{margin-top:36px;color:#63636f;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>vocodeck · <span>UI overhaul</span> — three directions</h1>
+  <p class="sub">Each is a full-fidelity static mockup of the same real deck state — your rail,
+  the "strip status" doc with the annotation editor open, the annotations dock, the presence
+  strip — so you're comparing the design, not the content. Below each frame: how that
+  direction treats diffs, the file tree, and syntax highlighting. Pick one (or point at
+  pieces of two) and I build it for real.</p>
+  <div class="cards">
+    <a class="card" href="a-bridge.html">
+      <div class="thumb t-a"><i></i><i></i><i></i></div>
+      <div class="body"><h2>A · <em>BRIDGE</em></h2>
+      <p>Mission control. Dark command-room, phosphor cyan + signal amber, monospace-forward,
+      dense, glanceable from across the room. The deck as a ship's bridge.</p></div>
+    </a>
+    <a class="card" href="b-paper.html">
+      <div class="thumb t-b"><i></i><i></i><i></i></div>
+      <div class="body"><h2>B · <em>PAPER</em></h2>
+      <p>The review room. Warm paper, ink, serif prose; annotations as true margin notes
+      with connector lines. The calmest — reviewing work like marking up a manuscript.</p></div>
+    </a>
+    <a class="card" href="c-signal.html">
+      <div class="thumb t-c"><i></i><i></i><i></i></div>
+      <div class="body"><h2>C · <em>SIGNAL</em></h2>
+      <p>Modern product. Soft graphite, elevated cards, one electric accent, color-coded
+      agent identities, ⌘K first-class. Linear/Raycast energy, built for 8-hour days.</p></div>
+    </a>
+  </div>
+  <p class="hint">Mixing is allowed: e.g. SIGNAL's layout with BRIDGE's colors, or PAPER as the
+  light theme of either dark direction.</p>
+</div>
+</body>
+</html>

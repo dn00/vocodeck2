@@ -13,10 +13,35 @@ onto the asyncio loop.
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import Callable
 from typing import Any
 
 DEFAULT_KEY = "f9"
+
+
+def input_monitoring_granted() -> bool | None:
+    """macOS Input Monitoring preflight (BUILD-PROD P4): pynput's
+    CGEventTap listener does not RAISE when the process lacks the
+    permission — it prints a "This process is not trusted!" warning
+    from an internal thread and PTT silently never fires. This is the
+    honest probe (CGPreflightListenEventAccess, macOS 10.15+):
+    True/False on macOS, None = cannot tell (other OS, missing symbol)
+    — and None must never be treated as denied."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        import ctypes
+
+        cg = ctypes.CDLL(
+            "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
+        )
+        fn = cg.CGPreflightListenEventAccess
+        fn.restype = ctypes.c_bool
+        fn.argtypes = []
+        return bool(fn())
+    except (OSError, AttributeError):
+        return None
 
 
 class PttHotkey:

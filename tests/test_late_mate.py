@@ -1,7 +1,4 @@
-"""Mate off the critical path (triage 2026-07-03): a deadline miss no
-longer cancels the mate — dispatch goes with the fast path and the late
-decision still acts, speaks (TTL/rule-3 policed), and corrects misroutes.
-"""
+"""Mate off the critical path without allowing late duplicate effects."""
 
 from __future__ import annotations
 
@@ -115,12 +112,10 @@ async def test_late_ack_speaks_with_the_dispatched_turn(tmp_path):
     assert mate[-1].turn_id == turn_id  # rule-2/3 attribution
 
 
-async def test_late_reroute_redispatches_and_says_so(tmp_path):
+async def test_late_target_disagreement_never_redispatches(tmp_path):
     d = make_daemon(tmp_path)
     a = d.registry.register(ident("/repo/a"), ["say", "listen"])  # active
     b = d.registry.register(ident("/repo/b"), ["say", "listen"])
-    events: list = []
-    d.bus.subscribe(lambda env: events.append((env.type, env.payload)))
     d.router = Router(
         first_mate=SlowMate(RouteDecision(kind="forward", target=b.call_name)),
         timeout_s=0.01,
@@ -129,14 +124,14 @@ async def test_late_reroute_redispatches_and_says_so(tmp_path):
     d.dispatch("check the build", routed.decision)  # fast path: lands on a
     assert [q.text for q in a.queued] == ["check the build"]
     await asyncio.sleep(0.1)
-    # Late mate corrected the destination: b got the words too.
-    assert [q.text for q in b.queued] == ["check the build"]
-    assert any(t == "route.decision" and p.get("late_reroute") for t, p in events)
+    # The command already escaped to a. A late disagreement cannot safely
+    # undo that, so it must never send the same destructive text to b too.
+    assert [q.text for q in b.queued] == []
     player = d.voice.player  # type: ignore[union-attr]
-    assert any(i.source is Source.FIRST_MATE for i in player.items)  # spoken
+    assert not any(i.source is Source.FIRST_MATE for i in player.items)
 
 
-async def test_late_action_executes(tmp_path):
+async def test_late_action_is_ignored(tmp_path):
     d = make_daemon(tmp_path)
     d.registry.register(ident("/repo/a"), ["say", "listen"])
     b = d.registry.register(ident("/repo/b"), ["say", "listen"])
@@ -153,7 +148,44 @@ async def test_late_action_executes(tmp_path):
     routed = await d.route(f"go to {b.call_name} please")
     assert routed.late_pending
     await asyncio.sleep(0.1)
-    assert d.registry.active is b  # idempotent deck op, fine late
+    assert d.registry.active is not b
+
+
+async def test_older_late_callback_is_invalidated_by_new_turn(tmp_path):
+    d = make_daemon(tmp_path)
+    d.registry.register(ident("/repo/a"), ["say", "listen"])
+    d.router = Router(
+        first_mate=SlowMate(
+            RouteDecision(kind="ack_forward", speech="stale acknowledgement"),
+            delay=0.08,
+        ),
+        timeout_s=0.01,
+    )
+    first = await d.route("first command")
+    d.dispatch("first command", first.decision)
+    d.router = Router(first_mate=SlowMate(None, delay=0.2), timeout_s=0.01)
+    second = await d.route("second command")
+    d.dispatch("second command", second.decision)
+    await asyncio.sleep(0.1)
+    player = d.voice.player  # type: ignore[union-attr]
+    assert not any(i.source is Source.FIRST_MATE for i in player.items)
+
+
+async def test_overlapping_routes_cannot_restore_an_older_pending_context(tmp_path):
+    d = make_daemon(tmp_path)
+    d.registry.register(ident("/repo/a"), ["say", "listen"])
+    d.router = Router(
+        first_mate=SlowMate(RouteDecision(kind="ack_forward", speech="late")),
+        timeout_s=0.01,
+    )
+    first_task = asyncio.create_task(d.route("first command"))
+    await asyncio.sleep(0.001)
+    second_task = asyncio.create_task(d.route("second command"))
+    await asyncio.gather(first_task, second_task)
+    assert d._pending_late is not None
+    assert d._pending_late["text"] == "second command"
+    await asyncio.sleep(0.1)
+    assert d._pending_late is None
 
 
 # ---- arbitration TTL (rule 6) -----------------------------------------------

@@ -13,6 +13,7 @@ never asked; the session token is cached per (host, cwd, harness) in
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -77,14 +78,57 @@ def format_transcript(result: dict) -> str:
     """Render a listen payload for an agent: the backlog is marked with
     age/origin so a slow agent sees WHAT is stale instead of an
     undifferentiated wall of text (live-test bug); the last line is
-    always the current instruction."""
+    always the current instruction. Review items riding `queued`
+    (SPEC-WORKBENCH §4.2) render with the review formatter."""
     lines = []
     for q in result.get("queued", []):
+        if q.get("kind") in ("finding", "ask"):
+            lines.append(format_review_item(q))
+            continue
         note = ", ".join(["queued while working", *_marks(q)])
         lines.append(f"[{note}] {q['text']}")
     marks = _marks(result)
     main = result.get("text", "")
     lines.append(f"[{', '.join(marks)}] {main}" if marks else main)
+    return "\n".join(lines)
+
+
+# ---- review items (SPEC-WORKBENCH §4.2) — the workbench wake ------------------
+
+REVIEW_FOOTER_CLI = (
+    "respond when done: `voco review status <f-id> "
+    "addressed|disputed|wont-fix [--note TEXT] [--commit SHA]` for findings, "
+    "`voco review reply <id> <markdown>` for questions and asks."
+)
+
+
+def format_review_item(item: dict) -> str:
+    """One agent-facing line per review item ({kind, id, finding|ask})."""
+    if item.get("kind") == "ask":
+        a = item.get("ask") or {}
+        return f"[review ask {item.get('id')}] {a.get('text', '')}"
+    f = item.get("finding") or {}
+    anchor = f.get("anchor") or {}
+    marks = [f.get("kind", "concern")]
+    if f.get("blocking"):
+        marks.append("blocking")
+    loc = ""
+    if anchor.get("file"):
+        loc = f" {anchor['file']}:{anchor.get('startLine', '?')}"
+        end = anchor.get("endLine")
+        if end and end != anchor.get("startLine"):
+            loc += f"-{end}"
+    head = f"[review finding {item.get('id')}, {', '.join(marks)}{loc}]"
+    return f"{head} {f.get('text', '')}"
+
+
+def format_review(result: dict, footer: str = REVIEW_FOOTER_CLI) -> str:
+    """Render a {status: review} wake: the human flagged items on the
+    workspace — they are the agent's next instruction (§4.2)."""
+    lines = ["[review] the user flagged items on your workspace:"]
+    lines += [format_review_item(i) for i in result.get("items", [])]
+    if footer:
+        lines.append(footer)
     return "\n".join(lines)
 
 
@@ -105,7 +149,13 @@ def _instance() -> str | None:
     stable across conversation restarts in the same pane; Claude Code's
     session id (also inherited by its MCP servers) covers non-tmux; None
     falls back to the legacy (host, cwd, harness) key."""
-    return os.environ.get("TMUX_PANE") or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    # VOCO_INSTANCE wins: a daemon-spawned pty bakes its handle here so
+    # the session links back to its terminal (W4).
+    return (
+        os.environ.get("VOCO_INSTANCE")
+        or os.environ.get("TMUX_PANE")
+        or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    )
 
 
 def derive_identity() -> dict:
@@ -123,6 +173,12 @@ def derive_identity() -> dict:
         "repo": Path(repo_root).name if repo_root else None,
         "branch": _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd),
         "worktree": repo_root,
+        # Worktree siblings share this; the workbench rail groups by it.
+        "common_dir": _git(
+            ["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd
+        )
+        if repo_root
+        else None,
         "harness": harness,
         "pid": os.getpid(),
         "instance": _instance(),
@@ -166,6 +222,10 @@ class Client:
         # re-arming its slice" from "a NEW listener taking over" — the
         # old one is superseded once instead of ping-ponging forever.
         self._poller = f"{os.getpid():x}-{secrets.token_hex(4)}"
+        # Current derived identity, refreshed by session(); rides every
+        # workspace verb so the daemon never resolves against a stale
+        # register-time root (dogfood failure, 2026-07-06).
+        self._identity: dict | None = None
 
     def _request(
         self, method: str, path: str, body: dict | None = None, timeout: float = 55.0
@@ -182,7 +242,13 @@ class Client:
     # ---- session (cached token, re-register on 410) --------------------------
 
     def _cache_path(self, identity: dict) -> Path:
-        key = f"{identity['host']}-{Path(identity['cwd']).name}-{identity['harness']}"
+        # FULL cwd in the key (as a short hash): two checkouts sharing a
+        # basename must never share a session — /a/proj and /b/proj
+        # collided here and every verb then resolved against the wrong
+        # workspace root (dogfood failure, 2026-07-06).
+        cwd = str(identity["cwd"])
+        cwd_tag = hashlib.sha1(cwd.encode()).hexdigest()[:8]
+        key = f"{identity['host']}-{Path(cwd).name}-{cwd_tag}-{identity['harness']}"
         inst = identity.get("instance")
         if inst:
             key += "-" + re.sub(r"[^A-Za-z0-9._-]", "_", str(inst))
@@ -190,6 +256,7 @@ class Client:
 
     def session(self) -> dict:
         identity = derive_identity()
+        self._identity = identity
         cache = self._cache_path(identity)
         if cache.exists():
             try:
@@ -200,10 +267,13 @@ class Client:
 
     def register(self, identity: dict | None = None) -> dict:
         identity = identity or derive_identity()
+        self._identity = identity
         info = self._request(
             "POST",
             "/v1/bridge/register",
-            {**identity, "capabilities": ["say", "listen", "screen"]},
+            # `review` opts in to workbench wakes (SPEC-WORKBENCH §4.2) —
+            # this adapter ships the review verbs, so it declares them.
+            {**identity, "capabilities": ["say", "listen", "screen", "review"]},
             timeout=5,
         )
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -221,6 +291,13 @@ class Client:
                 return fn(sess["session_id"])
             raise
 
+    def _identity_param(self) -> str:
+        """`&identity=…` for GET verbs — the same re-asserted identity
+        POST bodies carry."""
+        if not self._identity:
+            return ""
+        return "&identity=" + urllib.parse.quote(json.dumps(self._identity))
+
     # ---- verbs ---------------------------------------------------------------------
 
     def say(self, text: str) -> str:
@@ -229,7 +306,7 @@ class Client:
                 lambda sid: self._request(
                     "POST",
                     "/v1/bridge/say",
-                    {"session_id": sid, "text": text},
+                    {"session_id": sid, "text": text, "identity": self._identity},
                     timeout=5,
                 )
             )
@@ -248,6 +325,7 @@ class Client:
                         "markdown": markdown,
                         "title": title,
                         "mode": mode,
+                        "identity": self._identity,
                     },
                     timeout=5,
                 )
@@ -263,7 +341,8 @@ class Client:
                 lambda sid: self._request(
                     "GET",
                     f"/v1/bridge/listen?session_id={urllib.parse.quote(sid)}"
-                    f"&poller={urllib.parse.quote(self._poller)}",
+                    f"&poller={urllib.parse.quote(self._poller)}"
+                    f"{self._identity_param()}",
                     timeout=65,
                 )
             )
@@ -271,13 +350,79 @@ class Client:
             time.sleep(2)
             return {"status": "rearm", "_synthesized": True}
 
+    # ---- review verbs (SPEC-WORKBENCH §4.1/§4.2) ------------------------------
+    # These raise on failure (unlike say/listen): they run in an agent's
+    # deliberate tool call, where a clear error beats a silent no-op.
+
+    def findings(self, *, pending: bool = True) -> dict:
+        """This session's workspace ledger: {workspace, findings, asks}."""
+        q = "&pending=1" if pending else ""
+        return self._with_session(
+            lambda sid: self._request(
+                "GET",
+                f"/v1/bridge/findings?session_id={urllib.parse.quote(sid)}{q}"
+                f"{self._identity_param()}",
+                timeout=10,
+            )
+        )
+
+    def finding_status(
+        self,
+        finding_id: str,
+        status: str,
+        *,
+        note: str | None = None,
+        commit: str | None = None,
+    ) -> dict:
+        body: dict = {"finding_id": finding_id, "status": status}
+        if note is not None:
+            body["note"] = note
+        if commit is not None:
+            body["commit"] = commit
+        return self._with_session(
+            lambda sid: self._request(
+                "POST",
+                "/v1/bridge/finding_status",
+                {**body, "session_id": sid, "identity": self._identity},
+                timeout=10,
+            )
+        )
+
+    def reply(self, item_id: str, markdown: str) -> dict:
+        """Answer an ask (a-…) or a question-kind finding (f-…) in markdown."""
+        key = "ask_id" if item_id.startswith("a-") else "finding_id"
+        return self._with_session(
+            lambda sid: self._request(
+                "POST",
+                "/v1/bridge/ask_reply",
+                {
+                    key: item_id,
+                    "markdown": markdown,
+                    "session_id": sid,
+                    "identity": self._identity,
+                },
+                timeout=10,
+            )
+        )
+
+    def page_push(self, body: dict) -> dict:
+        """Push a doc or diff page to this session's workspace (§3.2)."""
+        return self._with_session(
+            lambda sid: self._request(
+                "POST",
+                "/v1/bridge/page",
+                {**body, "session_id": sid, "identity": self._identity},
+                timeout=35,
+            )
+        )
+
     def listen(self) -> dict:
-        """Park until a transcript arrives; self-heals through daemon
-        restarts up to RETRY_WINDOW_S of sustained failure."""
+        """Park until a transcript or review wake arrives; self-heals
+        through daemon restarts up to RETRY_WINDOW_S of sustained failure."""
         failing_since: float | None = None
         while True:
             result = self.listen_once()
-            if result.get("status") in ("transcript", "detach", "superseded"):
+            if result.get("status") in ("transcript", "review", "detach", "superseded"):
                 return result
             # rearm: distinguish daemon-alive rearm from synthesized ones
             # by probing registration cheaply every loop is overkill; the
@@ -300,9 +445,100 @@ def listen_stream(client) -> int:
         result = client.listen()
         if result.get("status") == "transcript":
             print(format_transcript(result), flush=True)
+        elif result.get("status") == "review":
+            print(format_review(result), flush=True)
         else:
             print(terminal_message(result) or SOFT_FAIL, flush=True)
             return 0
+
+
+def _http_error(e: Exception) -> str:
+    """The server's plain-text error body when there is one (agent-facing
+    hints like 'finding not in this session's workspace'), else str(e)."""
+    if isinstance(e, urllib.error.HTTPError):
+        try:
+            body = e.read().decode(errors="replace").strip()
+            if body:
+                return body
+        except Exception:
+            pass
+    return str(e)
+
+
+def cmd_review(args, client: Client) -> int:
+    """`voco review …` — the agent's half of the findings round-trip."""
+    try:
+        if args.rcmd == "findings":
+            r = client.findings(pending=not args.all)
+            items = [
+                format_review_item(
+                    {"kind": "finding", "id": f.get("finding_id"), "finding": f}
+                )
+                for f in r.get("findings", [])
+            ] + [
+                format_review_item({"kind": "ask", "id": a.get("ask_id"), "ask": a})
+                for a in r.get("asks", [])
+            ]
+            if not items:
+                print("no pending review items" if not args.all else "no findings")
+                return 0
+            print("\n".join(items))
+            print(REVIEW_FOOTER_CLI)
+            return 0
+        if args.rcmd == "status":
+            r = client.finding_status(
+                args.finding_id, args.status, note=args.note, commit=args.commit
+            )
+            print(f"{args.finding_id} → {r.get('finding', {}).get('status')}")
+            return 0
+        if args.rcmd == "reply":
+            client.reply(args.id, args.markdown)
+            print("answered")
+            return 0
+        # export: resolve this session's workspace, then the control verb.
+        ws_key = client.findings().get("workspace")
+        return control(
+            client,
+            "review.export",
+            {"workspace": ws_key, "out": args.out},
+            timeout=15,
+            render=lambda r: print(
+                f"exported {r.get('count')} finding(s) → {r.get('out')}"
+            ),
+        )
+    except Exception as e:
+        print(f"error: {_http_error(e)}", file=sys.stderr)
+        return 1
+
+
+def cmd_page(args, client: Client) -> int:
+    """`voco page …` — push a doc or diff page (SPEC-WORKBENCH §3.2).
+    Paths resolve to absolute HERE (the agent's cwd may be a subdir of
+    the workspace root the daemon confines against)."""
+    if args.pcmd == "doc":
+        body: dict = {"type": "doc", "path": str(Path(args.path).resolve())}
+        if args.name:
+            body["name"] = args.name
+    else:
+        if args.pr is not None:
+            source: dict = {"pr": args.pr}
+        elif args.staged:
+            source = {"staged": True}
+        elif args.file:
+            source = {"diff_file": str(Path(args.file).resolve())}
+        else:
+            # --branch BASE, bare --branch, or no flag: branch vs BASE
+            # (empty ⇒ the repo's default branch, resolved server-side).
+            source = {"branch": args.branch or ""}
+        body = {"type": "diff", "source": source}
+    try:
+        r = client.page_push(body)
+        where = f" → {r['root']}" if r.get("root") else ""
+        print(f"page {r.get('page_id')} rev {r.get('rev')}{where}")
+        return 0
+    except Exception as e:
+        print(f"error: {_http_error(e)}", file=sys.stderr)
+        return 1
 
 
 def cmd_watch(client: Client) -> int:
@@ -341,162 +577,11 @@ def cmd_watch(client: Client) -> int:
     return 0
 
 
-def cmd_doctor(client: Client) -> int:
-    """Environment diagnostic: what works, what's missing, how to fix it.
-    Warnings don't fail; only a dead required piece exits non-zero."""
-    import importlib.util
-    import shutil
-
-    failures = 0
-
-    def row(status: str, name: str, detail: str) -> None:
-        print(f"  {status:<4} {name:<14} {detail}")
-
-    def probe_tts(tts_cfg: dict) -> str | None:
-        """POST a real tiny synth and require audio bytes back — a random
-        HTTP listener squatting the port (OrbStack does) must not read ok."""
-        # Default mirrors the daemon's built-in (voice_loop): port 8000.
-        url = f"{tts_cfg.get('base_url', 'http://127.0.0.1:8000/v1').rstrip('/')}"
-        body = json.dumps(
-            {
-                "model": tts_cfg.get("model", "kokoro"),
-                "voice": tts_cfg.get("voice", "af_heart"),
-                "input": "hi",
-                "response_format": "pcm",
-            }
-        ).encode()
-        try:
-            req = urllib.request.Request(
-                f"{url}/audio/speech",
-                data=body,
-                method="POST",
-                headers={"Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                data = resp.read(4096)
-            return None if len(data) >= 1000 else "answers but returns no audio"
-        except Exception as e:
-            return str(getattr(e, "reason", e))
-
-    def probe_mate(base: str) -> str | None:
-        """GET /models and require OpenAI-shaped JSON back."""
-        try:
-            req = urllib.request.Request(f"{base.rstrip('/')}/models", method="GET")
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                obj = json.loads(resp.read(65536).decode())
-            if isinstance(obj, dict) and ("data" in obj or "object" in obj):
-                return None
-            return "answers but doesn't look OpenAI-compatible"
-        except Exception as e:
-            return str(getattr(e, "reason", e))
-
-    print(f"voco doctor — {client.base_url}")
-
-    # 1. daemon, then config separately — a config.get hiccup must not
-    # contradict an already-printed ok daemon row.
-    cfg: dict = {}
-    daemon_up = False
-    try:
-        state = client._request("POST", "/v1/control/state.get", {}, timeout=3)
-        n = len(state.get("sessions", []))
-        active = state.get("active_session")
-        row("ok", "daemon", f"up; {n} session(s), active={'yes' if active else 'no'}")
-        daemon_up = True
-    except Exception as e:
-        row("FAIL", "daemon", f"unreachable ({e}) — start with: voco-d")
-        failures += 1
-    if daemon_up:
-        try:
-            cfg = client._request("POST", "/v1/control/config.get", {}, timeout=3)
-        except Exception as e:
-            row("warn", "config", f"config.get failed ({e}); probing defaults")
-
-    # 2. TTS endpoint (from daemon config when available): must return audio
-    tts_cfg = cfg.get("tts", {})
-    tts_url = tts_cfg.get("base_url", "http://127.0.0.1:8000/v1")
-    err = probe_tts(tts_cfg)
-    if err is None:
-        row("ok", "tts", f"{tts_url} (synthesized a test phrase)")
-    else:
-        row(
-            "warn",
-            "tts",
-            f"{tts_url}: {err} — voice will be silent"
-            " (start voco-tts-floor or mlx-audio)",
-        )
-
-    # 3. first mate (llama-server or any OpenAI-compatible host)
-    mate_url = cfg.get("first_mate", {}).get("base_url")
-    if mate_url:
-        err = probe_mate(mate_url)
-        if err is None:
-            row("ok", "first_mate", mate_url)
-        else:
-            row(
-                "warn",
-                "first_mate",
-                f"{mate_url}: {err} — degraded mode (phrase table + forward-verbatim)",
-            )
-    else:
-        row("--", "first_mate", "not configured (degraded mode by design)")
-
-    # 4. tmux / inject
-    if shutil.which("tmux"):
-        inside = (
-            "this shell CAN inject"
-            if os.environ.get("TMUX_PANE")
-            else ("run agents inside tmux to enable inject")
-        )
-        row("ok", "tmux", inside)
-    else:
-        row("warn", "tmux", "not installed — no managed sessions, no inject")
-
-    # 5. listener script (voice_init output) — a stale MCP server keeps
-    # writing the pre-rework streaming variant, which never exits and so
-    # never wakes the agent (live-test find).
-    script = CACHE_DIR / "listen.sh"
-    if script.exists():
-        try:
-            stale = "--stream" in script.read_text()
-        except OSError:
-            stale = False
-        if stale:
-            row(
-                "warn",
-                "listen.sh",
-                "stale streaming script — restart the agent's MCP server"
-                " (old voice_init), then call voice_init again",
-            )
-        else:
-            row("ok", "listen.sh", "one-shot listener script")
-    else:
-        row("--", "listen.sh", "not written yet (voice_init creates it)")
-
-    # 6. optional python extras
-    for mod, extra, why in (
-        ("faster_whisper", "stt", "speech-to-text"),
-        ("sounddevice", "(core)", "mic/speaker"),
-        ("pynput", "ptt", "push-to-talk hotkey"),
-        ("openwakeword", "wake", "wake-word"),
-        ("kokoro_onnx", "floor", "bundled TTS floor"),
-    ):
-        found = importlib.util.find_spec(mod) is not None
-        row(
-            "ok" if found else "--",
-            mod,
-            why if found else f"{why} — uv sync --extra {extra}",
-        )
-
-    print(f"\n{'all required pieces up' if not failures else 'FAIL: daemon down'}")
-    return 1 if failures else 0
-
-
 def cmd_attach(args, client: Client) -> int:
-    mcp = {
-        "mcpServers": {
-            "voco": {"command": "voco-mcp", "env": {"VOCO_URL": client.base_url}}
-        }
-    }
+    env = {"VOCO_URL": client.base_url}
+    if client.token:
+        env["VOCO_TOKEN"] = client.token
+    mcp = {"mcpServers": {"voco": {"command": "voco-mcp", "env": env}}}
     print("# MCP config (Claude Code: .mcp.json / Codex: config.toml equivalent):")
     print(json.dumps(mcp, indent=2))
     print('\n# CLI fallback: agents call `voco say "..."` and `voco listen`.')
@@ -541,6 +626,25 @@ def main() -> None:
     p_new.add_argument("--name", default=None)
     p_new.add_argument("--cwd", default=None)
     p_new.add_argument("--host", default=None)
+    p_new.add_argument(
+        "--backend",
+        choices=["tmux", "pty"],
+        default=None,
+        help="terminal backend (default: daemon config, else tmux)",
+    )
+    p_new.add_argument(
+        "--worktree",
+        metavar="BRANCH",
+        default=None,
+        help="spawn in a fresh sibling worktree on BRANCH (created if new)",
+    )
+    p_new.add_argument(
+        "--from",
+        dest="worktree_from",
+        metavar="BASE",
+        default=None,
+        help="base ref for a NEW worktree branch (default: current HEAD)",
+    )
     p_kill = sub.add_parser("kill")
     p_kill.add_argument("name", help="tmux session name (voco-...)")
     p_kill.add_argument("--host", default=None)
@@ -553,16 +657,85 @@ def main() -> None:
         "name", help="session call name, or raw tmux target (voco-... / %%N)"
     )
     p_peek.add_argument("--host", default=None)
+    p_review = sub.add_parser("review", help="findings round-trip + export")
+    rsub = p_review.add_subparsers(dest="rcmd", required=True)
+    r_ls = rsub.add_parser("findings", help="list pending review items")
+    r_ls.add_argument("--all", action="store_true", help="include resolved")
+    r_st = rsub.add_parser("status", help="report a finding round-trip")
+    r_st.add_argument("finding_id")
+    r_st.add_argument("status", choices=["addressed", "disputed", "wont-fix"])
+    r_st.add_argument("--note", default=None)
+    r_st.add_argument("--commit", default=None)
+    r_re = rsub.add_parser("reply", help="answer an ask or question finding")
+    r_re.add_argument("id", help="a-… (ask) or f-… (question finding)")
+    r_re.add_argument("markdown")
+    r_ex = rsub.add_parser("export", help="write the review JSON + sidecar")
+    r_ex.add_argument("--out", default=None)
+    p_page = sub.add_parser("page", help="push a doc/diff page (workbench)")
+    psub = p_page.add_subparsers(dest="pcmd", required=True)
+    pg_doc = psub.add_parser("doc")
+    pg_doc.add_argument("path")
+    pg_doc.add_argument("--name", default=None)
+    pg_diff = psub.add_parser("diff")
+    pg_diff.add_argument("--pr", default=None, help="GitHub PR number (needs gh)")
+    pg_diff.add_argument(
+        "--branch",
+        nargs="?",
+        const="",
+        default=None,
+        help="diff vs BASE (default: the repo's default branch)",
+    )
+    pg_diff.add_argument("--staged", action="store_true")
+    pg_diff.add_argument("--file", default=None, help="a unified-diff file")
     sub.add_parser("watch")
     p_input = sub.add_parser("input")  # typed input path (say_as_user)
     p_input.add_argument("text")
     sub.add_parser("attach-cmd")
-    sub.add_parser("doctor")
+    p_doctor = sub.add_parser("doctor")
+    p_doctor.add_argument(
+        "--deep", action="store_true", help="byte-verify large cached models"
+    )
+    # lifecycle (BUILD-PROD P1): the daemon as a managed process
+    p_up = sub.add_parser("up", help="start the daemon (managed, detached)")
+    p_up.add_argument("--config", default=None)
+    p_up.add_argument("--port", type=int, default=7777)
+    p_up.add_argument("--no-audio", action="store_true")
+    p_up.add_argument(
+        "--wait", type=float, default=20.0, help="seconds to wait for health"
+    )
+    p_up.add_argument(
+        "--verbose", action="store_true", help="daemon DEBUG-level logging"
+    )
+    p_down = sub.add_parser("down", help="stop the managed daemon")
+    p_down.add_argument("--port", type=int, default=7777)
+    p_logs = sub.add_parser("logs", help="show the managed daemon's log")
+    p_logs.add_argument("-n", "--lines", type=int, default=50)
+    p_logs.add_argument("-f", "--follow", action="store_true")
+    p_auto = sub.add_parser(
+        "autostart", help="run the daemon at login (launchd on macOS)"
+    )
+    p_auto.add_argument("action", choices=["install", "uninstall", "status"])
+    p_auto.add_argument("--config", default=None)
+    p_auto.add_argument("--port", type=int, default=7777)
     p_cfg = sub.add_parser("config")
     p_cfg.add_argument("action", choices=["get", "set"])
     p_cfg.add_argument("key", nargs="?", help="section.key (set only)")
     p_cfg.add_argument("value", nargs="?", help="value; JSON parsed, else string")
     args = parser.parse_args()
+
+    # Lifecycle commands manage the daemon PROCESS — they never need a
+    # session, must work while the daemon is down, and are LOCAL by
+    # nature (they ignore VOCO_URL: that aims clients, never signals).
+    if args.cmd in ("up", "down", "logs", "autostart"):
+        from voco_cli import lifecycle
+
+        if args.cmd == "up":
+            raise SystemExit(lifecycle.cmd_up(args))
+        if args.cmd == "down":
+            raise SystemExit(lifecycle.cmd_down(args))
+        if args.cmd == "logs":
+            raise SystemExit(lifecycle.cmd_logs(args))
+        raise SystemExit(lifecycle.cmd_autostart(args))
 
     client = Client()
     if args.cmd == "say":
@@ -573,6 +746,8 @@ def main() -> None:
         result = client.listen()
         if result.get("status") == "transcript":
             print(format_transcript(result))
+        elif result.get("status") == "review":
+            print(format_review(result))
         else:
             # Say WHY it ended: a user detach must not read as a crash.
             print(terminal_message(result) or SOFT_FAIL)
@@ -602,18 +777,21 @@ def main() -> None:
         knob = "duplex" if args.mode in ("full_duplex", "half_duplex") else "attention"
         sys.exit(control(client, "mic.set", {knob: args.mode}, timeout=5))
     elif args.cmd == "new":
-        sys.exit(
-            control(
-                client,
-                "session.spawn",
-                {
-                    "harness": args.harness,
-                    "name": args.name,
-                    "cwd": args.cwd,
-                    "host": args.host,
-                },
-            )
-        )
+        payload = {
+            "harness": args.harness,
+            "name": args.name,
+            "cwd": args.cwd,
+            "host": args.host,
+        }
+        if args.backend:
+            payload["backend"] = args.backend
+        if args.worktree:
+            # The daemon needs a repo to branch from; default to here.
+            payload["cwd"] = args.cwd or os.getcwd()
+            payload["worktree"] = {"branch": args.worktree}
+            if args.worktree_from:
+                payload["worktree"]["from"] = args.worktree_from
+        sys.exit(control(client, "session.spawn", payload))
     elif args.cmd == "kill":
         sys.exit(
             control(client, "session.kill", {"name": args.name, "host": args.host})
@@ -637,6 +815,10 @@ def main() -> None:
                 render=lambda r: print(r.get("text", ""), end=""),
             )
         )
+    elif args.cmd == "review":
+        sys.exit(cmd_review(args, client))
+    elif args.cmd == "page":
+        sys.exit(cmd_page(args, client))
     elif args.cmd == "watch":
         sys.exit(cmd_watch(client))
     elif args.cmd == "input":
@@ -644,7 +826,9 @@ def main() -> None:
     elif args.cmd == "attach-cmd":
         sys.exit(cmd_attach(args, client))
     elif args.cmd == "doctor":
-        sys.exit(cmd_doctor(client))
+        from voco_cli.doctor import cmd_doctor
+
+        sys.exit(cmd_doctor(client, deep=args.deep))
     elif args.cmd == "config":
         if args.action == "get":
             sys.exit(control(client, "config.get", {}, timeout=5))

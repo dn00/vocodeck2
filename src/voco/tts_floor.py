@@ -14,37 +14,27 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import urllib.request
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 from aiohttp import web
 
-RELEASE = (
-    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
-)
-MODEL_FILES = {
-    "kokoro-v1.0.onnx": f"{RELEASE}/kokoro-v1.0.onnx",
-    "voices-v1.0.bin": f"{RELEASE}/voices-v1.0.bin",
-}
 SAMPLE_RATE = 24_000
 
 
-def ensure_models(model_dir: Path) -> tuple[Path, Path]:
-    model_dir.mkdir(parents=True, exist_ok=True)
-    paths = []
-    for name, url in MODEL_FILES.items():
-        path = model_dir / name
-        if not path.exists():
-            print(f"downloading {name} ...")
-            urllib.request.urlretrieve(url, path)
-        paths.append(path)
-    return paths[0], paths[1]
+def ensure_models(model_dir: Path | None) -> tuple[Path, Path]:
+    """P2: pinned + sha256-verified + atomic via voco.assets — the old
+    bare urlretrieve could load a torn or tampered download, and its
+    relative `models/` default only worked from the repo root. None =
+    the voco cache (survives any cwd)."""
+    from voco import assets
+
+    return assets.ensure_kokoro(dest_dir=model_dir)
 
 
 class FloorTts:
-    def __init__(self, model_dir: Path) -> None:
+    def __init__(self, model_dir: Path | None) -> None:
         from kokoro_onnx import Kokoro
 
         model, voices = ensure_models(model_dir)
@@ -98,7 +88,9 @@ def build_app(tts: FloorTts) -> web.Application:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="voco-tts-floor")
     parser.add_argument("--port", type=int, default=8880)
-    parser.add_argument("--model-dir", type=Path, default=Path("models"))
+    parser.add_argument(
+        "--model-dir", type=Path, default=None
+    )  # None = the voco cache; explicit dirs (e.g. a repo's models/) win
     args = parser.parse_args()
     tts = FloorTts(args.model_dir)
     print(f"voco-tts-floor on 127.0.0.1:{args.port} (kokoro-onnx, cpu)")

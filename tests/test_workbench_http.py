@@ -1,0 +1,604 @@
+"""Workbench HTTP surface: §8.5 browser defense, page push/read, snapshot."""
+
+from __future__ import annotations
+
+import socket
+
+import pytest
+from aiohttp.test_utils import TestClient, TestServer
+
+from voco.core.events import EventBus
+from voco.core.limits import MAX_REQUEST_BYTES, MAX_SCREEN_BYTES
+from voco.core.registry import Registry
+from voco.core.workspace import WorkspaceStore
+from voco.server.http import BridgeServer
+from voco.server.workbench import MAX_DOC_BYTES, handle_workbench_command
+
+HOST = socket.gethostname().split(".")[0]
+
+
+@pytest.fixture
+async def client(tmp_path):
+    bus = EventBus()
+    registry = Registry(emit=bus.emit)
+    store = WorkspaceStore(emit=bus.emit)
+
+    async def control(cmd, payload):
+        try:
+            return handle_workbench_command(store, cmd, payload, data_dir=tmp_path)
+        except KeyError:
+            raise ValueError(f"unknown command {cmd!r}") from None
+
+    server = BridgeServer(
+        registry,
+        bus,
+        listen_slice_s=0.5,
+        workspaces=store,
+        allowed_origins=["https://proxy.example"],
+        on_control=control,
+    )
+    c = TestClient(TestServer(server.build_app()))
+    await c.start_server()
+    c.server_obj = server
+    c.store = store
+    c.repo = tmp_path
+    yield c
+    await c.close()
+
+
+def ident(repo) -> dict:
+    return {
+        "host": HOST,  # matches the daemon's — a local_fs session
+        "user": "d",
+        "cwd": str(repo),
+        "repo": repo.name,
+        "branch": "main",
+        "worktree": str(repo),
+        "harness": "claude",
+    }
+
+
+async def register(client) -> str:
+    resp = await client.post("/v1/bridge/register", json=ident(client.repo))
+    assert resp.status == 200
+    return (await resp.json())["session_id"]
+
+
+def test_app_has_explicit_request_ceiling(client):
+    assert client.server_obj.build_app()._client_max_size == MAX_REQUEST_BYTES
+
+
+async def test_virtual_doc_above_aiohttp_default_reaches_domain_limit(client):
+    sid = await register(client)
+    within = "x" * (1024 * 1024 + 1)
+    ok = await client.post(
+        "/v1/bridge/page",
+        json={
+            "session_id": sid,
+            "type": "doc",
+            "name": "large",
+            "content": within,
+        },
+    )
+    assert ok.status == 200
+
+    too_large = "é" * (MAX_DOC_BYTES // 2 + 1)
+    rejected = await client.post(
+        "/v1/bridge/page",
+        json={
+            "session_id": sid,
+            "type": "doc",
+            "name": "too-large",
+            "content": too_large,
+        },
+    )
+    assert rejected.status == 413
+
+
+async def test_screen_limit_failure_is_atomic_and_returns_413(client):
+    sid = await register(client)
+    exact = "é" * (MAX_SCREEN_BYTES // 2)
+    ok = await client.post(
+        "/v1/bridge/screen",
+        json={"session_id": sid, "markdown": exact, "title": "Exact", "mode": "show"},
+    )
+    assert ok.status == 200
+    ws = client.store.resolve(ident(client.repo))
+    page = ws.page_by_ref("screen", next(iter(ws.pages.values())).ref)
+    assert page is not None
+    before = (page.rev, page.data["markdown"])
+
+    rejected = await client.post(
+        "/v1/bridge/screen",
+        json={"session_id": sid, "markdown": "x", "mode": "append"},
+    )
+    assert rejected.status == 413
+    session = client.server_obj._registry.get(sid)
+    assert session is not None and session.screen_markdown == exact
+    assert (page.rev, page.data["markdown"]) == before
+
+
+# ---- §8.5: origin discipline + workbench token ------------------------------
+
+
+async def test_foreign_origin_rejected_on_mutations_and_ws(client):
+    evil = {"Origin": "https://evil.example"}
+    resp = await client.post(
+        "/v1/control/say_as_user", json={"text": "rm -rf"}, headers=evil
+    )
+    assert resp.status == 403
+    resp = await client.post(
+        "/v1/bridge/register", json=ident(client.repo), headers=evil
+    )
+    assert resp.status == 403
+    resp = await client.get("/v1/events", headers={**evil, "Connection": "upgrade"})
+    assert resp.status == 403
+
+
+async def test_loopback_origin_any_port_needs_wb_token(client):
+    origin = {"Origin": "http://localhost:9999"}
+    resp = await client.post("/v1/control/state.get", json={}, headers=origin)
+    assert resp.status == 403  # loopback origin passes, but no wb token
+    wb = client.server_obj.wb_token
+    resp = await client.post(
+        "/v1/control/state.get", json={}, headers={**origin, "x-voco-wb": wb}
+    )
+    assert resp.status == 200
+
+
+async def test_allowed_origins_config_passes_with_token(client):
+    headers = {
+        "Origin": "https://proxy.example",
+        "x-voco-wb": client.server_obj.wb_token,
+    }
+    resp = await client.post("/v1/control/state.get", json={}, headers=headers)
+    assert resp.status == 200
+
+
+async def test_no_origin_curl_passes_as_before(client):
+    resp = await client.post("/v1/control/state.get", json={})
+    assert resp.status == 200
+
+
+async def test_browser_ws_without_wb_rejected_at_upgrade(client):
+    # BLOCKER 1: a browser-origin WS with no wb cannot even READ the event
+    # stream (the snapshot leaks cwds/screens/findings). Upgrade → 403.
+    resp = await client.get("/v1/events", headers={"Origin": "http://127.0.0.1:9999"})
+    assert resp.status == 403
+
+
+async def test_no_origin_ws_reads_events_and_runs_commands(client):
+    # CLI tools (no Origin) keep full access under the bearer policy.
+    async with client.ws_connect("/v1/events") as ws:
+        snap = await ws.receive_json()
+        assert snap["type"] == "snapshot"
+        await ws.send_json({"id": "1", "cmd": "state.get", "payload": {}})
+        reply = await ws.receive_json()
+        assert reply["ok"] is True
+
+
+async def test_browser_ws_with_wb_reads_and_commands(client):
+    wb = client.server_obj.wb_token
+    async with client.ws_connect(
+        f"/v1/events?wb={wb}", headers={"Origin": "http://127.0.0.1:7777"}
+    ) as ws:
+        await ws.receive_json()  # snapshot
+        await ws.send_json({"id": "2", "cmd": "state.get", "payload": {}})
+        reply = await ws.receive_json()
+        assert reply["ok"] is True
+
+
+# ---- served pages ------------------------------------------------------------
+
+
+async def test_shell_and_debug_inject_token_and_csp(client):
+    resp = await client.get("/")
+    body = await resp.text()
+    assert resp.status == 200
+    assert client.server_obj.wb_token in body
+    csp = resp.headers["Content-Security-Policy"]
+    assert "default-src 'self'" in csp and "nonce-" in csp
+    resp = await client.get("/debug")
+    assert client.server_obj.wb_token in await resp.text()
+
+
+# ---- screen verb -> pinned page; doc push; content reads ----------------------
+
+
+async def test_screen_verb_becomes_pinned_page_and_snapshot_lists_it(client):
+    sid = await register(client)
+    resp = await client.post(
+        "/v1/bridge/screen",
+        json={"session_id": sid, "markdown": "# plan", "title": "Plan"},
+    )
+    assert (await resp.json())["ok"] is True
+    snap = client.server_obj._snapshot()
+    (ws_meta,) = snap["workspaces"]
+    (page,) = ws_meta["pages"]
+    assert page["type"] == "screen" and page["pinned"] is True
+    # content served on demand
+    resp = await client.get(f"/v1/page/{page['page_id']}")
+    body = await resp.json()
+    assert body["content"]["markdown"] == "# plan"
+
+
+async def test_doc_push_path_confined_and_read_fresh(client):
+    sid = await register(client)
+    doc = client.repo / "DESIGN.md"
+    doc.write_text("v1")
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "doc", "path": str(doc)},
+    )
+    page_id = (await resp.json())["page_id"]
+
+    doc.write_text("v2 fresh")  # read-fresh-per-request
+    resp = await client.get(f"/v1/page/{page_id}")
+    assert (await resp.json())["content"]["markdown"] == "v2 fresh"
+
+    # confinement: outside the workspace root -> rejected at push
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "doc", "path": "/etc/hostname"},
+    )
+    assert resp.status == 404
+
+
+async def test_page_content_honors_bearer_and_browser_token(tmp_path):
+    bus = EventBus()
+    registry = Registry(emit=bus.emit)
+    store = WorkspaceStore(emit=bus.emit)
+    ws = store.resolve(ident(tmp_path))
+    page = store.push_doc(ws, name="secret", content="classified")
+    server = BridgeServer(
+        registry, bus, token="sekrit", workspaces=store, listen_slice_s=0.2
+    )
+    c = TestClient(TestServer(server.build_app()))
+    await c.start_server()
+    try:
+        assert (await c.get(f"/v1/page/{page.page_id}")).status == 401
+        headers = {"Authorization": "Bearer sekrit"}
+        assert (await c.get(f"/v1/page/{page.page_id}", headers=headers)).status == 200
+        browser = {**headers, "Origin": "http://127.0.0.1:7777"}
+        assert (await c.get(f"/v1/page/{page.page_id}", headers=browser)).status == 403
+        browser["x-voco-wb"] = server.wb_token
+        resp = await c.get(f"/v1/page/{page.page_id}", headers=browser)
+        assert resp.status == 200
+        assert (await resp.json())["content"]["markdown"] == "classified"
+    finally:
+        await c.close()
+
+
+async def test_symlink_escape_fails_on_read(client):
+    sid = await register(client)
+    inside = client.repo / "linked.md"
+    inside.write_text("ok")
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "doc", "path": str(inside)},
+    )
+    page_id = (await resp.json())["page_id"]
+    # swap the file for an escaping symlink AFTER the push (TOCTOU)
+    inside.unlink()
+    inside.symlink_to("/etc/hostname")
+    resp = await client.get(f"/v1/page/{page_id}")
+    assert resp.status == 404
+
+
+async def test_diff_push_content_parses_and_serves(client):
+    sid = await register(client)
+    patch = (
+        "diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n"
+        "@@ -1,2 +1,2 @@\n import os\n-x=1\n+x=2\n"
+    )
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "diff", "content": patch, "name": "wip"},
+    )
+    body = await resp.json()
+    assert body["ok"] is True
+    resp = await client.get(f"/v1/page/{body['page_id']}")
+    files = (await resp.json())["content"]["files"]
+    assert files[0]["path"] == "f.py"
+    kinds = [r["kind"] for r in files[0]["hunks"][0]["rows"]]
+    assert kinds == ["context", "del", "add"]
+
+
+async def test_finding_round_trip_add_then_agent_status(client):
+    sid = await register(client)
+    patch = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n"
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "diff", "content": patch, "name": "d"},
+    )
+    page_id = (await resp.json())["page_id"]
+    ws_key = client.store.resolve(
+        {"host": HOST, "worktree": str(client.repo), "cwd": str(client.repo)}
+    ).key
+    # human adds a finding via control (workbench origin + wb)
+    wb = client.server_obj.wb_token
+    add = await client.post(
+        "/v1/control/finding.add",
+        json={
+            "workspace": ws_key,
+            "page_id": page_id,
+            "anchor": {"file": "f", "side": "new", "startLine": 1, "endLine": 1},
+            "text": "why b?",
+            "kind": "question",
+        },
+        headers={"Origin": "http://127.0.0.1:7777", "x-voco-wb": wb},
+    )
+    fid = (await add.json())["finding"]["finding_id"]
+    # agent lists pending
+    resp = await client.get(f"/v1/bridge/findings?session_id={sid}&pending=1")
+    findings = (await resp.json())["findings"]
+    assert len(findings) == 1 and findings[0]["finding_id"] == fid
+    # agent marks addressed
+    resp = await client.post(
+        "/v1/bridge/finding_status",
+        json={
+            "session_id": sid,
+            "finding_id": fid,
+            "status": "addressed",
+            "commit": "deadbeef",
+        },
+    )
+    assert (await resp.json())["finding"]["status"] == "addressed"
+    # agent cannot withdraw
+    resp = await client.post(
+        "/v1/bridge/finding_status",
+        json={"session_id": sid, "finding_id": fid, "status": "withdrawn"},
+    )
+    assert resp.status == 400
+
+
+async def test_finding_status_confined_to_own_workspace(client, tmp_path_factory):
+    sid = await register(client)
+    # another session in a different repo
+    other = tmp_path_factory.mktemp("other")
+    oident = {
+        **ident(client.repo),
+        "cwd": str(other),
+        "worktree": str(other),
+        "repo": "other",
+    }
+    resp = await client.post("/v1/bridge/register", json=oident)
+    osid = (await resp.json())["session_id"]
+    # finding in client.repo's workspace
+    patch = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n"
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "diff", "content": patch, "name": "d"},
+    )
+    page_id = (await resp.json())["page_id"]
+    ws_key = client.store.resolve(
+        {"host": HOST, "worktree": str(client.repo), "cwd": str(client.repo)}
+    ).key
+    wb = client.server_obj.wb_token
+    add = await client.post(
+        "/v1/control/finding.add",
+        json={
+            "workspace": ws_key,
+            "page_id": page_id,
+            "anchor": {"file": "f"},
+            "text": "x",
+        },
+        headers={"Origin": "http://127.0.0.1:7777", "x-voco-wb": wb},
+    )
+    fid = (await add.json())["finding"]["finding_id"]
+    # the OTHER session cannot touch it
+    resp = await client.post(
+        "/v1/bridge/finding_status",
+        json={"session_id": osid, "finding_id": fid, "status": "addressed"},
+    )
+    assert resp.status == 404
+
+
+async def test_remote_session_path_push_soft_rejected(client):
+    remote = {**ident(client.repo), "host": "far-away-box"}
+    resp = await client.post("/v1/bridge/register", json=remote)
+    sid = (await resp.json())["session_id"]
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "doc", "path": str(client.repo / "x.md")},
+    )
+    assert resp.status == 400
+    assert "push content instead" in await resp.text()
+    # content push from remote works
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "doc", "name": "notes", "content": "hi"},
+    )
+    assert (await resp.json())["ok"] is True
+
+
+async def test_register_alone_creates_the_workspace(client):
+    """Live-test bug (Windows deck): agents that registered but never
+    pushed a page were invisible — no workspace existed, the rail was
+    empty. Registration itself must mint the workspace."""
+    resp = await client.post("/v1/bridge/register", json=ident(client.repo))
+    assert resp.status == 200
+    ws = client.store.home_of(ident(client.repo))
+    assert ws is not None and ws.kind == "workspace"
+    assert ws.key in {w["key"] for w in client.store.snapshot()}
+
+
+# ---- staleness kill + error context (dogfood failure, 2026-07-06) -------------
+# A session whose register-time identity went stale (client cache collision,
+# daemon state restore) made every workspace verb resolve against the wrong
+# root: page_push 500'd on git sources and "no such doc"'d on files that
+# plainly existed. Adapters now re-assert identity per verb; errors name the
+# root + attempted path; nothing on the bridge returns a bare 500.
+
+
+async def test_stale_identity_refreshed_per_bridge_call(client, tmp_path_factory):
+    sid = await register(client)  # registered at client.repo
+    moved = tmp_path_factory.mktemp("moved-checkout")
+    (moved / "NOTES.md").write_text("fresh")
+    fresh = {**ident(client.repo), "cwd": str(moved), "worktree": str(moved)}
+    # The exact dogfood shape: a RELATIVE path that exists in the agent's
+    # real cwd but not under the stale registered root.
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "doc", "path": "NOTES.md", "identity": fresh},
+    )
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["root"] == str(moved)
+    # The session itself moved: later verbs resolve the fresh root too.
+    s = client.server_obj._registry.get(sid)
+    assert s.identity["cwd"] == str(moved)
+    # A re-register from the NEW cwd finds the same session, not a twin.
+    resp = await client.post("/v1/bridge/register", json=fresh)
+    assert (await resp.json())["session_id"] == sid
+
+
+async def test_findings_get_refreshes_identity(client, tmp_path_factory):
+    import json as _json
+    import urllib.parse
+
+    sid = await register(client)
+    moved = tmp_path_factory.mktemp("elsewhere")
+    fresh = {**ident(client.repo), "cwd": str(moved), "worktree": str(moved)}
+    q = urllib.parse.quote(_json.dumps(fresh))
+    resp = await client.get(f"/v1/bridge/findings?session_id={sid}&identity={q}")
+    body = await resp.json()
+    assert body["workspace"].endswith(str(moved))
+
+
+async def test_malformed_identity_is_ignored(client):
+    sid = await register(client)
+    for bad in ("not json", {"host": "h"}, [1, 2], {"cwd": "/x"}):
+        resp = await client.post(
+            "/v1/bridge/page",
+            json={
+                "session_id": sid,
+                "type": "doc",
+                "name": "n",
+                "content": "c",
+                "identity": bad,
+            },
+        )
+        assert resp.status == 200  # verb works; stale-but-valid root kept
+    s = client.server_obj._registry.get(sid)
+    assert s.identity["cwd"] == str(client.repo)
+
+
+async def test_4xx_bodies_name_root_and_attempted_path(client):
+    sid = await register(client)
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "doc", "path": "missing.md"},
+    )
+    assert resp.status == 404
+    text = await resp.text()
+    assert "missing.md" in text and str(client.repo.resolve()) in text
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "doc", "path": "/etc/hostname"},
+    )
+    assert resp.status == 404
+    text = await resp.text()
+    assert "outside" in text and str(client.repo.resolve()) in text
+    # finding not found names the id and the workspace it looked in
+    resp = await client.post(
+        "/v1/bridge/finding_status",
+        json={"session_id": sid, "finding_id": "f-nope", "status": "addressed"},
+    )
+    assert resp.status == 404
+    text = await resp.text()
+    assert "f-nope" in text and str(client.repo) in text
+
+
+async def test_bridge_errors_never_bare_500(client, monkeypatch):
+    sid = await register(client)
+
+    def boom(source, root):
+        raise RuntimeError("kaput")
+
+    monkeypatch.setattr(client.server_obj.diff_resolver, "resolve", boom)
+    resp = await client.post(
+        "/v1/bridge/page",
+        json={"session_id": sid, "type": "diff", "source": {"branch": "main"}},
+    )
+    assert resp.status == 500
+    body = await resp.json()  # structured but does not leak exception details
+    assert body == {"ok": False, "error": "internal server error"}
+    assert "kaput" not in body["error"]
+
+
+def test_dead_workspace_root_names_itself_not_git():
+    from voco.adapters.diffsource import _default_runner
+
+    r = _default_runner(["git", "status"], "/no/such/checkout")
+    assert r.returncode != 0
+    assert "workspace root does not exist" in r.stderr
+    assert "not installed" not in r.stderr
+
+
+def test_registry_refresh_identity_rekeys_and_emits_on_move():
+    events: list[tuple[str, dict]] = []
+    reg = Registry(emit=lambda t, p: events.append((t, p)))
+    base = {"host": "h", "cwd": "/old", "worktree": "/old", "harness": "c"}
+    s = reg.register(base, ["say"])
+    events.clear()
+    reg.refresh_identity(s.session_id, {**base, "cwd": "/new", "worktree": "/new"})
+    assert s.identity["cwd"] == "/new"
+    assert [t for t, _ in events] == ["session.attached"]  # the rail re-groups
+    # same-root refresh (branch flip) stays quiet
+    events.clear()
+    reg.refresh_identity(s.session_id, {**base, "cwd": "/new", "worktree": "/new"})
+    assert events == []
+
+
+# ---- /v1/health: the lifecycle probe (BUILD-PROD P4) -------------------------
+
+
+async def test_health_is_unauthenticated_and_signed(client):
+    # `voco up` polls with no token; the service field is the signature
+    # a random listener squatting the port can't accidentally fake
+    resp = await client.get("/v1/health")
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["service"] == "voco-d"
+    assert data["ok"] is True
+
+
+async def test_health_merges_live_daemon_facts():
+    bus = EventBus()
+    server = BridgeServer(
+        Registry(emit=bus.emit),
+        bus,
+        listen_slice_s=0.5,
+        health_info=lambda: {"version": "9.9.9", "uptime_s": 4.2, "voice": False},
+    )
+    c = TestClient(TestServer(server.build_app()))
+    await c.start_server()
+    try:
+        data = await (await c.get("/v1/health")).json()
+        assert data["service"] == "voco-d"  # merge never loses the signature
+        assert data["version"] == "9.9.9"
+        assert data["uptime_s"] == 4.2
+        assert data["voice"] is False
+    finally:
+        await c.close()
+
+
+async def test_health_info_cannot_shadow_the_signature():
+    # healthy() trusts service/ok — a colliding info payload must lose
+    bus = EventBus()
+    server = BridgeServer(
+        Registry(emit=bus.emit),
+        bus,
+        listen_slice_s=0.5,
+        health_info=lambda: {"service": "evil-d", "ok": False, "extra": 1},
+    )
+    c = TestClient(TestServer(server.build_app()))
+    await c.start_server()
+    try:
+        data = await (await c.get("/v1/health")).json()
+        assert data["service"] == "voco-d"
+        assert data["ok"] is True
+        assert data["extra"] == 1  # honest merge for non-signature keys
+    finally:
+        await c.close()

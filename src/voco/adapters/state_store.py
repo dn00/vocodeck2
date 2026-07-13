@@ -15,19 +15,91 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
+from voco.adapters.manifest import _pid_alive, _proc_start, _sync_dir
+
 STATE_FILE = "registry.json"
+
+
+class StateLockError(Exception):
+    """Another live daemon already owns this registry state directory."""
 
 
 class StateStore:
     def __init__(self, state_dir: Path) -> None:
         self._dir = state_dir
         self._path = state_dir / STATE_FILE
+        self._lock = state_dir / "registry.lock"
 
     @property
     def path(self) -> Path:
         return self._path
+
+    def acquire(self, wait_s: float = 0.0) -> None:
+        """Exclusively claim registry persistence for this daemon run."""
+        deadline = time.monotonic() + wait_s
+        while True:
+            try:
+                self._acquire_once()
+                return
+            except StateLockError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.25)
+
+    def _read_lock(self) -> dict:
+        try:
+            return json.loads(self._lock.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _holder_is_live(self) -> bool:
+        held = self._read_lock()
+        pid = held.get("pid")
+        return (
+            isinstance(pid, int)
+            and pid != os.getpid()
+            and _pid_alive(pid)
+            and held.get("start") == _proc_start(pid)
+        )
+
+    def _acquire_once(self) -> None:
+        self._dir.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps({"pid": os.getpid(), "start": _proc_start(os.getpid())})
+        for _ in range(2):
+            try:
+                with open(self._lock, "x", encoding="utf-8") as fh:
+                    fh.write(payload)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+            except FileExistsError:
+                if self._holder_is_live():
+                    held = self._read_lock()
+                    raise StateLockError(
+                        f"another voco daemon (pid {held.get('pid')}) owns {self._dir}"
+                    ) from None
+                self._lock.unlink(missing_ok=True)
+                continue
+            else:
+                if os.name == "posix":
+                    os.chmod(self._lock, 0o600)
+                _sync_dir(self._dir)
+                return
+        held = self._read_lock()
+        raise StateLockError(
+            f"another voco daemon (pid {held.get('pid')}) owns {self._dir}"
+        )
+
+    def release(self) -> None:
+        try:
+            held = self._read_lock()
+            if held.get("pid") == os.getpid():
+                self._lock.unlink(missing_ok=True)
+                _sync_dir(self._dir)
+        except OSError:
+            pass
 
     def load(self) -> tuple[dict | None, str | None]:
         """Returns (data, error). Missing file is (None, None) — fresh boot."""
@@ -52,7 +124,10 @@ class StateStore:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, separators=(",", ":"))
+                f.flush()
+                os.fsync(f.fileno())
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
         tmp.replace(self._path)
+        _sync_dir(self._dir)

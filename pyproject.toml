@@ -49,9 +49,11 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 ignore = ["SIM105", "SIM108", "RUF001", "RUF002", "RUF003"]
 
 [tool.mypy]
-python_version = "3.11"
+# grammar version for stub parsing: numpy>=2.4 ships PEP-695 stubs
+# that a 3.11 grammar cannot parse; source stays 3.11-compatible (ruff UP).
+python_version = "3.12"
 mypy_path = "src:clients"
-packages = ["voco"]
+packages = ["voco", "voco_cli", "voco_mcp"]
 ignore_missing_imports = true
 warn_unused_ignores = true
 warn_redundant_casts = true

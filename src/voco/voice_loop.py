@@ -17,18 +17,20 @@ import asyncio
 import re
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 import numpy as np
 
-from voco.adapters.hotkey import PttHotkey
+from voco.adapters.hotkey import PttHotkey, input_monitoring_granted
 from voco.adapters.microphone import MicStream
 from voco.adapters.silero import load_silero
 from voco.adapters.speaker import SpeakerPlayer
 from voco.adapters.stt import build_stt
 from voco.adapters.tts import OpenAICompatibleTts, PhraseBank
+from voco.adapters.wake import load_openwakeword
 from voco.core.arbitration import DuplexMode, PlaybackItem, PlaybackQueue, Source
 from voco.core.attention import AttentionGate, AttentionMode
 from voco.core.capture import CaptureBuffer, pre_roll_frames_for
@@ -68,7 +70,16 @@ class VoiceLoopDeps:
     mic_factory: Callable[..., Any] = MicStream
     player_factory: Callable[..., Any] = SpeakerPlayer
     hotkey_factory: Callable[..., Any] | None = PttHotkey
-    wake_loader: Callable[[str], Callable[[np.ndarray], float]] | None = None
+    # P4: OS permission probe for the PTT listener (macOS Input
+    # Monitoring). Injectable so tests exercise the denied path.
+    ptt_preflight: Callable[[], bool | None] = input_monitoring_granted
+    # P12: the REAL detector is the default (the wiring bug was a None
+    # default nobody ever overrode — wake was dead code); the heavy
+    # openwakeword import stays lazy inside the loader call, and the
+    # loader only runs when [audio].wake_model is configured.
+    wake_loader: Callable[[str], Callable[[np.ndarray], float]] | None = (
+        load_openwakeword
+    )
 
 
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+")
@@ -166,10 +177,13 @@ class VoiceLoop:
         self._host = host
         audio_cfg = cfg.get("audio", {})
         stt_cfg = dict(cfg.get("stt", {"provider": "faster-whisper"}))
+        self._max_stt_pending = max(1, int(stt_cfg.pop("max_pending", 2)))
         tts_cfg = cfg.get(
             "tts",
             {
-                "base_url": "http://127.0.0.1:8000/v1",
+                # the bundled floor's own default port (P3 unification —
+                # 8000 was a mismatch nothing listened on)
+                "base_url": "http://127.0.0.1:8880/v1",
                 "model": "kokoro",
                 "voice": "af_heart",
             },
@@ -201,6 +215,9 @@ class VoiceLoop:
         )
         self.bank = PhraseBank(self.tts, cache)
         self.stt = deps.stt_builder(stt_cfg.pop("provider"), **stt_cfg)
+        self._stt_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="voco-stt"
+        )
 
         self._aec = EchoCanceller() if audio_cfg.get("aec") else None
         self._aec_ref = bytearray()  # 16kHz reference accumulator
@@ -208,6 +225,7 @@ class VoiceLoop:
         self.player = deps.player_factory(
             on_finished=lambda: self.queue.on_item_finished(),
             on_playing_changed=self._on_playing_changed,
+            on_error=self._on_speaker_error,
             sample_rate=self.tts.sample_rate,
             device=audio_cfg.get("output_device"),
             on_pcm_played=self._on_pcm_played if self._aec else None,
@@ -256,26 +274,73 @@ class VoiceLoop:
             ),
         )
         self.mic = deps.mic_factory(
-            self._on_frame, device=audio_cfg.get("input_device")
+            self._on_frame,
+            device=audio_cfg.get("input_device"),
+            on_error=self._on_mic_error,
         )
+        # P12 wake honesty: a detector either LOADS or the failure is a
+        # named reason — "wake" mode with no working detector is a deaf
+        # deck wearing a lying label, never a permitted state.
         self._wake_scorer: Callable[[np.ndarray], float] | None = None
+        self._wake_unavailable = (
+            "no wake-word model configured — set [audio].wake_model"
+        )
         wake_model = audio_cfg.get("wake_model")
         if wake_model and deps.wake_loader is not None:
-            self._wake_scorer = deps.wake_loader(str(wake_model))
+            try:
+                self._wake_scorer = deps.wake_loader(str(wake_model))
+                self._wake_unavailable = ""
+            except ImportError:
+                self._wake_unavailable = (
+                    "openwakeword is not installed — uv sync --extra wake,"
+                    " then restart voco-d"
+                )
+            except Exception as e:
+                self._wake_unavailable = (
+                    f"wake model failed to load ({wake_model}): {e}"
+                )
+        elif wake_model:
+            # a model IS configured, so the "set [audio].wake_model" reason
+            # would lie — the miss is the loader, not the config
+            self._wake_unavailable = (
+                "wake detector disabled in this build (no wake loader wired)"
+            )
         self._wake_threshold = float(audio_cfg.get("wake_threshold", 0.5))
+        self._wake_boot_fallback: str | None = None
+        if self.attention.mode is AttentionMode.WAKE and self._wake_scorer is None:
+            # honest boot degrade: ptt_only keeps the same "deaf until an
+            # explicit act" posture, and the reason reaches the deck/log
+            # once start() runs (the bus funnel is wired by then)
+            self.attention.set_mode(AttentionMode.PTT_ONLY)
+            self._premute = AttentionMode.PTT_ONLY
+            self._wake_boot_fallback = (
+                f"wake attention unavailable ({self._wake_unavailable})"
+                " — falling back to ptt_only"
+            )
 
         self._loop: asyncio.AbstractEventLoop | None = None
         self._ptt: PttHotkey | None = None
         self._deadline_task: asyncio.Task[None] | None = None
         self._deadline_wakeup = asyncio.Event()
         self._speculation: dict[tuple[int, int], asyncio.Task[None]] = {}
+        self._stt_gate = asyncio.Lock()
+        self._stt_active: asyncio.Task[None] | None = None
+        self._routing: set[asyncio.Task[None]] = set()
         self._playing = False  # mirrored from the player (loop thread)
+        # mic.level throttle state (deck meters read real signal, never a
+        # synthetic pulse): last emit time + last emitted value.
+        self._level_ts = 0.0
+        self._level_sent = -1.0
 
     # ---- lifecycle ---------------------------------------------------------
 
     async def start(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
         self.player.bind_loop(loop)
+        if self._wake_boot_fallback:
+            # emitted here, not in __init__, so the P4 log funnel and any
+            # early deck subscriber actually see it
+            self._bus.emit("daemon.error", {"error": self._wake_boot_fallback})
         failed = await self.bank.ensure()
         if failed:
             self._bus.emit(
@@ -296,6 +361,23 @@ class VoiceLoop:
                 key=self._ptt_key,
             )
             self._ptt.start()
+            if self._deps.ptt_preflight() is False:
+                # P4: pynput does not raise on a missing macOS Input
+                # Monitoring grant — it warns to stderr and PTT silently
+                # never fires. Preflight makes the failure reach the
+                # deck instead of dying in a terminal nobody watches.
+                self._bus.emit(
+                    "daemon.error",
+                    {
+                        "error": (
+                            f"push-to-talk cannot see the"
+                            f" {self._ptt_key.upper()} key: grant Input"
+                            " Monitoring to the app that runs voco-d"
+                            " (System Settings → Privacy & Security →"
+                            " Input Monitoring), then restart voco-d"
+                        )
+                    },
+                )
         except Exception as e:
             # Capability degrades (Wayland / missing pynput); loop stays up.
             self._bus.emit("daemon.error", {"error": f"ptt unavailable: {e}"})
@@ -307,6 +389,28 @@ class VoiceLoop:
             self._ptt.stop()
         if self._deadline_task is not None:
             self._deadline_task.cancel()
+        for task in self._speculation.values():
+            task.cancel()
+        self._speculation.clear()
+        for task in self._routing:
+            task.cancel()
+        self._routing.clear()
+        self._stt_executor.shutdown(wait=False, cancel_futures=True)
+
+    async def aclose(self) -> None:
+        """Cancel and observe loop-owned tasks during daemon shutdown."""
+        tasks = [
+            task
+            for task in [
+                self._deadline_task,
+                *self._speculation.values(),
+                *self._routing,
+            ]
+            if task is not None
+        ]
+        self.stop()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     # ---- daemon-facing controls ----------------------------------------------
 
@@ -323,10 +427,29 @@ class VoiceLoop:
     ) -> None:
         self.machine.set_patience(hold_ms=hold_ms, incomplete_ms=incomplete_ms)
 
-    def set_attention(self, mode: AttentionMode) -> None:
+    def set_attention(self, mode: AttentionMode) -> bool:
+        if mode is AttentionMode.WAKE and self._wake_scorer is None:
+            # P12: refuse, loudly, and stay in the current WORKING mode —
+            # the deck toasts this error, so the click is never silently
+            # dead and the mic never silently deaf. The False reaches the
+            # caller, which reports the actual state instead of the echo.
+            self._bus.emit(
+                "daemon.error",
+                {"error": f"wake attention unavailable — {self._wake_unavailable}"},
+            )
+            return False
         if mode is not AttentionMode.MUTED:
             self._premute = mode
         self.attention.set_mode(mode)
+        return True
+
+    @property
+    def wake_available(self) -> bool:
+        return self._wake_scorer is not None
+
+    @property
+    def wake_unavailable_reason(self) -> str:
+        return self._wake_unavailable  # "" when a detector is loaded
 
     def set_muted(self, muted: bool) -> None:
         """Phrase-table mute/unmute: MUTED <-> the last non-muted mode."""
@@ -341,16 +464,37 @@ class VoiceLoop:
     def open_mate_speech_channel(self) -> MateSpeechChannel:
         return MateSpeechChannel(self)
 
-    def _sentence_synth(self, text: str, voice: str | None):
+    def _sentence_synth(
+        self,
+        text: str,
+        voice: str | None,
+        *,
+        who: str | None = None,
+        turn_id: str | None = None,
+    ):
         """Synthesize sentence-by-sentence inside ONE playback item: the
         first sentence is audible at ~one-sentence TTFA instead of
-        scaling with message length (triage: sentence-chunked TTS)."""
+        scaling with message length (triage: sentence-chunked TTS).
+        With `who` set, each sentence boundary emits `speech.sentence` as
+        the player PULLS into it (DESIGN-DECK U0) — playback-aligned to
+        within the audio buffer; the transcript karaoke keys on it."""
         sentences = [
             s.strip() for s in _SENTENCE_BOUNDARY.split(text) if s.strip()
         ] or [text]
 
         async def gen():
-            for sentence in sentences:
+            for i, sentence in enumerate(sentences):
+                if who is not None:
+                    self._bus.emit(
+                        "speech.sentence",
+                        {
+                            "who": who,
+                            "text": sentence,
+                            "index": i,
+                            "total": len(sentences),
+                            "turn_id": turn_id,
+                        },
+                    )
                 async for chunk in self.tts.stream(sentence, voice=voice):
                     yield chunk
 
@@ -365,10 +509,16 @@ class VoiceLoop:
             )
         )
 
-    def speak_agent(self, text: str, turn_id: str | None) -> None:
+    def speak_agent(
+        self, text: str, turn_id: str | None, who: str | None = None
+    ) -> None:
         self.queue.enqueue(
             PlaybackItem(
-                Source.AGENT, self._sentence_synth(text, None), turn_id=turn_id
+                Source.AGENT,
+                self._sentence_synth(text, None, who=who, turn_id=turn_id),
+                turn_id=turn_id,
+                who=who,
+                text=text,
             )
         )
 
@@ -391,6 +541,25 @@ class VoiceLoop:
         assert self._loop is not None
         self._loop.call_soon_threadsafe(self._process_frame, frame)
 
+    def _on_mic_error(self, message: str) -> None:
+        """Marshal device-thread diagnostics onto the event loop."""
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return
+        try:
+            loop.call_soon_threadsafe(
+                self._bus.emit, "daemon.error", {"error": message}
+            )
+        except RuntimeError:
+            pass  # loop closed between the check and cross-thread scheduling
+
+    def _on_speaker_error(self, error: Exception) -> None:
+        """Report output-device/TTS-stream failures without killing voice."""
+        self._bus.emit(
+            "daemon.error",
+            {"error": f"speaker playback failed: {type(error).__name__}: {error}"},
+        )
+
     def _on_pcm_played(self, pcm: bytes) -> None:
         # PortAudio output thread: resample + frame the AEC reference.
         if self._aec is None:  # tap is only wired when AEC is on; guard anyway
@@ -403,9 +572,26 @@ class VoiceLoop:
             del self._aec_ref[:frame_bytes]
             self._aec.push_playback(np.frombuffer(chunk, dtype=np.int16))
 
+    def _emit_mic_level(self, frame: np.ndarray) -> None:
+        """Throttled honest input level (post-AEC — what voco actually
+        hears): ~10Hz while there is signal, one trailing zero when it
+        settles, then silence on the wire. -50..-10 dBFS maps to 0..1."""
+        now = time.monotonic()
+        if now - self._level_ts < 0.1:
+            return
+        rms = float(np.sqrt(np.mean(np.square(frame.astype(np.float64)))))
+        db = 20.0 * float(np.log10(max(rms, 1.0) / 32768.0))
+        level = round(min(1.0, max(0.0, (db + 50.0) / 40.0)), 3)
+        if level == 0.0 and self._level_sent == 0.0:
+            return  # silence already reported — no idle spam
+        self._level_ts = now
+        self._level_sent = level
+        self._bus.emit("mic.level", {"level": level})
+
     def _process_frame(self, frame: np.ndarray) -> None:
         if self._aec is not None:
             frame = self._aec.process(frame)
+        self._emit_mic_level(frame)
         self.capture.feed(frame)
         if (
             self._wake_scorer is not None
@@ -447,6 +633,14 @@ class VoiceLoop:
         self.machine.ptt_released()
         self._kick_deadline()
 
+    # Client-initiated hold-PTT (mk3.1 #7): the deck's hold button / key
+    # ride the exact hotkey path, so attention gating stays identical.
+    def ptt_press(self) -> None:
+        self._on_ptt_press()
+
+    def ptt_release(self) -> None:
+        self._on_ptt_release()
+
     # ---- turn machine listeners -----------------------------------------------------
 
     def _on_capture_started(self, key: int, reopened: bool) -> None:
@@ -461,18 +655,64 @@ class VoiceLoop:
         self.capture.pause()
         pcm = self.capture.take()
         assert self._loop is not None
+        # A reopened capture supersedes older, not-yet-running revisions of
+        # the same utterance. Keep the one blocking provider call alive (a
+        # Python thread cannot be killed safely), but its result is ignored
+        # below when a newer revision exists.
+        for stale_key, stale in list(self._speculation.items()):
+            if stale_key[0] == key and stale_key[1] < revision:
+                if stale is self._stt_active:
+                    continue
+                self._speculation.pop(stale_key, None)
+                stale.cancel()
+        pending = [
+            (pending_key, task)
+            for pending_key, task in self._speculation.items()
+            if task is not self._stt_active
+        ]
+        while len(pending) >= self._max_stt_pending:
+            stale_key, stale = pending.pop(0)
+            if self._speculation.get(stale_key) is not stale:
+                continue
+            self._speculation.pop(stale_key, None)
+            stale.cancel()
+            self._bus.emit(
+                "daemon.error",
+                {"error": "stt backlog full; dropped a superseded revision"},
+            )
         task = self._loop.create_task(self._transcribe(key, revision, pcm))
         self._speculation[(key, revision)] = task
         self._kick_deadline()
 
     async def _transcribe(self, key: int, revision: int, pcm: bytes) -> None:
         loop = asyncio.get_running_loop()
+        current = asyncio.current_task()
+        assert current is not None
         try:
-            text = await loop.run_in_executor(None, self.stt.transcribe, pcm)
+            # Gate BEFORE executor submission. Otherwise cancelled asyncio
+            # wrappers leave cancelled work items accumulating in the
+            # ThreadPoolExecutor's unbounded internal queue.
+            async with self._stt_gate:
+                self._stt_active = current
+                try:
+                    text = await loop.run_in_executor(
+                        self._stt_executor, self.stt.transcribe, pcm
+                    )
+                finally:
+                    if self._stt_active is current:
+                        self._stt_active = None
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             self._bus.emit("daemon.error", {"error": f"stt: {e}"})
             text = ""
-        self._speculation.pop((key, revision), None)
+        if self._speculation.get((key, revision)) is current:
+            self._speculation.pop((key, revision), None)
+        if any(
+            pending_key == key and pending_revision > revision
+            for pending_key, pending_revision in self._speculation
+        ):
+            return
         self._bus.emit("stt.final", {"text": text})
         self.machine.stt_final(key, revision, text)
         self._kick_deadline()
@@ -490,7 +730,9 @@ class VoiceLoop:
 
     def _on_route_requested(self, key: int, revision: int, text: str) -> None:
         assert self._loop is not None
-        self._loop.create_task(self._route_turn(key, revision, text))
+        task = self._loop.create_task(self._route_turn(key, revision, text))
+        self._routing.add(task)
+        task.add_done_callback(self._routing.discard)
 
     async def _route_turn(self, key: int, revision: int, text: str) -> None:
         try:
