@@ -6,7 +6,9 @@ import asyncio
 import json
 import stat
 
-from voco.adapters.state_store import StateStore
+import pytest
+
+from voco.adapters.state_store import StateLockError, StateStore
 from voco.core.registry import Registry
 from voco.daemon import Daemon
 
@@ -81,6 +83,18 @@ def test_state_store_round_trip_perms_and_corruption(tmp_path):
     assert data is None and err is None
 
 
+def test_state_store_lock_blocks_live_foreign_holder(tmp_path):
+    from voco.adapters.manifest import _proc_start
+
+    root = tmp_path / "voco"
+    root.mkdir()
+    (root / "registry.lock").write_text(
+        json.dumps({"pid": 1, "start": _proc_start(1)}), encoding="utf-8"
+    )
+    with pytest.raises(StateLockError):
+        StateStore(root).acquire()
+
+
 def test_daemon_restart_preserves_queued_input(tmp_path):
     cfg = {"state": {"dir": str(tmp_path)}}
     d1 = Daemon(cfg, no_audio=True)
@@ -96,8 +110,13 @@ def test_daemon_restart_preserves_queued_input(tmp_path):
     assert payload is not None and payload["text"] == "do the thing"
 
 
+def test_queue_drain_is_a_durable_state_event():
+    assert "input.drained" in Daemon._STATE_EVENTS
+
+
 async def test_debounced_saver_writes_after_bus_event(tmp_path):
     d = Daemon({"state": {"dir": str(tmp_path)}}, no_audio=True)
+    d._restore_state()
     d._wire_state_saver()
     d.registry.register({"host": "m", "cwd": "/w", "harness": "codex"}, ["say"])
     d.bus.emit("digest.updated", {"session_id": "x", "unread": 1})
@@ -105,3 +124,4 @@ async def test_debounced_saver_writes_after_bus_event(tmp_path):
     await asyncio.sleep(0.8)
     data, err = d._state.load()
     assert err is None and data is not None and len(data["sessions"]) == 1
+    d._state.release()

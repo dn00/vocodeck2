@@ -80,10 +80,24 @@ def test_finding_goes_stale_when_page_rev_bumps():
         ws,
         ref="branch:main",
         title="diff",
-        files=[{"path": "src/foo.py"}],
+        files=[{"path": "src/foo.py"}, {"path": "src/bar.py"}],
         source={"branch": "main"},
     )
     assert page.rev == 2 and f.rev == 1  # finding kept, now stale
+
+
+def test_identical_diff_republish_is_idempotent():
+    store, ws, page, events = store_with_diff()
+    events.clear()
+    store.upsert_diff(
+        ws,
+        ref="branch:main",
+        title="diff",
+        files=[{"path": "src/foo.py"}],
+        source={"branch": "main"},
+    )
+    assert page.rev == 1
+    assert events == []
 
 
 def test_findings_for_open_only_and_unknown_workspace():

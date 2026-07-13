@@ -231,6 +231,7 @@ class WorkbenchRoutes:
         doc pages). Browser origins need the wb token, like every other
         workbench surface."""
         self._server._check_browser_mutation(request)
+        self._server._check_auth(request)
         store = self._server.workspaces
         if store is None:
             raise web.HTTPNotFound(text="workbench disabled")
@@ -272,6 +273,7 @@ class WorkbenchRoutes:
         sandboxes (defense in depth). Browser origins need the wb token
         (?wb= — an iframe src can't carry headers)."""
         self._server._check_browser_mutation(request)
+        self._server._check_auth(request)
         store = self._server.workspaces
         if store is None:
             raise web.HTTPNotFound(text="workbench disabled")
@@ -299,6 +301,8 @@ class WorkbenchRoutes:
         return resp
 
     async def page_content(self, request: web.Request) -> web.Response:
+        self._server._check_browser_mutation(request)
+        self._server._check_auth(request)
         store = self._server.workspaces
         if store is None:
             raise web.HTTPNotFound(text="workbench disabled")

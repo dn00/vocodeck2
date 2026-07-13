@@ -22,12 +22,28 @@ def test_queued_inputs_carry_origin_and_age():
     clock["t"] += 30
     payload = r.on_listen_start(s.session_id)
     assert payload is not None
-    # First queued item becomes the transcript, with its true age.
-    assert payload["text"] == "spoken early"
-    assert payload["origin"] == "voice"
-    assert payload["age_s"] == 180
+    # Newest queued item is the current instruction; older items remain
+    # chronological backlog so the formatter outputs early -> later.
+    assert payload["text"] == "typed later"
+    assert payload["origin"] == "typed"
+    assert payload["age_s"] == 30
     (q,) = payload["queued"]
-    assert q["origin"] == "typed" and q["age_s"] == 30
+    assert q["origin"] == "voice" and q["age_s"] == 180
+
+
+def test_queue_events_converge_count_after_drain():
+    events = []
+    r = Registry(emit=lambda t, p: events.append((t, p)))
+    s = r.register(ident(), ["say", "listen"])
+    r.dispatch("one", r.mint_turn_id())
+    r.dispatch("two", r.mint_turn_id())
+    queued = [p for t, p in events if t == "input.queued"]
+    assert [p["queued"] for p in queued] == [1, 2]
+    r.on_listen_start(s.session_id)
+    assert events[-1] == (
+        "input.drained",
+        {"session_id": s.session_id, "queued": 0},
+    )
 
 
 def test_live_dispatch_is_fresh_and_marks_origin():

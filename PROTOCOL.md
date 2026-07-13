@@ -41,6 +41,7 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 - `digest.updated`
 - `finding.added`
 - `finding.updated`
+- `input.drained`
 - `input.queued` *(turn-scoped: payload carries `turn_id`)*
 - `mic.level`
 - `mic.state`

@@ -38,6 +38,10 @@ export class Store {
     /** @type {Map<string, Map<string, any>>} */ this.findings = new Map();
     // asks keyed the same way (workspace key -> Map<ask_id, ask>)
     /** @type {Map<string, Map<string, any>>} */ this.asks = new Map();
+    // A live event can seed either map before its authoritative lazy fetch.
+    // Completeness therefore needs its own bit; Map presence is not enough.
+    /** @type {Set<string>} */ this.loadedFindingWorkspaces = new Set();
+    /** @type {Set<string>} */ this.loadedAskWorkspaces = new Set();
     this.selectedAgent = /** @type {?string} */ (null); // session_id
     this.activeSession = /** @type {?string} */ (null);
     this.selectedWorkspace = /** @type {?string} */ (null);
@@ -53,6 +57,9 @@ export class Store {
     // True when the daemon restarted and even a reload didn't mint a
     // working token — the command bar tells the human to reload.
     this.staleToken = false;
+    // Monotonic client generation. Every authoritative snapshot invalidates
+    // page content cached under the previous daemon/client state.
+    this.snapshotEpoch = 0;
     this.ticker = "";
     // ---- voice presence (U1) ------------------------------------------------
     // The turn machine's public state: idle|capturing|holding|routing|reopenable.
@@ -100,6 +107,7 @@ export class Store {
   // ---- snapshot + events ----------------------------------------------------
 
   applySnapshot(snap) {
+    this.snapshotEpoch += 1;
     this.sessions.clear();
     for (const s of snap.sessions || []) this.sessions.set(s.session_id, s);
     this.activeSession = snap.active_session ?? null;
@@ -109,6 +117,8 @@ export class Store {
     // the lazy caches must refetch (the selection notify triggers it).
     this.findings.clear();
     this.asks.clear();
+    this.loadedFindingWorkspaces.clear();
+    this.loadedAskWorkspaces.clear();
     for (const t of this.transcripts.values()) t.stale = true;
     this.mic = snap.mic || {};
     // level is transient signal: a (re)connected daemon may never emit
@@ -206,10 +216,20 @@ export class Store {
           this.lastRouted.route = "first mate";
         this._notify("voice");
         break;
-      case "input.queued":
+      case "input.queued": {
+        const s = this.sessions.get(p.session_id);
+        if (s) s.queued = Number.isFinite(p.queued)
+          ? p.queued : (s.queued || 0) + 1;
         this._staleTranscript(p.session_id);
         this._notify("transcript", "sessions");
         break;
+      }
+      case "input.drained": {
+        const s = this.sessions.get(p.session_id);
+        if (s) s.queued = 0;
+        this._notify("sessions");
+        break;
+      }
       case "agent.say": {
         // keep the card's "last utterance" live between snapshots (mk4)
         const s = this.sessions.get(p.session_id);
@@ -280,6 +300,26 @@ export class Store {
       inputs: data.inputs || [], says: data.says || [], stale: false,
     });
     this._notify("transcript");
+  }
+
+  /** Merge an authoritative fetch under any newer live events. */
+  setFindingSnapshot(wsKey, findings) {
+    const merged = new Map();
+    for (const f of findings || []) merged.set(f.finding_id, f);
+    for (const [id, f] of this.findings.get(wsKey) || []) merged.set(id, f);
+    this.findings.set(wsKey, merged);
+    this.loadedFindingWorkspaces.add(wsKey);
+    this._notify("findings");
+  }
+
+  /** Merge an authoritative fetch under any newer live events. */
+  setAskSnapshot(wsKey, asks) {
+    const merged = new Map();
+    for (const a of asks || []) merged.set(a.ask_id, a);
+    for (const [id, a] of this.asks.get(wsKey) || []) merged.set(id, a);
+    this.asks.set(wsKey, merged);
+    this.loadedAskWorkspaces.add(wsKey);
+    this._notify("asks");
   }
 
   _applySessionEvent(type, p, ts) {

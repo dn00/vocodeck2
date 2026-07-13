@@ -51,6 +51,24 @@ def test_dump_restore_round_trip_keeps_pages_and_findings():
     assert new.page_id not in {p.page_id for p in ws.pages.values()}
 
 
+def test_pageless_finding_round_trip_keeps_null_page_id():
+    src = WorkspaceStore(now=lambda: 5.0)
+    ws = src.resolve(LOCAL)
+    src.add_finding(
+        ws.key,
+        page_id=None,
+        anchor={"kind": "file", "file": "src/main.py", "startLine": 2},
+        text="rename this",
+    )
+    dst = WorkspaceStore()
+    restored = dst.restore_workspace(json.loads(json.dumps(src.dump_workspace(ws))))
+    assert restored is not None
+    (finding,) = restored.findings.values()
+    assert finding.page_id is None
+    assert finding.to_dict()["page_id"] is None
+    assert [item["id"] for item in restored.pending_review()] == [finding.finding_id]
+
+
 def test_restore_skips_malformed_never_raises():
     dst = WorkspaceStore()
     assert dst.restore_workspace({"v": 999}) is None
@@ -72,6 +90,23 @@ def test_manifest_save_load_by_workspace(tmp_path):
     loaded, errors = m.load_all()
     assert errors == [] and len(loaded) == 1 and loaded[0]["key"] == ws.key
     m.release()
+
+
+def test_safe_key_is_injective_for_percent_and_slash_and_has_no_separators():
+    assert safe_key("host:/a%2Fb") != safe_key("host:/a/b")
+    encoded = safe_key(r"win:C:\\Users\\d\\repo")
+    assert "/" not in encoded and "\\" not in encoded
+
+
+def test_corrupt_manifest_is_named_and_quarantined(tmp_path):
+    bad = tmp_path / "workspaces" / "workspace-a"
+    bad.mkdir(parents=True)
+    (bad / "manifest.json").write_text("{broken", encoding="utf-8")
+    loaded, errors = WorkspaceManifest(tmp_path).load_all()
+    assert loaded == []
+    assert len(errors) == 1 and "workspace-a" in errors[0]
+    assert not (bad / "manifest.json").exists()
+    assert list(bad.glob("manifest.corrupt-*.json"))
 
 
 def test_lock_blocks_second_live_holder(tmp_path):

@@ -223,7 +223,7 @@ def main() -> int:
         api.post("/v1/bridge/say", {"session_id": freya["session_id"], "text": line})
 
     print("· findings in every state")
-    f1 = api.control(
+    api.control(
         "finding.add",
         {
             "workspace": key,
@@ -275,7 +275,9 @@ def main() -> int:
                 "startLine": 8,
                 "endLine": 8,
             },
-            "text": "should the orb also carry PTT press state, or is that the halo's job?",
+            "text": (
+                "should the orb also carry PTT press state, or is that the halo's job?"
+            ),
             "kind": "question",
         },
     )

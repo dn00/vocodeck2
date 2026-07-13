@@ -189,6 +189,31 @@ async def test_doc_push_path_confined_and_read_fresh(client):
     assert resp.status == 404
 
 
+async def test_page_content_honors_bearer_and_browser_token(tmp_path):
+    bus = EventBus()
+    registry = Registry(emit=bus.emit)
+    store = WorkspaceStore(emit=bus.emit)
+    ws = store.resolve(ident(tmp_path))
+    page = store.push_doc(ws, name="secret", content="classified")
+    server = BridgeServer(
+        registry, bus, token="sekrit", workspaces=store, listen_slice_s=0.2
+    )
+    c = TestClient(TestServer(server.build_app()))
+    await c.start_server()
+    try:
+        assert (await c.get(f"/v1/page/{page.page_id}")).status == 401
+        headers = {"Authorization": "Bearer sekrit"}
+        assert (await c.get(f"/v1/page/{page.page_id}", headers=headers)).status == 200
+        browser = {**headers, "Origin": "http://127.0.0.1:7777"}
+        assert (await c.get(f"/v1/page/{page.page_id}", headers=browser)).status == 403
+        browser["x-voco-wb"] = server.wb_token
+        resp = await c.get(f"/v1/page/{page.page_id}", headers=browser)
+        assert resp.status == 200
+        assert (await resp.json())["content"]["markdown"] == "classified"
+    finally:
+        await c.close()
+
+
 async def test_symlink_escape_fails_on_read(client):
     sid = await register(client)
     inside = client.repo / "linked.md"

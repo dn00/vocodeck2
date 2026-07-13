@@ -36,3 +36,6 @@ jobs:
       - name: tsc --checkJs
         if: runner.os == 'Linux'
         run: npx -y -p typescript@5.6.3 tsc -p src/voco/server/static/tsconfig.json
+      - name: Workbench state unit tests
+        if: runner.os == 'Linux'
+        run: node --test tests_js/*.test.mjs

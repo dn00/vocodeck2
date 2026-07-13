@@ -36,6 +36,8 @@ if TYPE_CHECKING:
     from voco.core.workspace import WorkspaceStore
 
 LISTEN_SLICE_S = 50.0
+WS_EVENT_QUEUE_SIZE = 512
+WS_COMMAND_QUEUE_SIZE = 64
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]"}
 
@@ -141,6 +143,10 @@ class BridgeServer:
         # Async so subprocess-backed commands (tmux/ssh) never block the
         # loop that pumps WS events and listen polls.
         self._on_control = on_control or _no_control
+        # One mutation lane across HTTP and every WS client. Control commands
+        # change shared routing/audio/workbench state and must not race merely
+        # because two tabs or an MCP client acted at once.
+        self._control_lock = asyncio.Lock()
         # Daemon-owned live state (mic duplex/attention) merged into every
         # snapshot so UIs render current truth without waiting for events.
         self._snapshot_extra = snapshot_extra
@@ -417,7 +423,8 @@ class BridgeServer:
         if env.type == "state.get":
             return web.json_response(self._snapshot())
         try:
-            result = await self._on_control(env.type, env.payload)
+            async with self._control_lock:
+                result = await self._on_control(env.type, env.payload)
         except ValueError as e:
             return web.json_response({"ok": False, "error": str(e)}, status=400)
         except Exception as e:
@@ -444,14 +451,28 @@ class BridgeServer:
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
         loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=512)
+        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=WS_EVENT_QUEUE_SIZE)
+        command_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=WS_COMMAND_QUEUE_SIZE)
+        overflowed = False
+        close_task: asyncio.Task[bool] | None = None
+
+        def push_raw(raw: str) -> None:
+            nonlocal overflowed, close_task
+            if overflowed:
+                return
+            try:
+                queue.put_nowait(raw)
+            except asyncio.QueueFull:
+                # A client that missed one event cannot safely continue from
+                # partial state. Close it explicitly; reconnect always starts
+                # with an authoritative snapshot.
+                overflowed = True
+                close_task = asyncio.create_task(
+                    ws.close(code=1013, message=b"event backlog; resync")
+                )
 
         def push(env) -> None:
-            try:
-                queue.put_nowait(json.dumps(env.to_dict()))
-            except asyncio.QueueFull:
-                pass  # named fail-silent: a slow UI drops events, never
-                # blocks the daemon; it can re-sync from a fresh snapshot.
+            push_raw(json.dumps(env.to_dict()))
 
         unsubscribe = self._bus.subscribe(
             lambda env: loop.call_soon_threadsafe(push, env)
@@ -459,30 +480,45 @@ class BridgeServer:
         # Per-connection snapshot (SPEC §10): stamped but not broadcast.
         push(self._bus.make("snapshot", self._snapshot()))
         sender = asyncio.create_task(self._pump_ws(ws, queue))
-        # Commands run as tasks and reply through the event queue: the
-        # receive loop stays responsive during a slow peek/spawn, and one
-        # task (the pump) is the only writer — no interleaved WS frames.
-        pending: set[asyncio.Task[None]] = set()
 
-        async def run_command(raw: str) -> None:
-            reply = await self._handle_ws_command(raw, commands_ok=commands_ok)
-            try:
-                queue.put_nowait(json.dumps(reply))
-            except asyncio.QueueFull:
-                pass  # same named fail-silent as events: slow UI drops
+        # One bounded worker per connection prevents a fast/buggy client from
+        # creating unbounded tasks. The global control lock above serializes
+        # this worker with HTTP and other clients.
+        async def command_worker() -> None:
+            while True:
+                raw = await command_queue.get()
+                reply = await self._handle_ws_command(raw, commands_ok=commands_ok)
+                push_raw(json.dumps(reply))
+
+        worker = asyncio.create_task(command_worker())
 
         try:
             async for msg in ws:
                 if msg.type != WSMsgType.TEXT:
                     continue
-                task = asyncio.create_task(run_command(msg.data))
-                pending.add(task)
-                task.add_done_callback(pending.discard)
+                try:
+                    command_queue.put_nowait(msg.data)
+                except asyncio.QueueFull:
+                    try:
+                        req_id = json.loads(msg.data).get("id")
+                    except (ValueError, AttributeError):
+                        req_id = None
+                    push_raw(
+                        json.dumps(
+                            CommandReply(
+                                id=req_id,
+                                ok=False,
+                                error="too many pending commands",
+                            ).to_dict()
+                        )
+                    )
         finally:
             unsubscribe()
             sender.cancel()
-            for task in pending:
-                task.cancel()
+            worker.cancel()
+            await asyncio.gather(sender, worker, return_exceptions=True)
+            if close_task is not None:
+                await asyncio.gather(close_task, return_exceptions=True)
         return ws
 
     async def _pump_ws(
@@ -505,7 +541,8 @@ class BridgeServer:
         if env.type == "state.get":
             return CommandReply(id=req_id, ok=True, payload=self._snapshot()).to_dict()
         try:
-            result = await self._on_control(env.type, env.payload)
+            async with self._control_lock:
+                result = await self._on_control(env.type, env.payload)
             return CommandReply(id=req_id, ok=True, payload=result).to_dict()
         except Exception as e:
             return CommandReply(id=req_id, ok=False, error=str(e)).to_dict()

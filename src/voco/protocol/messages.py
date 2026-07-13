@@ -40,6 +40,7 @@ EVENT_TYPES = {
     "agent.say",
     "screen.updated",
     "input.queued",
+    "input.drained",
     "digest.updated",
     "pane.hint",
     "mic.state",

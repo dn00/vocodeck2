@@ -53,7 +53,7 @@ ignore = ["SIM105", "SIM108", "RUF001", "RUF002", "RUF003"]
 # that a 3.11 grammar cannot parse; source stays 3.11-compatible (ruff UP).
 python_version = "3.12"
 mypy_path = "src:clients"
-packages = ["voco"]
+packages = ["voco", "voco_cli", "voco_mcp"]
 ignore_missing_imports = true
 warn_unused_ignores = true
 warn_redundant_casts = true

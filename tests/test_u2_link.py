@@ -306,6 +306,9 @@ async def test_artifact_route_injects_shim_and_sandboxes():
         def _check_browser_mutation(self, request):
             pass
 
+        def _check_auth(self, request):
+            pass
+
     class FakeReq:
         def __init__(self, pid):
             self.match_info = {"page_id": pid}
@@ -346,7 +349,11 @@ def test_acquire_waits_out_a_releasing_holder(tmp_path):
 
     # A LIVE foreign holder: the parent process (alive, not us).
     lock = tmp_path / "daemon.lock"
-    lock.write_text(json.dumps({"pid": os.getppid(), "start": None}))
+    from voco.adapters.manifest import _proc_start
+
+    lock.write_text(
+        json.dumps({"pid": os.getppid(), "start": _proc_start(os.getppid())})
+    )
     b = WorkspaceManifest(tmp_path)
     with pytest.raises(WorkspaceLockError):
         b.acquire()  # no wait: the live holder wins immediately
@@ -603,6 +610,7 @@ async def test_workspace_link_detect_rekeys_on_branch_change(daemon, tmp_path):
     # xai WARNING 4: the detect cache is branch-keyed — a branch switch
     # re-asks gh instead of trusting a stale answer.
     key = await opened_key(daemon, tmp_path)
+    initial_branch = daemon.workspaces.get(key).branch
     calls = []
     daemon._ghlink_detect = lambda root, branch: (calls.append(branch), None)[1]
     await daemon._control("workspace.link", {"workspace": key, "detect": True})
@@ -611,7 +619,7 @@ async def test_workspace_link_detect_rekeys_on_branch_change(daemon, tmp_path):
     ws = daemon.workspaces.get(key)
     ws.branch = "feature-x"
     await daemon._control("workspace.link", {"workspace": key, "detect": True})
-    assert calls == ["main", "feature-x"]
+    assert calls == [initial_branch, "feature-x"]
 
 
 async def test_workspace_link_detect_stamps_provenance(daemon, tmp_path):
@@ -736,3 +744,9 @@ async def test_attach_snippet_names_the_daemon(daemon):
     assert out["mcp"]["mcpServers"]["voco"]["command"] == "voco-mcp"
     assert out["mcp"]["mcpServers"]["voco"]["env"]["VOCO_URL"] == out["url"]
     assert "RemoteForward" in out["remote"]
+
+
+async def test_attach_snippet_includes_configured_bearer_token():
+    d = Daemon({"bridge": {"token": "sekrit"}}, no_audio=True)
+    out = await d._control("attach.snippet", {})
+    assert out["mcp"]["mcpServers"]["voco"]["env"]["VOCO_TOKEN"] == "sekrit"

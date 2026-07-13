@@ -22,10 +22,32 @@ import os
 import sys
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 
 def safe_key(key: str) -> str:
-    return key.replace("/", "%2F").replace(":", "%3A")
+    """Encode an arbitrary workspace key as one injective path segment.
+
+    urllib's percent encoder also escapes a literal ``%`` and Windows
+    backslashes. For ordinary ``host:/path`` keys it preserves the legacy
+    directory spelling, so existing manifests continue to load in place.
+    """
+    return quote(key, safe="")
+
+
+def _sync_dir(path: Path) -> None:
+    """Best-effort directory fsync after replace (POSIX durability edge)."""
+    if os.name != "posix":
+        return
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def _proc_start(pid: int) -> str | None:
@@ -161,7 +183,15 @@ class WorkspaceManifest:
     # ---- per-workspace manifests --------------------------------------------
 
     def _path(self, key: str) -> Path:
-        return self._ws_dir / safe_key(key) / "manifest.json"
+        directory = self._ws_dir / safe_key(key)
+        # Defense in depth against a hostile/pre-existing symlink even if a
+        # future safe_key implementation regresses path-segment confinement.
+        root = self._ws_dir.resolve()
+        try:
+            directory.resolve().relative_to(root)
+        except ValueError as e:
+            raise ValueError("workspace manifest path escaped data dir") from e
+        return directory / "manifest.json"
 
     def save(self, key: str, data: dict) -> None:
         path = self._path(key)
@@ -174,14 +204,19 @@ class WorkspaceManifest:
                 fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
                 with os.fdopen(fd, "w", encoding="utf-8") as fh:
                     json.dump(data, fh, separators=(",", ":"))
+                    fh.flush()
+                    os.fsync(fh.fileno())
             else:
                 # Windows: mode bits don't map; plain create (ACLs apply).
                 with open(tmp, "w", encoding="utf-8") as fh:
                     json.dump(data, fh, separators=(",", ":"))
+                    fh.flush()
+                    os.fsync(fh.fileno())
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
         tmp.replace(path)
+        _sync_dir(path.parent)
 
     def load_all(self) -> tuple[list[dict], list[str]]:
         """Return (manifests, errors). Missing dir → empty, fresh boot."""
@@ -196,5 +231,15 @@ class WorkspaceManifest:
             try:
                 out.append(json.loads(mpath.read_text(encoding="utf-8")))
             except (json.JSONDecodeError, OSError) as e:
-                errors.append(f"{mpath.name} unreadable ({e})")
+                corrupt = sub / f"manifest.corrupt-{time.time_ns()}.json"
+                moved = False
+                try:
+                    mpath.replace(corrupt)
+                    moved = True
+                except OSError:
+                    pass
+                detail = f"workspace {sub.name} manifest unreadable ({e})"
+                if moved:
+                    detail += f"; moved to {corrupt.name}"
+                errors.append(detail)
         return out, errors

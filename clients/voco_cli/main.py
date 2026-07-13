@@ -578,11 +578,10 @@ def cmd_watch(client: Client) -> int:
 
 
 def cmd_attach(args, client: Client) -> int:
-    mcp = {
-        "mcpServers": {
-            "voco": {"command": "voco-mcp", "env": {"VOCO_URL": client.base_url}}
-        }
-    }
+    env = {"VOCO_URL": client.base_url}
+    if client.token:
+        env["VOCO_TOKEN"] = client.token
+    mcp = {"mcpServers": {"voco": {"command": "voco-mcp", "env": env}}}
     print("# MCP config (Claude Code: .mcp.json / Codex: config.toml equivalent):")
     print(json.dumps(mcp, indent=2))
     print('\n# CLI fallback: agents call `voco say "..."` and `voco listen`.')

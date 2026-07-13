@@ -12,7 +12,7 @@ findings, chat, and live terminals. Design: [SPEC.md](SPEC.md) +
 ## Quickstart
 
 ```sh
-uv sync --extra stt --extra ptt --extra dev
+uv sync --extra stt --extra ptt --extra mcp --extra dev
 
 # 1. Probe your providers first (downloads the silero VAD model):
 uv run python scripts/providers_smoke.py --config configs/mac-m1.toml

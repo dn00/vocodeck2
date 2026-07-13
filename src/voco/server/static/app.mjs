@@ -133,17 +133,30 @@ function openPickerFor(ws) {
     } });
 }
 
-// ---- content cache (page_id -> {rev, content}) ------------------------------
+// ---- content cache (page_id -> {version, content}) --------------------------
 const contentCache = new Map();
-async function fetchContent(pageId, rev) {
-  const hit = contentCache.get(pageId);
-  if (hit && hit.rev === rev) return hit.content;
-  const resp = await fetch(`/v1/page/${pageId}`, {
+async function fetchContent(page) {
+  // updated_ts covers legitimate same-rev refreshes while rev remains the
+  // durable review revision. Snapshot epoch prevents page-id reuse after a
+  // daemon restart from reviving content from the previous process.
+  const version = `${store.snapshotEpoch}:${page.rev}:${page.updated_ts || 0}`;
+  // Path-backed docs are intentionally read fresh by the server. The client
+  // cannot distinguish them from virtual docs from metadata alone, so all
+  // docs use read-through behavior (small cost, correct contract).
+  const cacheable = page.type !== "doc";
+  const hit = contentCache.get(page.page_id);
+  if (cacheable && hit && hit.version === version) return hit.content;
+  const resp = await fetch(`/v1/page/${page.page_id}`, {
     headers: { "x-voco-wb": (window.__VOCO__ || {}).wb || "" },
   });
-  if (!resp.ok) throw new Error(`page ${pageId}: ${resp.status}`);
+  if (!resp.ok) throw new Error(`page ${page.page_id}: ${resp.status}`);
   const body = await resp.json();
-  contentCache.set(pageId, { rev, content: body.content });
+  if (cacheable) {
+    contentCache.delete(page.page_id); // refresh insertion order (tiny LRU)
+    contentCache.set(page.page_id, { version, content: body.content });
+    if (contentCache.size > 128)
+      contentCache.delete(contentCache.keys().next().value);
+  }
   return body.content;
 }
 
@@ -578,7 +591,8 @@ function workFingerprint() {
     store.connected ? 1 : 0];
   // the tab strip shows EVERY open page — new/republished/closed pages
   // must rebuild the canvas even when the selected page didn't change
-  parts.push(pages.map((p) => p.page_id + ":" + p.rev).join(","));
+  parts.push(pages.map((p) =>
+    p.page_id + ":" + p.rev + ":" + (p.updated_ts || 0)).join(","));
   if (store.selectedPage === "__files__" && ws) {
     // the file browser is client-local state — agent churn must not
     // rebuild it (the filter box would lose focus mid-typing)
@@ -586,12 +600,12 @@ function workFingerprint() {
     return parts.join("|");
   }
   if (page) {
-    parts.push(page.rev, page.title);
+    parts.push(page.rev, page.updated_ts || 0, page.title);
     // findings shape the diff's marks/chips — only THIS page's matter
     if (page.type === "diff")
       parts.push(store.findingsFor(ws ? ws.key : "")
         .filter((f) => f.page_id === page.page_id)
-        .map((f) => f.finding_id + f.status).join(","));
+        .map((f) => f.finding_id + f.status + ":" + f.rev).join(","));
     if (page.type === "screen" && agent)
       parts.push((agent.screen_markdown || "").length);
   } else if (agent) {
@@ -1113,7 +1127,7 @@ async function renderPage(view, page, srnote, actions) {
   if (page.type === "html") {
     view.textContent = "…";
     try {
-      const c = await fetchContent(page.page_id, page.rev);
+      const c = await fetchContent(page);
       if (stale()) return;
       let reveal = null;
       if (pendingReveal && pendingReveal.pageId === page.page_id
@@ -1135,7 +1149,7 @@ async function renderPage(view, page, srnote, actions) {
   if (page.type === "screen" || page.type === "doc") {
     view.textContent = "…";
     try {
-      const c = await fetchContent(page.page_id, page.rev);
+      const c = await fetchContent(page);
       if (stale()) return;
       // M4 FIX: every markdown-rendered page is an annotation surface —
       // agent-pushed SCREENS included. Screens used to render through
@@ -1163,7 +1177,7 @@ async function renderPage(view, page, srnote, actions) {
   if (page.type === "diff") {
     view.textContent = "…";
     try {
-      const c = await fetchContent(page.page_id, page.rev);
+      const c = await fetchContent(page);
       if (stale()) return;
       const findings = store.findingsFor(store.selectedWorkspace || "")
         .filter((f) => f.page_id === page.page_id && f.status !== "withdrawn");
@@ -1244,7 +1258,7 @@ async function renderPage(view, page, srnote, actions) {
   }
   if (page.type === "terminal") {
     try {
-      const c = await fetchContent(page.page_id, page.rev);
+      const c = await fetchContent(page);
       // Head actions (mockup): mode truth + kill for daemon-spawned ones.
       if (actions) {
         const mode = (c && c.mode) || "mirror";
@@ -1474,6 +1488,8 @@ function renderDock() {
   const kindCls = { concern: "k-c", question: "k-q", nit: "k-n" };
   for (const f of findings) {
     const done = f.status !== "open";
+    const findingPage = ws && ws.pages.find((p) => p.page_id === f.page_id);
+    const staleFinding = !!findingPage && f.rev !== findingPage.rev;
     const textBox = h("div", { class: "ftext" }, f.text || "");
     const item = h("div", { class: "fitem" + (done ? " done" : ""),
       onclick: (e) => {
@@ -1485,6 +1501,10 @@ function renderDock() {
       h("div", { class: "fh" },
         h("span", { class: kindCls[f.kind] || "k-n" }, f.kind),
         f.blocking ? h("span", { class: "blk" }, "⚑ blocking") : "",
+        staleFinding ? h("span", {
+          class: "fstate stale",
+          title: `annotation is from r${f.rev}; page is now r${findingPage.rev}`,
+        }, `stale r${f.rev}→r${findingPage.rev}`) : "",
         done ? h("span", { class: "fstate s-" + f.status }, f.status) : "",
         h("span", { class: "fops" }, ...(f.status === "open" ? [
           h("span", { title: "edit",
@@ -1634,24 +1654,18 @@ async function exportReview() {
 // Fetch full findings + asks when work is selected (the snapshot
 // carries counts only).
 async function loadFindings(wsKey) {
-  if (!wsKey || store.findings.has(wsKey)) return;
+  if (!wsKey || store.loadedFindingWorkspaces.has(wsKey)) return;
   try {
     const r = await bus.command("finding.list", { workspace: wsKey });
-    const m = new Map();
-    for (const f of r.findings || []) m.set(f.finding_id, f);
-    store.findings.set(wsKey, m);
-    store._notify("findings");
+    store.setFindingSnapshot(wsKey, r.findings || []);
   } catch (e) { /* not connected yet; a later event fills it */ }
 }
 
 async function loadAsks(wsKey) {
-  if (!wsKey || store.asks.has(wsKey)) return;
+  if (!wsKey || store.loadedAskWorkspaces.has(wsKey)) return;
   try {
     const r = await bus.command("ask.list", { workspace: wsKey });
-    const m = new Map();
-    for (const a of r.asks || []) m.set(a.ask_id, a);
-    store.asks.set(wsKey, m);
-    store._notify("asks");
+    store.setAskSnapshot(wsKey, r.asks || []);
   } catch (e) { /* not connected yet; a later event fills it */ }
 }
 

@@ -162,6 +162,7 @@ class Daemon:
                 )
             )
         )
+        self._state_locked = False
         self._state_save_task: asyncio.Task[None] | None = None
         self._watcher_task: asyncio.Task[None] | None = None
         # Workbench manifests (SPEC-WORKBENCH §8): durable pages + findings.
@@ -558,7 +559,7 @@ class Daemon:
             text = str(payload.get("text", "")).strip()
             if not text:
                 raise ValueError("text required")
-            asyncio.get_running_loop().create_task(self._route_and_dispatch(text))
+            await self._route_and_dispatch(text)
             return {}
         if cmd == "session.spawn":
             harness = str(payload.get("harness", "")).strip()
@@ -937,13 +938,13 @@ class Daemon:
         story for the connect modal — MCP config + CLI fallback + ssh
         remote hint. Read-only; mirrors the CLI's attach-cmd output."""
         url = f"http://127.0.0.1:{self._port}"
+        env = {"VOCO_URL": url}
+        token = self.cfg.get("bridge", {}).get("token")
+        if token:
+            env["VOCO_TOKEN"] = str(token)
         return {
             "url": url,
-            "mcp": {
-                "mcpServers": {
-                    "voco": {"command": "voco-mcp", "env": {"VOCO_URL": url}}
-                }
-            },
+            "mcp": {"mcpServers": {"voco": {"command": "voco-mcp", "env": env}}},
             "cli": 'fallback: agents run `voco say "..."` and `voco listen`',
             "remote": (
                 f"~/.ssh/config on the agent host: RemoteForward {self._port} "
@@ -1071,12 +1072,22 @@ class Daemon:
         "session.activated",
         "session.state",
         "input.queued",
+        "input.drained",
         "agent.say",
         "screen.updated",
         "digest.updated",
     }
 
     def _restore_state(self) -> None:
+        try:
+            self._state.acquire(wait_s=6.0)
+            self._state_locked = True
+        except Exception as e:
+            self.bus.emit(
+                "daemon.error",
+                {"error": f"state lock: {e} — session persistence off"},
+            )
+            return
         data, err = self._state.load()
         if err:
             self.bus.emit("daemon.error", {"error": f"state: {err}"})
@@ -1309,6 +1320,8 @@ class Daemon:
     def _schedule_state_save(self) -> None:
         """Debounced: one pending save absorbs every change in its window
         (dump happens after the sleep, on the loop — always consistent)."""
+        if not self._state_locked:
+            return
         if self._state_save_task is not None and not self._state_save_task.done():
             return
 
@@ -1590,10 +1603,14 @@ class Daemon:
                 await self._floor.stop()  # the floor dies with its daemon
             if self.voice is not None:
                 self.voice.stop()
-            try:
-                self._state.save(self.registry.dump())  # final synchronous save
-            except Exception as e:
-                log.error("state save failed: %s", e)
+            if self._state_locked:
+                try:
+                    self._state.save(self.registry.dump())  # final synchronous save
+                except Exception as e:
+                    log.error("state save failed: %s", e)
+                finally:
+                    self._state.release()
+                    self._state_locked = False
             if self._pty is not None:
                 # v1: pty terminals die with the daemon (§5, honest).
                 self._pty.shutdown()

@@ -313,6 +313,7 @@ svg.ic { width: 14px; height: 14px; flex: none; display: block; }
 .fstate { font-size: 9.5px; color: var(--ink3); letter-spacing: .06em; }
 .fstate.s-addressed { color: var(--ok); }
 .fstate.s-disputed { color: var(--voice); }
+.fstate.stale { color: var(--voice); }
 .ftext { margin-top: 4px; font: 12px/1.5 var(--sans); color: var(--ink); }
 .floc { margin-top: 4px; font: 10.5px var(--mono); color: var(--ink3); }
 .fitem.done .ftext { text-decoration: line-through; color: var(--ink3); }

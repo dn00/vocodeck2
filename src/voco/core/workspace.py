@@ -13,9 +13,8 @@ INVARIANTS:
   hosts may share a path string (workbench decision log 20, extended).
 - A session with no repo lands in a SESSIONSPACE keyed by (host, cwd) —
   agent-scoped pages only, no review surfaces.
-- Page identity within a workspace is `(type, ref)`; re-push bumps rev
-  (screen `show` bumps, `append` grows the same rev). Closing hides,
-  never deletes.
+- Page identity within a workspace is `(type, ref)`; semantic content changes
+  bump rev. Closing hides, never deletes.
 - Rev history is never rewritten; findings staleness (W1) rides revs.
 """
 
@@ -462,8 +461,7 @@ class WorkspaceStore:
         mode: str,
     ) -> Page:
         """The screen verb as a pinned agent page (SPEC-WORKBENCH §3.2).
-        `show` replaces content and bumps rev; `append` grows the current
-        rev — mirrors registry.set_screen semantics exactly."""
+        Both `show` and `append` change reviewable content and bump rev."""
         ws = self.resolve(identity)
         ref = f"screen:{call_name}"
         page = ws.page_by_ref("screen", ref)
@@ -487,7 +485,7 @@ class WorkspaceStore:
             page.data["markdown"] = markdown
             page.data["screen_title"] = title
             page.title = title or page.title
-            page.rev += 1
+        page.rev += 1
         page.updated_ts = self._now()
         self._emit_page(ws, page, "updated")
         return page
@@ -604,8 +602,9 @@ class WorkspaceStore:
         """A session's terminal page (SPEC-WORKBENCH §5, W4): agent-scoped,
         pinned, one per agent (`term:<call_name>`). `mode` is cell-driven:
         "stream" (pty — live xterm over /v1/term) or "mirror" (tmux —
-        read-only capture polling). Re-registration refreshes, no rev bump
-        (the terminal itself is the content)."""
+        read-only capture polling). Re-registration bumps rev when the
+        backing session or terminal descriptor changes so browser caches
+        cannot retain a dead session."""
         if mode not in ("stream", "mirror"):
             raise ValueError(f"bad terminal mode: {mode}")
         ws = self.resolve(identity)
@@ -625,8 +624,12 @@ class WorkspaceStore:
                 data=data,
             )
             return self._mint_page(ws, page)
+        changed = page.session_id != session_id or page.data != data
+        if not changed:
+            return page
         page.session_id = session_id
         page.data = data
+        page.rev += 1
         page.updated_ts = self._now()
         self._emit_page(ws, page, "updated")
         return page
@@ -667,6 +670,31 @@ class WorkspaceStore:
                 data=data,
             )
             return self._mint_page(ws, page)
+        old_files = page.data.get("files") or []
+        old_key = page.data.get("diff_key")
+        same_content = (
+            diff_key == old_key
+            if diff_key is not None and old_key is not None
+            else files == old_files
+        )
+        if same_content:
+            # Live-git polling and agent retries commonly republish the same
+            # diff. Treat that as a true no-op: otherwise every poll makes
+            # valid findings appear stale despite no reviewable change.
+            metadata_changed = (
+                page.title != title
+                or page.closed
+                or page.data.get("source") != source
+                or old_key != diff_key
+            )
+            page.title = title
+            page.closed = False
+            page.data["source"] = source
+            page.data["diff_key"] = diff_key
+            if metadata_changed:
+                page.updated_ts = self._now()
+                self._emit_page(ws, page, "updated")
+            return page
         data["interdiff"] = compute_interdiff(
             page.data.get("files") or [], files, page.rev
         )
@@ -964,7 +992,11 @@ class WorkspaceStore:
             for fraw in data.get("findings", []):
                 f = Finding(
                     finding_id=str(fraw["finding_id"]),
-                    page_id=str(fraw["page_id"]),
+                    page_id=(
+                        str(fraw["page_id"])
+                        if fraw.get("page_id") is not None
+                        else None
+                    ),
                     rev=int(fraw.get("rev", 1)),
                     anchor=dict(fraw.get("anchor", {})),
                     text=str(fraw.get("text", "")),

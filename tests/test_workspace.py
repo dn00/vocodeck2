@@ -89,7 +89,7 @@ def test_remote_same_path_does_not_collide():
     assert a is not b
 
 
-def test_screen_upsert_show_bumps_rev_append_grows():
+def test_screen_upsert_show_and_append_bump_rev():
     store, events = store_and_events()
     page = store.upsert_screen(
         LOCAL,
@@ -110,7 +110,7 @@ def test_screen_upsert_show_bumps_rev_append_grows():
         title=None,
         mode="append",
     )
-    assert page.rev == 1  # append grows the same rev
+    assert page.rev == 2
     assert page.data["markdown"] == "# plan\nmore"
 
     store.upsert_screen(
@@ -121,12 +121,37 @@ def test_screen_upsert_show_bumps_rev_append_grows():
         title="Fresh",
         mode="show",
     )
-    assert page.rev == 2
+    assert page.rev == 3
     assert page.session_id == "s2"
     assert page.data["markdown"] == "fresh"
 
     actions = [p["action"] for t, p in events if t == "page.updated"]
     assert actions == ["added", "updated", "updated"]
+
+
+def test_terminal_reattach_bumps_rev_for_browser_cache():
+    store, _ = store_and_events()
+    page = store.upsert_terminal(
+        LOCAL, session_id="s1", call_name="Helena", mode="mirror", handle="old"
+    )
+    assert page.rev == 1
+    store.upsert_terminal(
+        LOCAL, session_id="s2", call_name="Helena", mode="stream", handle="new"
+    )
+    assert page.rev == 2
+    assert page.session_id == "s2" and page.data["handle"] == "new"
+
+
+def test_identical_terminal_registration_is_a_noop():
+    store, events = store_and_events()
+    page = store.upsert_terminal(
+        LOCAL, session_id="s1", call_name="Helena", mode="mirror", handle="term"
+    )
+    events.clear()
+    store.upsert_terminal(
+        LOCAL, session_id="s1", call_name="Helena", mode="mirror", handle="term"
+    )
+    assert page.rev == 1 and events == []
 
 
 def test_doc_push_path_xor_content_and_rev_bump():

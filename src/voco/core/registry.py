@@ -402,7 +402,10 @@ class Registry:
             "queued": self._queued_payload(s.queued) + self.review_items(s.session_id),
         }
         if s.parked and self.try_deliver(s.session_id, payload):
+            had_queued = bool(s.queued)
             s.queued.clear()
+            if had_queued:
+                self._emit("input.drained", {"session_id": s.session_id, "queued": 0})
             s.parked = False
             s.outstanding_turn_id = turn_id
             s.input_log.append(
@@ -423,6 +426,7 @@ class Registry:
                 "turn_id": turn_id,
                 "text": text,
                 "origin": origin,
+                "queued": len(s.queued),
             },
         )
         return "queued_idle" if was_idle else "queued"
@@ -469,17 +473,22 @@ class Registry:
         s.reviewing = False  # ...and the review turn
         review = self.review_items(session_id)
         if s.queued:
-            first, rest = s.queued[0], s.queued[1:]
+            # The CLI renders backlog entries first and the main transcript
+            # last. Make the newest command the current instruction so a
+            # burst A, B, C reaches the agent in chronological order with C
+            # carrying the turn id (rather than the old A, C, B ordering).
+            current, backlog = s.queued[-1], s.queued[:-1]
             payload = {
                 "status": "transcript",
-                "turn_id": first.turn_id,
-                "text": first.text,
-                "origin": first.origin,
-                "age_s": max(0, round(self._now() - first.ts)),
-                "queued": self._queued_payload(rest) + review,
+                "turn_id": current.turn_id,
+                "text": current.text,
+                "origin": current.origin,
+                "age_s": max(0, round(self._now() - current.ts)),
+                "queued": self._queued_payload(backlog) + review,
             }
             s.queued.clear()
-            s.outstanding_turn_id = first.turn_id
+            self._emit("input.drained", {"session_id": s.session_id, "queued": 0})
+            s.outstanding_turn_id = current.turn_id
             return payload
         if review:
             s.reviewing = True
