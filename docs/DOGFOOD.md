@@ -5,9 +5,6 @@
 - **DF-4: Stale/idle session not selectable and not auto-cleaned.**
   The "Dana" session shows as idle in the workbench and cannot be selected (mic cannot be passed to it). Stale sessions from split identity (DF-3) should either be auto-cleaned after a timeout or have a manual dismiss/remove option in the UI.
 
-- **DF-6: Separate workspace registration from agent registration.**
-  Currently every interaction (page_push, voice_init, listen) spawns an agent session. This creates phantom agents for repos you're just reviewing. Proposed split: `voco workspace add <path>` registers a repo/worktree as a review surface (diffs, files, pages) with no agent. `voice_init` / `voco listen` registers a live agent inside an already-known workspace. The rail groups by workspace; agents appear as dots inside their workspace. A workspace with no agent is the normal review-only state. This is architectural — it would also resolve DF-3 and DF-4 at the root.
-
 - **DF-7: Diff base defaults to full branch divergence instead of merge-base.**
   `page diff --branch staging` showed 1.7k files (full divergence) instead of just the PR's changes. Default should be merge-base diff. The UI should also let you select a different base.
 
@@ -18,6 +15,11 @@
   Sessions with no active listener (Dana, Silas) show as "idle", implying they're alive and waiting. In reality they're dead processes that will never drain queued messages. Text sent to them queues silently with no feedback. Needs: (a) a "disconnected" status (no listener heartbeat for N seconds) distinct from "idle" (listener parked, waiting for input), (b) auto-reap after a longer timeout, (c) the UI should warn or block sending to a disconnected session. Related to DF-3/DF-4/DF-6.
 
 ## Fixed
+
+- **DF-6: Separate workspace registration from agent registration.** Added
+  `voco workspace add <path>` and a session-free workspace registration path.
+  CLI/MCP `page_push` now publishes directly to a workspace and no longer
+  creates a voice agent. `voice_init` and listening remain the agent boundary.
 
 - **DF-3: Multiple sessions spawned instead of one; identity keeps changing.**
   `voice_init` now bakes the MCP server's resolved instance, harness, and cwd

@@ -103,3 +103,4 @@ Payload shapes are stable per type; see SPEC §10 for semantics.
 - `workspace.list`
 - `workspace.live`
 - `workspace.open`
+- `workspace.register`

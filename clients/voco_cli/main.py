@@ -408,14 +408,25 @@ class Client:
         )
 
     def page_push(self, body: dict) -> dict:
-        """Push a doc or diff page to this session's workspace (§3.2)."""
-        return self._with_session(
-            lambda sid: self._request(
-                "POST",
-                "/v1/bridge/page",
-                {**body, "session_id": sid, "identity": self._identity},
-                timeout=35,
-            )
+        """Push a doc or diff page without registering an agent session."""
+        identity = derive_identity()
+        self._identity = identity
+        registered = self._request(
+            "POST",
+            "/v1/control/workspace.register",
+            {"identity": identity},
+            timeout=10,
+        )
+        return self._request(
+            "POST",
+            "/v1/control/page.publish",
+            {**body, "workspace": registered["workspace"]},
+            timeout=35,
+        )
+
+    def workspace_add(self, path: str) -> dict:
+        return self._request(
+            "POST", "/v1/control/workspace.open", {"path": path}, timeout=15
         )
 
     def page_close(self, page_id: str) -> dict:
@@ -706,6 +717,10 @@ def main() -> None:
     pg_diff.add_argument("--file", default=None, help="a unified-diff file")
     pg_close = psub.add_parser("close", help="close a non-pinned page")
     pg_close.add_argument("page_id")
+    p_workspace = sub.add_parser("workspace", help="manage review workspaces")
+    wsub = p_workspace.add_subparsers(dest="wcmd", required=True)
+    w_add = wsub.add_parser("add", help="add a checkout without an agent")
+    w_add.add_argument("path")
     sub.add_parser("watch")
     p_input = sub.add_parser("input")  # typed input path (say_as_user)
     p_input.add_argument("text")
@@ -834,6 +849,15 @@ def main() -> None:
                 render=lambda r: print(r.get("text", ""), end=""),
             )
         )
+    elif args.cmd == "workspace":
+        if args.wcmd == "add":
+            try:
+                result = client.workspace_add(args.path)
+                print(f"workspace {result['workspace']} → {result['root']}")
+                sys.exit(0)
+            except Exception as e:
+                print(f"error: {_http_error(e)}", file=sys.stderr)
+                sys.exit(1)
     elif args.cmd == "review":
         sys.exit(cmd_review(args, client))
     elif args.cmd == "page":

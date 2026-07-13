@@ -196,6 +196,24 @@ async def test_workspace_open_mints_a_workspace(daemon, tmp_path):
     assert ws is not None and ws.kind == "workspace"
 
 
+async def test_workspace_register_mints_no_agent_session(daemon, tmp_path):
+    repo = make_repo(tmp_path)
+    result = await daemon._control(
+        "workspace.register",
+        {
+            "identity": {
+                "host": "remote-box",
+                "cwd": str(repo),
+                "worktree": str(repo),
+                "repo": "proj",
+                "branch": "feature",
+            }
+        },
+    )
+    assert result["workspace"] == f"remote-box:{repo}"
+    assert daemon.registry.all() == []
+
+
 async def test_workspace_open_rejects_non_checkouts(daemon, tmp_path):
     bare = tmp_path / "plain"
     bare.mkdir()
@@ -226,6 +244,23 @@ async def test_page_publish_resolves_and_upserts(daemon, tmp_path):
     assert again["page_id"] == result["page_id"] and again["rev"] == 1
 
 
+async def test_page_publish_doc_without_agent(daemon, tmp_path):
+    repo = make_repo(tmp_path)
+    opened = await daemon._control("workspace.open", {"path": str(repo)})
+    result = await daemon._control(
+        "page.publish",
+        {
+            "workspace": opened["workspace"],
+            "type": "doc",
+            "name": "Plan",
+            "content": "# plan",
+        },
+    )
+    page = daemon.workspaces.page(result["page_id"])
+    assert page is not None and page.data["content"] == "# plan"
+    assert daemon.registry.all() == []
+
+
 async def test_page_publish_errors_carry_context(daemon, tmp_path):
     with pytest.raises(ValueError, match="unknown workspace"):
         await daemon._control(
@@ -250,7 +285,12 @@ async def test_page_publish_errors_carry_context(daemon, tmp_path):
 
 
 def test_new_commands_are_legal_envelopes():
-    for cmd in ("workspace.open", "page.publish", "session.transcript"):
+    for cmd in (
+        "workspace.open",
+        "workspace.register",
+        "page.publish",
+        "session.transcript",
+    ):
         env = validate_envelope({"cmd": cmd, "payload": {}})
         assert env.type == cmd
 

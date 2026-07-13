@@ -4,6 +4,8 @@ the HTTP routes themselves are covered in test_workbench_http.py)."""
 
 from __future__ import annotations
 
+import pytest
+
 from voco_cli.main import format_review, format_review_item, format_transcript
 from voco_mcp.main import _page_close, _page_push, _review_findings, _review_reply
 
@@ -203,22 +205,38 @@ def test_session_refreshes_identity_snapshot(monkeypatch, tmp_path):
 
 
 def test_workspace_verbs_carry_current_identity(monkeypatch):
-    from voco_cli.main import Client
+    from voco_cli import main as cli
 
-    c = Client()
-    c._identity = {"host": "h", "cwd": "/now", "harness": "x"}
+    identity = {"host": "h", "cwd": "/now", "harness": "x"}
+    monkeypatch.setattr(cli, "derive_identity", lambda: dict(identity))
+    c = cli.Client()
     sent: list[tuple] = []
 
     def fake_request(method, path, body=None, timeout=55.0):
         sent.append((path, body))
+        if path.endswith("workspace.register"):
+            return {"workspace": "h:/now"}
         return {}
 
     monkeypatch.setattr(c, "_request", fake_request)
-    monkeypatch.setattr(c, "session", lambda: {"session_id": "s1"})
+    monkeypatch.setattr(
+        c,
+        "session",
+        lambda: pytest.fail("page_push must not register an agent session"),
+    )
     c.page_push({"type": "doc", "path": "/x"})
+    assert sent[0] == (
+        "/v1/control/workspace.register",
+        {"identity": identity},
+    )
+    assert sent[1] == (
+        "/v1/control/page.publish",
+        {"type": "doc", "path": "/x", "workspace": "h:/now"},
+    )
+    monkeypatch.setattr(c, "session", lambda: {"session_id": "s1"})
     c.finding_status("f-1", "addressed")
     c.reply("a-1", "done")
-    for _path, body in sent:
+    for _path, body in sent[2:]:
         assert body["identity"]["cwd"] == "/now"
     c.findings()  # a GET: identity rides the query string instead
     get_path, get_body = sent[-1]

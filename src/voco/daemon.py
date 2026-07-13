@@ -722,6 +722,8 @@ class Daemon:
             return {"workspace": key, "live": live}
         if cmd == "workspace.open":
             return await self._workspace_open(payload)
+        if cmd == "workspace.register":
+            return self._workspace_register(payload)
         if cmd == "page.publish":
             return await self._page_publish(payload)
         if cmd == "workspace.link":
@@ -808,6 +810,23 @@ class Daemon:
             "branch": ws.branch,
         }
 
+    def _workspace_register(self, payload: dict) -> dict:
+        """Register derived workspace facts without creating an agent session."""
+        identity = payload.get("identity")
+        if not isinstance(identity, dict):
+            raise ValueError("identity required")
+        if not identity.get("host") or not (
+            identity.get("worktree") or identity.get("cwd")
+        ):
+            raise ValueError("identity needs host and cwd/worktree")
+        ws = self.workspaces.resolve(identity)
+        return {
+            "workspace": ws.key,
+            "root": ws.root,
+            "repo": ws.repo,
+            "branch": ws.branch,
+        }
+
     async def _page_publish(self, payload: dict) -> dict:
         """DESIGN-DECK U0: human-initiated diff publish — the §3.2
         sentence ('works with no agent attached') as a real command. Same
@@ -823,6 +842,45 @@ class Daemon:
             raise ValueError(f"unknown workspace: {key}")
         if ws.kind == "sessionspace":
             raise ValueError(f"{key} has no checkout; review needs a workspace")
+        type_ = payload.get("type") or ("diff" if "source" in payload else None)
+        if type_ == "doc":
+            from voco.core.limits import utf8_size
+            from voco.server.workbench import MAX_DOC_BYTES, confined_read
+
+            path = payload.get("path")
+            content = payload.get("content")
+            if path:
+                import socket as _socket
+
+                if ws.host != _socket.gethostname().split(".")[0]:
+                    raise ValueError(
+                        "remote workspace: push doc content instead of path"
+                    )
+                doc_path = (
+                    str(Path(ws.root, str(path)).resolve())
+                    if not Path(str(path)).is_absolute()
+                    else str(path)
+                )
+                confined_read(ws.root, doc_path)
+                page = self.workspaces.push_doc(
+                    ws, name=payload.get("name"), path=doc_path
+                )
+            else:
+                text = None if content is None else str(content)
+                if text is not None and utf8_size(text) > MAX_DOC_BYTES:
+                    raise ValueError(f"doc too large ({utf8_size(text)} bytes)")
+                page = self.workspaces.push_doc(
+                    ws, name=payload.get("name"), content=text
+                )
+            return {
+                "ok": True,
+                "page_id": page.page_id,
+                "rev": page.rev,
+                "workspace": ws.key,
+                "root": ws.root,
+            }
+        if type_ != "diff":
+            raise ValueError("type must be doc|diff")
         source = payload.get("source")
         if not isinstance(source, dict) or not (
             {"pr", "branch", "staged", "worktree"} & source.keys()

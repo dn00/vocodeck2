@@ -94,6 +94,7 @@ COMMAND_TYPES = {
     "workspace.live",
     # DESIGN-DECK U0: agentless review + the transcript read path.
     "workspace.open",
+    "workspace.register",
     "page.publish",
     "session.transcript",
     # DESIGN-DECK rev 5 (U2a): GitHub links + the connect modal's snippet.
