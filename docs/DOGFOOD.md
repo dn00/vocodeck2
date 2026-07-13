@@ -2,10 +2,13 @@
 
 ## Open
 
-- **DF-7: Diff base defaults to full branch divergence instead of merge-base.**
-  `page diff --branch staging` showed 1.7k files (full divergence) instead of just the PR's changes. Default should be merge-base diff. The UI should also let you select a different base.
-
 ## Fixed
+
+- **DF-7: Diff base defaults to full branch divergence instead of merge-base.**
+  Branch reviews now encode the intended Git operation directly as
+  `BASE...HEAD`, with a regression test for the exact argv. The review picker
+  already exposes an alternate base. Session-free publication also guarantees
+  the diff resolves in the selected workspace rather than a phantom agent root.
 
 - **DF-9: Rail nav double-selects across workspaces; page doesn't switch.**
   Overview, Files, and page rows now scope selection styling to their workspace

@@ -136,6 +136,22 @@ def test_worktree_source_includes_tracked_and_untracked():
     assert source_ref({"worktree": True}) == "worktree:True"
 
 
+def test_branch_source_uses_explicit_merge_base_diff():
+    from voco.adapters.diffsource import DiffResolver
+
+    calls: list[list[str]] = []
+
+    def run(argv, cwd):
+        calls.append(argv)
+        if argv == ["git", "diff", "staging...HEAD", "--"]:
+            return RunResult(0, "diff --git a/only-feature.py b/only-feature.py\n", "")
+        raise AssertionError(f"unexpected argv {argv}")
+
+    out = DiffResolver(runner=run).resolve({"branch": "staging"}, "/repo")
+    assert "only-feature.py" in out
+    assert calls == [["git", "diff", "staging...HEAD", "--"]]
+
+
 def test_falsy_staged_and_worktree_do_not_resolve():
     from voco.adapters.diffsource import DiffResolveError, DiffResolver, source_ref
 

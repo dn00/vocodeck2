@@ -133,10 +133,11 @@ class DiffResolver:
             base = source.get("branch") or self.default_branch(root)
             if not valid_ref(base):
                 raise DiffResolveError(f"invalid base ref: {base!r}")
-            merge_base = self._git(["merge-base", "HEAD", "--", base], root).strip()
-            if not merge_base:
-                raise DiffResolveError(f"no merge-base with {base!r}")
-            return self._git(["diff", f"{merge_base}..HEAD", "--"], root)
+            # Triple-dot is Git's explicit merge-base diff: changes introduced
+            # by HEAD since it forked from BASE. A two-dot BASE..HEAD diff would
+            # include changes unique to both tips and can explode on long-lived
+            # staging branches.
+            return self._git(["diff", f"{base}...HEAD", "--"], root)
         if "diff_file" in source:
             # Confinement is the route's job (same as docs); we only read.
             with open(source["diff_file"], encoding="utf-8", errors="replace") as fh:
