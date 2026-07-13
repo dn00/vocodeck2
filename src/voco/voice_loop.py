@@ -225,6 +225,7 @@ class VoiceLoop:
         self.player = deps.player_factory(
             on_finished=lambda: self.queue.on_item_finished(),
             on_playing_changed=self._on_playing_changed,
+            on_error=self._on_speaker_error,
             sample_rate=self.tts.sample_rate,
             device=audio_cfg.get("output_device"),
             on_pcm_played=self._on_pcm_played if self._aec else None,
@@ -551,6 +552,13 @@ class VoiceLoop:
             )
         except RuntimeError:
             pass  # loop closed between the check and cross-thread scheduling
+
+    def _on_speaker_error(self, error: Exception) -> None:
+        """Report output-device/TTS-stream failures without killing voice."""
+        self._bus.emit(
+            "daemon.error",
+            {"error": f"speaker playback failed: {type(error).__name__}: {error}"},
+        )
 
     def _on_pcm_played(self, pcm: bytes) -> None:
         # PortAudio output thread: resample + frame the AEC reference.

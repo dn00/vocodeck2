@@ -25,6 +25,7 @@ class SpeakerPlayer:
         self,
         on_finished: Callable[[], None],
         on_playing_changed: Callable[[bool], None] = lambda p: None,
+        on_error: Callable[[Exception], None] = lambda e: None,
         sample_rate: int = 24_000,
         device: int | str | None = None,
         buffer_threshold_ms: int = 150,
@@ -32,6 +33,7 @@ class SpeakerPlayer:
     ) -> None:
         self._on_finished = on_finished
         self._on_playing_changed = on_playing_changed
+        self._on_error = on_error
         self._on_pcm_played = on_pcm_played  # AEC reference tap
         self._sample_rate = sample_rate
         self._device = device
@@ -49,9 +51,14 @@ class SpeakerPlayer:
         self._task = self._loop.create_task(self._run(item))
 
     def stop(self) -> None:
-        if self._task is not None and not self._task.done():
-            self._task.cancel()
+        task = self._task
+        if task is not None and not task.done():
+            # Relinquish ownership before cancellation is delivered.  The
+            # arbitration queue may synchronously start a replacement; the
+            # old task's finally block must never clear or finish that task.
             self._task = None
+            task.cancel()
+            self._on_playing_changed(False)
 
     # ---- internals ---------------------------------------------------------
 
@@ -65,14 +72,15 @@ class SpeakerPlayer:
                 await self._play_stream(content)  # type: ignore[arg-type]
         except asyncio.CancelledError:
             raise
-        except Exception:
-            pass  # named fail-silent: a playback error must not kill the loop;
-            # the item is reported finished and the daemon's error event
-            # carries diagnostics at the call site.
+        except Exception as error:
+            # Playback failure must not kill the voice loop, but it must be
+            # visible to the operator before arbitration advances.
+            self._on_error(error)
         finally:
-            self._on_playing_changed(False)
-            if self._task is not None:
+            task = asyncio.current_task()
+            if self._task is task:
                 self._task = None
+                self._on_playing_changed(False)
                 self._on_finished()
 
     async def _play_pcm(self, pcm: bytes) -> None:
