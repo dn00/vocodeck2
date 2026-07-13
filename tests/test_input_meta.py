@@ -19,6 +19,10 @@ def test_queued_inputs_carry_origin_and_age():
     clock = {"t": 1000.0}
     r = Registry(now=lambda: clock["t"])
     s = r.register(ident(), ["say", "listen"])
+    # This is a backlog-age test, so model a live agent working between
+    # listener polls. An idle session with no listener for 150s is correctly
+    # disconnected by DF-10 and must reject new input.
+    s.outstanding_turn_id = "t-working"
     r.dispatch("spoken early", r.mint_turn_id())
     clock["t"] += 150
     r.dispatch("typed later", r.mint_turn_id(), origin="typed")
