@@ -427,9 +427,7 @@ class Registry:
             return "no_session"
         input_bytes = utf8_size(text)
         if input_bytes > MAX_INPUT_BYTES:
-            raise ValueError(
-                f"input exceeds maximum size of {MAX_INPUT_BYTES} bytes"
-            )
+            raise ValueError(f"input exceeds maximum size of {MAX_INPUT_BYTES} bytes")
         was_idle = s.state == "idle"
         payload = {
             "status": "transcript",
@@ -454,9 +452,7 @@ class Registry:
             self._emit_session_state(s)
             return "live"
         if len(s.queued) >= MAX_QUEUED_INPUTS:
-            raise ValueError(
-                f"input queue is full ({MAX_QUEUED_INPUTS} commands)"
-            )
+            raise ValueError(f"input queue is full ({MAX_QUEUED_INPUTS} commands)")
         s.queued.append(
             QueuedInput(ts=self._now(), turn_id=turn_id, text=text, origin=origin)
         )

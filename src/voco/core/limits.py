@@ -22,7 +22,5 @@ def validate_screen_candidate(current: str, incoming: str, mode: str) -> str:
     """Return the candidate or reject it before any state is mutated."""
     candidate = screen_candidate(current, incoming, mode)
     if utf8_size(candidate) > MAX_SCREEN_BYTES:
-        raise ValueError(
-            f"screen exceeds maximum size of {MAX_SCREEN_BYTES} bytes"
-        )
+        raise ValueError(f"screen exceeds maximum size of {MAX_SCREEN_BYTES} bytes")
     return candidate
