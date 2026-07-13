@@ -25,7 +25,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from voco.core.limits import MAX_INPUT_BYTES, MAX_QUEUED_INPUTS, utf8_size
+from voco.core.limits import (
+    MAX_INPUT_BYTES,
+    MAX_QUEUED_INPUTS,
+    MAX_SCREEN_BYTES,
+    utf8_size,
+    validate_screen_candidate,
+)
 
 NAME_POOL = [
     "Helena",
@@ -612,10 +618,11 @@ class Registry:
         if s is None:
             return
         self._mark_connected(s)
+        candidate = validate_screen_candidate(s.screen_markdown, markdown, mode)
         if mode == "append":
-            s.screen_markdown += "\n" + markdown
+            s.screen_markdown = candidate
         else:
-            s.screen_markdown = markdown
+            s.screen_markdown = candidate
             s.screen_title = title
         # Full current content rides along so UIs render without a refetch.
         self._emit(
@@ -706,7 +713,9 @@ class Registry:
                     queued=self._restore_queued(raw.get("queued", [])),
                     unread_digest=int(raw.get("unread_digest", 0)),
                     screen_title=raw.get("screen_title"),
-                    screen_markdown=str(raw.get("screen_markdown", "")),
+                    screen_markdown=self._restore_screen(
+                        raw.get("screen_markdown", "")
+                    ),
                     last_seen=last_seen,
                     connected=False,
                 )
@@ -726,6 +735,12 @@ class Registry:
         if active in self._sessions:
             self._active_id = active
         return restored
+
+    @staticmethod
+    def _restore_screen(raw: object) -> str:
+        """Drop oversized persisted screen content rather than truncate Markdown."""
+        text = str(raw or "")
+        return text if utf8_size(text) <= MAX_SCREEN_BYTES else ""
 
     def transcript(self, session_id: str) -> dict:
         """Both halves of the conversation record (DESIGN-DECK U0),

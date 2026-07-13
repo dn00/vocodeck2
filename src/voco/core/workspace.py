@@ -27,6 +27,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from voco.core.limits import MAX_SCREEN_BYTES, utf8_size, validate_screen_candidate
+
 PageScope = Literal["workspace", "agent"]
 
 # Page types shipped in W0/W1; the set is data, additive by design.
@@ -465,6 +467,8 @@ class WorkspaceStore:
         ws = self.resolve(identity)
         ref = f"screen:{call_name}"
         page = ws.page_by_ref("screen", ref)
+        current = "" if page is None else str(page.data.get("markdown", ""))
+        candidate = validate_screen_candidate(current, markdown, mode)
         if page is None:
             page = Page(
                 page_id="",
@@ -475,14 +479,14 @@ class WorkspaceStore:
                 pinned=True,
                 session_id=session_id,
                 call_name=call_name,
-                data={"markdown": markdown, "screen_title": title},
+                data={"markdown": candidate, "screen_title": title},
             )
             return self._mint_page(ws, page)
         page.session_id = session_id
         if mode == "append":
-            page.data["markdown"] = f"{page.data.get('markdown', '')}\n{markdown}"
+            page.data["markdown"] = candidate
         else:
-            page.data["markdown"] = markdown
+            page.data["markdown"] = candidate
             page.data["screen_title"] = title
             page.title = title or page.title
         page.rev += 1
@@ -965,6 +969,10 @@ class WorkspaceStore:
             )
             for praw in data.get("pages", []):
                 pdata = dict(praw.get("data", {}))
+                if str(praw.get("type")) == "screen":
+                    markdown = str(pdata.get("markdown", ""))
+                    if utf8_size(markdown) > MAX_SCREEN_BYTES:
+                        pdata["markdown"] = ""
                 # Manifest-boundary hygiene mirrors the push whitelist
                 # (xai B1a W7): params restore as {annotatable: bool} or
                 # not at all — a persisted "false" STRING must not fake

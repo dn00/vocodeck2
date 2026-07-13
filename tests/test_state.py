@@ -9,7 +9,7 @@ import stat
 import pytest
 
 from voco.adapters.state_store import StateLockError, StateStore
-from voco.core.limits import MAX_INPUT_BYTES, MAX_QUEUED_INPUTS
+from voco.core.limits import MAX_INPUT_BYTES, MAX_QUEUED_INPUTS, MAX_SCREEN_BYTES
 from voco.core.registry import Registry
 from voco.daemon import Daemon
 
@@ -119,6 +119,29 @@ def test_dump_restore_preserves_in_limit_queue():
         "command 1",
         "command 2",
     ]
+
+
+def test_registry_screen_limit_and_restore_recovery():
+    events: list[tuple[str, dict]] = []
+    source = Registry(emit=lambda topic, payload: events.append((topic, payload)))
+    session = source.register({"host": "m", "cwd": "/x"}, ["say"])
+    exact = "é" * (MAX_SCREEN_BYTES // 2)
+    source.set_screen(session.session_id, exact, "Exact", "show")
+    assert session.screen_markdown == exact
+    event_count = len(events)
+
+    with pytest.raises(ValueError, match="screen exceeds maximum size"):
+        source.set_screen(session.session_id, "x", None, "append")
+    assert session.screen_markdown == exact
+    assert len(events) == event_count
+
+    dumped = source.dump()
+    dumped["sessions"][0]["screen_markdown"] = "é" * MAX_SCREEN_BYTES
+    restored = Registry()
+    assert restored.restore(dumped) == 1
+    restored_session = restored.get(session.session_id)
+    assert restored_session is not None
+    assert restored_session.screen_markdown == ""
 
 
 def test_restore_expires_old_session_tokens():

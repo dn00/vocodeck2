@@ -29,6 +29,12 @@ from urllib.parse import urlsplit
 
 from aiohttp import WSMsgType, web
 
+from voco.core.limits import (
+    MAX_REQUEST_BYTES,
+    MAX_SCREEN_BYTES,
+    utf8_size,
+    validate_screen_candidate,
+)
 from voco.protocol.messages import CommandReply, validate_envelope
 
 if TYPE_CHECKING:
@@ -183,7 +189,10 @@ class BridgeServer:
     def build_app(self) -> web.Application:
         from voco.server.workbench import add_workbench_routes
 
-        app = web.Application(middlewares=[error_middleware])
+        app = web.Application(
+            middlewares=[error_middleware],
+            client_max_size=MAX_REQUEST_BYTES,
+        )
         app.router.add_post("/v1/bridge/register", self._register)
         app.router.add_post("/v1/bridge/say", self._say)
         app.router.add_post("/v1/bridge/screen", self._screen)
@@ -350,6 +359,29 @@ class BridgeServer:
             raise web.HTTPBadRequest(text="mode must be show|append")
         markdown = str(body.get("markdown") or "")
         title = body.get("title")
+        workspace_current: str | None = None
+        try:
+            validate_screen_candidate(s.screen_markdown, markdown, mode)
+            if self.workspaces is not None:
+                ws = self.workspaces.resolve(s.identity)
+                page = ws.page_by_ref("screen", f"screen:{s.call_name}")
+                workspace_current = (
+                    "" if page is None else str(page.data.get("markdown", ""))
+                )
+                validate_screen_candidate(workspace_current, markdown, mode)
+        except ValueError as error:
+            current_sizes = [utf8_size(s.screen_markdown)]
+            if workspace_current is not None:
+                current_sizes.append(utf8_size(workspace_current))
+            actual_size = max(
+                size + utf8_size(markdown) + (1 if mode == "append" else 0)
+                for size in current_sizes
+            )
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=MAX_SCREEN_BYTES,
+                actual_size=actual_size,
+                text=str(error),
+            ) from error
         self._registry.set_screen(s.session_id, markdown, title, mode)
         if self.workspaces is not None:
             # The screen verb doubles as the pinned screen page

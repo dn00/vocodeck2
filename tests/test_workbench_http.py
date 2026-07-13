@@ -8,10 +8,11 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from voco.core.events import EventBus
+from voco.core.limits import MAX_REQUEST_BYTES, MAX_SCREEN_BYTES
 from voco.core.registry import Registry
 from voco.core.workspace import WorkspaceStore
 from voco.server.http import BridgeServer
-from voco.server.workbench import handle_workbench_command
+from voco.server.workbench import MAX_DOC_BYTES, handle_workbench_command
 
 HOST = socket.gethostname().split(".")[0]
 
@@ -61,6 +62,60 @@ async def register(client) -> str:
     resp = await client.post("/v1/bridge/register", json=ident(client.repo))
     assert resp.status == 200
     return (await resp.json())["session_id"]
+
+
+def test_app_has_explicit_request_ceiling(client):
+    assert client.server_obj.build_app()._client_max_size == MAX_REQUEST_BYTES
+
+
+async def test_virtual_doc_above_aiohttp_default_reaches_domain_limit(client):
+    sid = await register(client)
+    within = "x" * (1024 * 1024 + 1)
+    ok = await client.post(
+        "/v1/bridge/page",
+        json={
+            "session_id": sid,
+            "type": "doc",
+            "name": "large",
+            "content": within,
+        },
+    )
+    assert ok.status == 200
+
+    too_large = "é" * (MAX_DOC_BYTES // 2 + 1)
+    rejected = await client.post(
+        "/v1/bridge/page",
+        json={
+            "session_id": sid,
+            "type": "doc",
+            "name": "too-large",
+            "content": too_large,
+        },
+    )
+    assert rejected.status == 413
+
+
+async def test_screen_limit_failure_is_atomic_and_returns_413(client):
+    sid = await register(client)
+    exact = "é" * (MAX_SCREEN_BYTES // 2)
+    ok = await client.post(
+        "/v1/bridge/screen",
+        json={"session_id": sid, "markdown": exact, "title": "Exact", "mode": "show"},
+    )
+    assert ok.status == 200
+    ws = client.store.resolve(ident(client.repo))
+    page = ws.page_by_ref("screen", next(iter(ws.pages.values())).ref)
+    assert page is not None
+    before = (page.rev, page.data["markdown"])
+
+    rejected = await client.post(
+        "/v1/bridge/screen",
+        json={"session_id": sid, "markdown": "x", "mode": "append"},
+    )
+    assert rejected.status == 413
+    session = client.server_obj._registry.get(sid)
+    assert session is not None and session.screen_markdown == exact
+    assert (page.rev, page.data["markdown"]) == before
 
 
 # ---- §8.5: origin discipline + workbench token ------------------------------

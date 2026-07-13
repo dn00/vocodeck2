@@ -836,8 +836,10 @@ class Daemon:
             )
         except DiffResolveError as e:
             raise ValueError(f"{e} (workspace root {ws.root!r})") from e
-        if len(text) > MAX_DIFF_BYTES:
-            raise ValueError(f"diff too large ({len(text)} bytes)")
+        from voco.core.limits import utf8_size
+
+        if utf8_size(text) > MAX_DIFF_BYTES:
+            raise ValueError(f"diff too large ({utf8_size(text)} bytes)")
         page = self.workspaces.upsert_diff(
             ws,
             ref=source_ref(source),
@@ -1431,9 +1433,10 @@ class Daemon:
         text = await self._run_blocking(resolve)
         if not text:
             return
+        from voco.core.limits import utf8_size
         from voco.server.workbench import MAX_DIFF_BYTES
 
-        if len(text) > MAX_DIFF_BYTES:
+        if utf8_size(text) > MAX_DIFF_BYTES:
             # An oversized diff would stall the loop every tick: stop
             # tracking THIS workspace and say why, once.
             self._live_workspaces[ws.key] = False

@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING
 
 from aiohttp import web
 
+from voco.core.limits import utf8_size
+
 if TYPE_CHECKING:
     from voco.core.workspace import Page, Workspace
     from voco.server.http import BridgeServer
@@ -482,9 +484,14 @@ class WorkbenchRoutes:
             return store.push_doc(
                 ws, name=body.get("name"), path=str(path), params=params
             )
+        content = body.get("content")
+        if content is not None and utf8_size(str(content)) > MAX_DOC_BYTES:
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=MAX_DOC_BYTES, actual_size=utf8_size(str(content))
+            )
         try:
             return store.push_doc(
-                ws, name=body.get("name"), content=body.get("content"), params=params
+                ws, name=body.get("name"), content=content, params=params
             )
         except ValueError as e:
             raise web.HTTPBadRequest(text=str(e)) from e
@@ -499,9 +506,9 @@ class WorkbenchRoutes:
         params = self._doc_params(body)
         name = body.get("name")
         content, path, url = body.get("content"), body.get("path"), body.get("url")
-        if content is not None and len(content) > MAX_DOC_BYTES:
+        if content is not None and utf8_size(str(content)) > MAX_DOC_BYTES:
             raise web.HTTPRequestEntityTooLarge(
-                max_size=MAX_DOC_BYTES, actual_size=len(content)
+                max_size=MAX_DOC_BYTES, actual_size=utf8_size(str(content))
             )
         if url is not None:
             allow = getattr(self._server, "allow_artifact_urls", False)
@@ -559,9 +566,9 @@ class WorkbenchRoutes:
             # A raw patch: never live-tracked (no recorded source). Cap it —
             # a huge paste must not exhaust memory or stall the loop (W8).
             text = str(content)
-            if len(text) > MAX_DIFF_BYTES:
+            if utf8_size(text) > MAX_DIFF_BYTES:
                 raise web.HTTPRequestEntityTooLarge(
-                    max_size=MAX_DIFF_BYTES, actual_size=len(text)
+                    max_size=MAX_DIFF_BYTES, actual_size=utf8_size(text)
                 )
             ref = body.get("name") or "diff:pasted"
             diff_text, recorded, title = text, None, body.get("name") or "diff"
@@ -590,11 +597,11 @@ class WorkbenchRoutes:
                     raise web.HTTPBadRequest(
                         text=f"{e} (workspace root {ws.root!r})"
                     ) from e
-                if len(diff_text) > MAX_DIFF_BYTES:
+                if utf8_size(diff_text) > MAX_DIFF_BYTES:
                     # Same cap as pasted content: a monster branch/PR diff
                     # must not stall the daemon or bloat page state.
                     raise web.HTTPRequestEntityTooLarge(
-                        max_size=MAX_DIFF_BYTES, actual_size=len(diff_text)
+                        max_size=MAX_DIFF_BYTES, actual_size=utf8_size(diff_text)
                     )
             ref, recorded, title = source_ref(source), source, source_ref(source)
         else:

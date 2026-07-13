@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from voco.core.agent_state import display_state
+from voco.core.limits import MAX_SCREEN_BYTES
 from voco.core.workspace import WorkspaceStore
 
 LOCAL = {
@@ -127,6 +128,53 @@ def test_screen_upsert_show_and_append_bump_rev():
 
     actions = [p["action"] for t, p in events if t == "page.updated"]
     assert actions == ["added", "updated", "updated"]
+
+
+def test_screen_limit_is_utf8_aware_and_rejection_has_no_side_effects():
+    store, events = store_and_events()
+    exact = "é" * (MAX_SCREEN_BYTES // 2)
+    page = store.upsert_screen(
+        LOCAL,
+        session_id="s1",
+        call_name="Helena",
+        markdown=exact,
+        title="Exact",
+        mode="show",
+    )
+    assert page.data["markdown"] == exact
+    before = (page.rev, dict(page.data), list(events))
+
+    with pytest.raises(ValueError, match="screen exceeds maximum size"):
+        store.upsert_screen(
+            LOCAL,
+            session_id="s1",
+            call_name="Helena",
+            markdown="x",
+            title=None,
+            mode="append",
+        )
+
+    assert (page.rev, page.data, events) == before
+
+
+def test_restore_drops_oversized_screen_markdown():
+    store, _ = store_and_events()
+    ws = store.resolve(LOCAL)
+    page = store.upsert_screen(
+        LOCAL,
+        session_id="s1",
+        call_name="Helena",
+        markdown="ok",
+        title="Screen",
+        mode="show",
+    )
+    dumped = store.dump_workspace(ws)
+    dumped["pages"][0]["data"]["markdown"] = "é" * MAX_SCREEN_BYTES
+
+    restored, _ = store_and_events()
+    ws2 = restored.restore_workspace(dumped)
+    assert ws2 is not None
+    assert ws2.pages[page.page_id].data["markdown"] == ""
 
 
 def test_terminal_reattach_bumps_rev_for_browser_cache():
