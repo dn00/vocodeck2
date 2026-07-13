@@ -201,6 +201,7 @@ class Registry:
     SWEEP_IDLE_S = 60.0
     SWEEP_WORKING_S = 900.0
     LISTENER_GRACE_S = 120.0
+    DISCONNECTED_REAP_S = 900.0
 
     def register(self, identity: dict[str, Any], capabilities: list[str]) -> Session:
         key = _identity_key(identity)
@@ -590,6 +591,18 @@ class Registry:
         """Emit display transitions caused only by elapsed wall time."""
         for s in self._sessions.values():
             self._emit_session_state(s)
+
+    def reap_disconnected(self) -> list[str]:
+        """Forget idle sessions whose listener has been gone for 15 minutes."""
+        reaped: list[str] = []
+        for s in list(self._sessions.values()):
+            if not self.is_disconnected(s):
+                continue
+            if self._now() - s.last_listener_seen <= self.DISCONNECTED_REAP_S:
+                continue
+            reaped.append(s.session_id)
+            self.detach(s.session_id)
+        return reaped
 
     def record_say(self, session_id: str, text: str, turn_id: str | None) -> bool:
         """Returns True if this session is active (say should be spoken)."""

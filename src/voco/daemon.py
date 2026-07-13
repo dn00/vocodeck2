@@ -1442,6 +1442,7 @@ class Daemon:
         while True:
             await asyncio.sleep(5.0)
             self.registry.refresh_liveness()
+            self.registry.reap_disconnected()
 
     async def _live_git_tick(self, host: str, git_status: Any) -> None:
         """Refresh local workspaces concurrently with a small hard bound."""

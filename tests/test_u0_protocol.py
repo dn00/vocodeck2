@@ -63,6 +63,23 @@ def test_idle_session_becomes_disconnected_and_rejects_input():
     assert reg.snapshot()["sessions"][0]["display_state"] == "listening"
 
 
+def test_disconnected_session_is_reaped_after_long_timeout():
+    clock = {"now": 10.0}
+    events: list[tuple[str, dict]] = []
+    reg = Registry(
+        now=lambda: clock["now"],
+        emit=lambda topic, payload: events.append((topic, payload)),
+    )
+    s = reg.register(IDENT, ["say", "listen"])
+    clock["now"] += reg.DISCONNECTED_REAP_S + 1
+    assert reg.reap_disconnected() == [s.session_id]
+    assert reg.get(s.session_id) is None
+    assert any(
+        topic == "session.detached" and payload["session_id"] == s.session_id
+        for topic, payload in events
+    )
+
+
 def test_input_log_survives_dump_restore():
     reg = Registry()
     s = reg.register(IDENT, ["say"])

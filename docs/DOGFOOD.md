@@ -2,9 +2,6 @@
 
 ## Open
 
-- **DF-4: Stale/idle session not selectable and not auto-cleaned.**
-  The "Dana" session shows as idle in the workbench and cannot be selected (mic cannot be passed to it). Stale sessions from split identity (DF-3) should either be auto-cleaned after a timeout or have a manual dismiss/remove option in the UI.
-
 - **DF-7: Diff base defaults to full branch divergence instead of merge-base.**
   `page diff --branch staging` showed 1.7k files (full divergence) instead of just the PR's changes. Default should be merge-base diff. The UI should also let you select a different base.
 
@@ -12,6 +9,11 @@
   Clicking "Files" or "Overview" in one workspace's rail also selects the same nav item in the other workspace (firstmate + CRM both highlight). Likely because phantom agents (DF-3/DF-4) share the same selection state or the nav handler matches by item type rather than workspace-scoped ID. The center panel also doesn't switch to the clicked page — required a full page refresh to recover. After refresh the double-select still persists. Would scale to N-select with more workspaces added. Probably related to the phantom agent sessions from DF-3.
 
 ## Fixed
+
+- **DF-4: Stale/idle session not selectable and not auto-cleaned.** Existing
+  manual detach controls remain available, and idle sessions are now marked
+  disconnected after two minutes and automatically removed after fifteen
+  minutes without a listener heartbeat.
 
 - **DF-10: "Idle" status misleading for dead sessions; messages silently
   queued.** Idle sessions with no listener heartbeat for two minutes now become
