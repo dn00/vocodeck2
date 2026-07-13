@@ -81,18 +81,28 @@ def init_reply(client: Client) -> str:
     A script file beats an inline command: the agent's shell may be fish
     (no VAR=x prefix syntax), lacks `voco` on PATH (the CLI lives in this
     server's venv), and the bearer token stays inside a 0700 file instead
-    of process args. Identity is NOT baked in — the running script
-    inherits the agent's TMUX_PANE / harness session id, so it registers
-    as the SAME session as this server. Safe to run again at any time:
-    a new run supersedes the previous listener."""
+    of process args. The resolved identity seam is baked into the script.
+    Monitor/background runners do not reliably inherit TMUX_PANE, harness
+    flags, or cwd from the MCP server; relying on inheritance created phantom
+    agents in dogfood. Safe to run again at any time: a new run supersedes the
+    previous listener."""
     try:
         sess = client.session()
     except Exception:
         return SOFT_FAIL
 
+    identity = client._identity or {}
     env_lines = [f"export VOCO_URL={shlex.quote(client.base_url)}"]
     if client.token:
         env_lines.append(f"export VOCO_TOKEN={shlex.quote(client.token)}")
+    if identity.get("instance"):
+        env_lines.append(
+            f"export VOCO_INSTANCE={shlex.quote(str(identity['instance']))}"
+        )
+    if identity.get("harness"):
+        env_lines.append(f"export VOCO_HARNESS={shlex.quote(str(identity['harness']))}")
+    if identity.get("cwd"):
+        env_lines.append(f"cd {shlex.quote(str(identity['cwd']))}")
     env_block = "\n".join(env_lines)
     py = shlex.quote(sys.executable)
 

@@ -210,6 +210,11 @@ class InitClient:
         self.base_url = "http://127.0.0.1:7799"
         self.token = token
         self._fail = fail
+        self._identity = {
+            "cwd": "/repo/firstmate",
+            "harness": "claude",
+            "instance": "%42",
+        }
 
     def session(self) -> dict:
         if self._fail:
@@ -233,6 +238,9 @@ def test_voice_init_writes_both_scripts_and_full_instructions(tmp_path, monkeypa
     body = oneshot.read_text()
     assert body.startswith("#!/usr/bin/env bash")
     assert "export VOCO_URL=http://127.0.0.1:7799" in body
+    assert "export VOCO_INSTANCE=%42" in body
+    assert "export VOCO_HARNESS=claude" in body
+    assert "cd /repo/firstmate" in body
     # Pins THIS interpreter: the agent's shell has no `voco` on PATH.
     assert f"exec {sys.executable} -m voco_cli.main listen\n" in body
     assert "--stream" not in body
@@ -265,3 +273,11 @@ def test_voice_init_fails_soft_when_daemon_unreachable(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_main, "CACHE_DIR", tmp_path)
     assert mcp_main.init_reply(InitClient(fail=True)) == SOFT_FAIL
     assert not (tmp_path / "listen.sh").exists()  # nothing written on failure
+
+
+def test_derive_identity_honors_baked_harness(monkeypatch):
+    from voco_cli.main import derive_identity
+
+    monkeypatch.setenv("VOCO_HARNESS", "claude")
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    assert derive_identity()["harness"] == "claude"

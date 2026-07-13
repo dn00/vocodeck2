@@ -160,8 +160,10 @@ def _instance() -> str | None:
 
 def derive_identity() -> dict:
     cwd = os.getcwd()
-    harness = "unknown"
-    if os.environ.get("CLAUDECODE"):
+    harness = os.environ.get("VOCO_HARNESS") or "unknown"
+    if harness != "unknown":
+        pass
+    elif os.environ.get("CLAUDECODE"):
         harness = "claude"
     elif os.environ.get("CODEX_SANDBOX") or os.environ.get("CODEX"):
         harness = "codex"

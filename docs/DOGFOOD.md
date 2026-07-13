@@ -2,9 +2,6 @@
 
 ## Open
 
-- **DF-3: Multiple sessions spawned instead of one; identity keeps changing.**
-  A single Claude Code session created multiple daemon sessions with different names. `voice_init` registered as "Dana", the streaming listener registered a second session as "Ezra", and then `voice_screen` brought "Dana" back — now both Dana and Ezra appear under the firstmate repo. Expected: one stable session identity throughout. Root cause likely: each MCP tool call and the Monitor script each derive a different session identity (different TMUX_PANE or process context), so the daemon treats them as separate agents. Workspace association was also delayed until a page reload.
-
 - **DF-4: Stale/idle session not selectable and not auto-cleaned.**
   The "Dana" session shows as idle in the workbench and cannot be selected (mic cannot be passed to it). Stale sessions from split identity (DF-3) should either be auto-cleaned after a timeout or have a manual dismiss/remove option in the UI.
 
@@ -21,6 +18,11 @@
   Sessions with no active listener (Dana, Silas) show as "idle", implying they're alive and waiting. In reality they're dead processes that will never drain queued messages. Text sent to them queues silently with no feedback. Needs: (a) a "disconnected" status (no listener heartbeat for N seconds) distinct from "idle" (listener parked, waiting for input), (b) auto-reap after a longer timeout, (c) the UI should warn or block sending to a disconnected session. Related to DF-3/DF-4/DF-6.
 
 ## Fixed
+
+- **DF-3: Multiple sessions spawned instead of one; identity keeps changing.**
+  `voice_init` now bakes the MCP server's resolved instance, harness, and cwd
+  into both generated listener scripts. Monitor/background processes reuse the
+  same cached daemon session instead of registering phantom agents.
 
 - **DF-8: No way to close/remove a page.** The existing browser close controls
   now confirm when a page has annotations. Added `voco page close <id>` and the
